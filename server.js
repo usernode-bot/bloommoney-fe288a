@@ -11,7 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // Paths that stay open without authentication. Add a path here (and add it
 // with `app.get`/`app.post` below) if you deliberately want it public.
 // Everything else requires a valid platform-issued JWT.
-const PUBLIC_API_PATHS = new Set(['/health']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico']);
 
 app.use(express.json());
 
