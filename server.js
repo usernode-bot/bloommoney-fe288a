@@ -925,6 +925,11 @@ app.post('/api/admin/markets', requireAdmin, async (req, res) => {
 
 // ── Static + HTML shell ────────────────────────────────────────────────────────
 
+// Silence the browser's auto-request for /favicon.ico: return 204 No Content
+// before the static + catch-all handlers so it never hits the auth-gated
+// catch-all (which would 401 and log a console error, failing CI checks).
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
