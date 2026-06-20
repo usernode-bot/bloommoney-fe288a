@@ -359,6 +359,12 @@ document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
+  // Skip the network round-trip when there's no token to present — this avoids
+  // a guaranteed 401 that shows up as a console error in headless test runners.
+  if (!S.token) {
+    document.getElementById('wallet-gate').classList.remove('hidden');
+    return;
+  }
   try {
     const data = await api('GET', '/api/me');
     S.user = data.user;
