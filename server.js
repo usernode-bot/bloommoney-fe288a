@@ -11,7 +11,7 @@ const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
 
-const PUBLIC_API_PATHS = new Set(['/health']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json());
@@ -34,7 +34,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function upsertUser(u) {
-  const isAdmin = BLOOM_ADMIN && u.username === BLOOM_ADMIN;
+  const isAdmin = !!(BLOOM_ADMIN && u.username === BLOOM_ADMIN);
   await pool.query(`
     INSERT INTO users (user_id, username, usernode_pubkey, is_admin)
     VALUES ($1, $2, $3, $4)

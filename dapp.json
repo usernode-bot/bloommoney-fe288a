@@ -13,6 +13,6 @@
     { "name": "Feed renders", "path": "/?demo=1", "expectSelector": "#app-feed" },
     { "name": "Opinion markets list renders", "path": "/?demo=1", "expectSelector": "#section-markets" },
     { "name": "Futures markets list renders", "path": "/?demo=1", "expectSelector": "#section-futures" },
-    { "name": "Admin stats renders", "path": "/api/admin/stats", "expectSelector": null }
+    { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" }
   ]
 }
