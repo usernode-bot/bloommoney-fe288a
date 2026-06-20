@@ -1235,7 +1235,7 @@ async function start() {
         (900015,9005,'staging-eve','Staging demo reply — What leverage are you using?',900004)
       ON CONFLICT(id) DO NOTHING
     `);
-    await pool.query(`UPDATE posts SET reply_count=2 WHERE id=900001 ON CONFLICT DO NOTHING`);
+    await pool.query(`UPDATE posts SET reply_count=2 WHERE id=900001`);
 
     // Seed follows
     await pool.query(`
