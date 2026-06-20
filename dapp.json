@@ -1,3 +1,18 @@
 {
-  "secrets": []
+  "name": "BloomMoney",
+  "secrets": [
+    {
+      "key": "BLOOM_ADMIN_USERNAME",
+      "description": "Username that receives admin role on first registration",
+      "required": false,
+      "private": false,
+      "default": ""
+    }
+  ],
+  "tests": [
+    { "name": "Feed renders", "path": "/?demo=1", "expectSelector": "#app-feed" },
+    { "name": "Opinion markets list renders", "path": "/?demo=1", "expectSelector": "#section-markets" },
+    { "name": "Futures markets list renders", "path": "/?demo=1", "expectSelector": "#section-futures" },
+    { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" }
+  ]
 }
