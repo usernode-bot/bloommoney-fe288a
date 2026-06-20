@@ -8,8 +8,9 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "pg": "^8.13.0",
-    "jsonwebtoken": "^9.0.2"
+    "@zkpassport/sdk": "^0.15.3",
+    "express": "^4.22.2",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.22.0"
   }
 }

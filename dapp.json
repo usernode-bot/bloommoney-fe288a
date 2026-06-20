@@ -1,3 +1,25 @@
 {
-  "secrets": []
+  "secrets": [],
+  "tests": [
+    {
+      "name": "Home renders",
+      "path": "/",
+      "expectSelector": "#press-btn"
+    },
+    {
+      "name": "Leaderboard card present",
+      "path": "/",
+      "expectSelector": "#leaderboard"
+    },
+    {
+      "name": "Verify-human prompt present",
+      "path": "/",
+      "expectText": "Verify you're human"
+    },
+    {
+      "name": "Verified badge on leaderboard",
+      "path": "/",
+      "expectText": "Staging demo · Ada"
+    }
+  ]
 }

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <script>
   // usernode-dev-console@1
   (function () {
@@ -64,27 +64,139 @@
   })();
   </script>
   <title>BloomMoney</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: { brand: { DEFAULT: '#0052FF', dark: '#0047E1', tint: '#EAF0FF' } },
+        },
+      },
+    };
+  </script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-  <h1 class="text-2xl font-bold">BloomMoney</h1>
+<body class="bg-slate-50 text-slate-900 min-h-screen font-sans antialiased">
+  <!-- Header -->
+  <header class="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
+    <div class="mx-auto max-w-md px-4 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-white text-sm font-bold">B</span>
+        <span class="font-bold tracking-tight">BloomMoney</span>
+      </div>
+      <div id="user-badge" class="flex items-center gap-2"></div>
+    </div>
+  </header>
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+  <main class="mx-auto max-w-md px-4 py-6 flex flex-col gap-4">
+    <!-- Hero stat + press action -->
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 text-center">
+      <div id="count" class="text-4xl font-bold font-mono tabular-nums tracking-tight transition-transform">0</div>
+      <div class="mt-1 text-sm text-slate-500">total presses</div>
+      <button id="press-btn"
+        class="mt-5 w-full rounded-xl bg-brand hover:bg-brand-dark active:scale-[0.98] transition-all text-white text-base font-semibold py-3.5 shadow-sm shadow-brand/20">
+        Press
+      </button>
+      <p id="press-hint" class="mt-2 text-xs text-slate-400 h-4"></p>
+    </section>
 
-  <div id="count" class="text-lg text-zinc-400">0 total presses</div>
+    <!-- Verified-human card -->
+    <section id="verify-card" class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
+      <!-- populated by JS -->
+    </section>
 
-  <div class="w-full max-w-sm">
-    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Leaderboard</h2>
-    <div id="leaderboard" class="space-y-1"></div>
+    <!-- Leaderboard -->
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
+      <h2 class="text-sm font-semibold text-slate-500 mb-3">Leaderboard</h2>
+      <div id="leaderboard" class="space-y-1"></div>
+    </section>
+  </main>
+
+  <!-- zkPassport proof panel (production flow) -->
+  <div id="verify-panel" class="fixed inset-0 z-20 hidden items-end sm:items-center justify-center bg-slate-900/50 p-4">
+    <div class="w-full max-w-sm rounded-2xl bg-white shadow-xl p-6">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="font-bold text-lg">Verify you're human</h3>
+        <button id="verify-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">
+        Scan this with the zkPassport app. Your passport is read on your phone —
+        BloomMoney only receives a private proof, never your documents or details.
+      </p>
+      <div id="verify-qr" class="flex justify-center min-h-[200px] items-center text-sm text-slate-400">
+        Preparing…
+      </div>
+      <a id="verify-link" href="#" target="_blank" rel="noopener"
+         class="mt-4 hidden w-full text-center rounded-xl bg-brand hover:bg-brand-dark text-white text-sm font-semibold py-3">
+        Open in zkPassport app
+      </a>
+      <p id="verify-status" class="mt-3 text-center text-sm text-slate-500"></p>
+    </div>
   </div>
 
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
     const headers = token ? { 'x-usernode-token': token } : {};
+    const ZKP_SCOPE = 'bloommoney-verified-human';
+
+    let me = { username: '', verified: false, staging: false };
+
+    const checkIcon = (cls) =>
+      '<svg viewBox="0 0 20 20" fill="currentColor" class="' + cls + '"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0l-3.5-3.5a1 1 0 1 1 1.4-1.4l2.8 2.8 6.8-6.8a1 1 0 0 1 1.4 0z" clip-rule="evenodd"/></svg>';
+
+    function renderHeaderBadge() {
+      const el = document.getElementById('user-badge');
+      let html = '';
+      if (me.staging) {
+        html += '<span class="rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold px-2 py-0.5 uppercase tracking-wide">Staging</span>';
+      }
+      if (me.verified) {
+        html += '<span class="inline-flex items-center gap-1 rounded-full bg-brand-tint text-brand text-xs font-semibold px-2.5 py-1">' +
+                checkIcon('h-3.5 w-3.5') + 'Verified human</span>';
+      }
+      el.innerHTML = html;
+    }
+
+    function renderVerifyCard() {
+      const el = document.getElementById('verify-card');
+      if (me.verified) {
+        el.innerHTML =
+          '<div class="flex items-start gap-3">' +
+            '<span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-brand">' + checkIcon('h-5 w-5') + '</span>' +
+            '<div>' +
+              '<div class="font-semibold">You\'re a verified human</div>' +
+              '<p class="text-sm text-slate-500 mt-0.5">Your unique-human proof is on file. The badge is yours for good.</p>' +
+            '</div>' +
+          '</div>';
+        return;
+      }
+      el.innerHTML =
+        '<div class="flex items-start gap-3">' +
+          '<span class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">' +
+            '<svg viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5"><path d="M10 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 16a6 6 0 1 1 12 0v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1z"/></svg>' +
+          '</span>' +
+          '<div class="min-w-0">' +
+            '<div class="font-semibold">Verify you\'re human</div>' +
+            '<p class="text-sm text-slate-500 mt-0.5">Prove you\'re a unique, real person — privately, with zero-knowledge. No bots, no duplicate accounts.</p>' +
+            '<button id="verify-start" class="mt-3 rounded-xl bg-brand hover:bg-brand-dark active:scale-[0.98] transition-all text-white text-sm font-semibold px-4 py-2.5">Get verified</button>' +
+            '<p id="verify-card-msg" class="mt-2 text-xs text-rose-600 h-4"></p>' +
+          '</div>' +
+        '</div>';
+      document.getElementById('verify-start').addEventListener('click', startVerification);
+    }
+
+    async function loadMe() {
+      try {
+        const res = await fetch('/api/me', { headers });
+        if (res.ok) me = await res.json();
+      } catch {}
+      renderHeaderBadge();
+      renderVerifyCard();
+    }
 
     async function loadLeaderboard() {
       const res = await fetch('/api/leaderboard', { headers });
@@ -92,16 +204,40 @@
       const { leaderboard } = await res.json();
       const el = document.getElementById('leaderboard');
       if (!leaderboard.length) {
-        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">No presses yet</p>';
+        el.innerHTML = '<p class="text-center text-slate-400 text-sm py-4">No presses yet — be the first.</p>';
+        document.getElementById('count').textContent = '0';
         return;
       }
-      el.innerHTML = leaderboard.map((r, i) =>
-        '<div class="flex justify-between px-3 py-1 rounded ' + (i === 0 ? 'bg-violet-600/20 text-violet-300' : 'text-zinc-400') + '">' +
-        '<span>' + (i + 1) + '. ' + r.username + '</span>' +
-        '<span class="font-mono">' + r.presses + '</span></div>'
-      ).join('');
+      el.innerHTML = leaderboard.map((r, i) => {
+        const top = i === 0;
+        const rowCls = top ? 'bg-brand-tint' : 'hover:bg-slate-50';
+        const rankCls = top ? 'text-brand' : 'text-slate-400';
+        const badge = r.verified
+          ? '<span class="inline-flex items-center justify-center text-brand" title="Verified human">' + checkIcon('h-4 w-4') + '</span>'
+          : '';
+        return '<div class="flex items-center justify-between rounded-lg px-3 py-2 ' + rowCls + '">' +
+          '<div class="flex items-center gap-2 min-w-0">' +
+            '<span class="w-5 text-right font-mono tabular-nums text-sm ' + rankCls + '">' + (i + 1) + '</span>' +
+            '<span class="truncate font-medium text-sm">' + escapeHtml(r.username) + '</span>' +
+            badge +
+          '</div>' +
+          '<span class="font-mono tabular-nums text-sm text-slate-600">' + r.presses + '</span>' +
+        '</div>';
+      }).join('');
       const total = leaderboard.reduce((s, r) => s + parseInt(r.presses), 0);
-      document.getElementById('count').textContent = total + ' total presses';
+      const countEl = document.getElementById('count');
+      countEl.textContent = total.toLocaleString();
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function pulseCount() {
+      const el = document.getElementById('count');
+      el.style.transform = 'scale(1.12)';
+      setTimeout(() => { el.style.transform = 'scale(1)'; }, 140);
     }
 
     document.getElementById('press-btn').addEventListener('click', async () => {
@@ -110,11 +246,132 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
         });
-        if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
+        if (res.ok) { pulseCount(); loadLeaderboard(); }
+        else if (res.status === 401) document.getElementById('press-hint').textContent = 'Sign in to press.';
       } catch {}
     });
 
+    // ---- Verified-human flow -------------------------------------------
+
+    async function startVerification() {
+      const msg = document.getElementById('verify-card-msg');
+      if (msg) msg.textContent = '';
+
+      // Staging (and any env without a real prover): simulated proof so the
+      // badge flow is reviewable without a passport scan.
+      if (me.staging) {
+        try {
+          const res = await fetch('/api/verify-human', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ demo: true }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.verified) {
+            me.verified = true;
+            renderHeaderBadge();
+            renderVerifyCard();
+            loadLeaderboard();
+          } else if (msg) {
+            msg.textContent = data.error || 'Verification failed.';
+          }
+        } catch {
+          if (msg) msg.textContent = 'Verification failed.';
+        }
+        return;
+      }
+
+      // Production: real zkPassport proof on the user's phone.
+      openPanel();
+      runZkPassport().catch((e) => {
+        document.getElementById('verify-status').textContent =
+          'Verification is temporarily unavailable. Please try again later.';
+        console.error('zkPassport flow error', e);
+      });
+    }
+
+    function openPanel() {
+      const panel = document.getElementById('verify-panel');
+      panel.classList.remove('hidden');
+      panel.classList.add('flex');
+      document.getElementById('verify-status').textContent = '';
+      document.getElementById('verify-qr').textContent = 'Preparing…';
+      document.getElementById('verify-link').classList.add('hidden');
+    }
+    function closePanel() {
+      const panel = document.getElementById('verify-panel');
+      panel.classList.add('hidden');
+      panel.classList.remove('flex');
+    }
+    document.getElementById('verify-close').addEventListener('click', closePanel);
+    document.getElementById('verify-panel').addEventListener('click', (e) => {
+      if (e.target.id === 'verify-panel') closePanel();
+    });
+
+    async function runZkPassport() {
+      const statusEl = document.getElementById('verify-status');
+      const qrEl = document.getElementById('verify-qr');
+
+      const { ZKPassport } = await import('https://esm.sh/@zkpassport/sdk@0.15.3');
+      const zkPassport = new ZKPassport(window.location.hostname);
+      const builder = await zkPassport.request({
+        name: 'BloomMoney',
+        logo: window.location.origin + '/favicon.ico',
+        purpose: 'Prove you are a unique, real human',
+        scope: ZKP_SCOPE,
+      });
+
+      // Minimal disclosure: a valid government ID held by an adult. We don't
+      // disclose any attribute — only the uniqueness/humanity proof is needed.
+      const { url, onRequestReceived, onGeneratingProof, onResult, onReject, onError } =
+        builder.gte('age', 18).done();
+
+      // Render QR + deep link.
+      try {
+        const QRCode = (await import('https://esm.sh/qrcode@1.5.3')).default;
+        const dataUrl = await QRCode.toDataURL(url, { width: 200, margin: 1 });
+        qrEl.innerHTML = '<img alt="zkPassport QR" class="rounded-lg" src="' + dataUrl + '">';
+      } catch {
+        qrEl.textContent = 'Use the button below to continue on your phone.';
+      }
+      const link = document.getElementById('verify-link');
+      link.href = url;
+      link.classList.remove('hidden');
+
+      onRequestReceived(() => { statusEl.textContent = 'Request received on your phone…'; });
+      onGeneratingProof(() => { statusEl.textContent = 'Generating your proof…'; });
+      onReject(() => { statusEl.textContent = 'Request was rejected.'; });
+      onError((err) => {
+        statusEl.textContent = 'Something went wrong. Please try again.';
+        console.error('zkPassport error', err);
+      });
+
+      onResult(async ({ verified, result, proofs, query }) => {
+        if (!verified) { statusEl.textContent = 'Proof could not be verified.'; return; }
+        statusEl.textContent = 'Confirming…';
+        try {
+          const res = await fetch('/api/verify-human', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({ proofs, query, queryResult: result }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.verified) {
+            me.verified = true;
+            renderHeaderBadge();
+            renderVerifyCard();
+            loadLeaderboard();
+            closePanel();
+          } else {
+            statusEl.textContent = data.error || 'Could not save your verification.';
+          }
+        } catch {
+          statusEl.textContent = 'Could not save your verification.';
+        }
+      });
+    }
+
+    loadMe();
     loadLeaderboard();
   </script>
 </body>
