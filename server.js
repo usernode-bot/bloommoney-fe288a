@@ -179,7 +179,7 @@ async function upsertUser(u) {
 }
 
 async function ensureBalances(userId, pubkey) {
-  for (const [sym, bal] of [['USDC', 1000000000], ['BLOOM', 100000000], ['ETH', 0], ['BTC', 0]]) {
+  for (const [sym, bal] of [['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000], ['ETH', 0], ['BTC', 0]]) {
     await pool.query(
       'INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
       [userId, sym, bal]
@@ -647,6 +647,47 @@ app.post('/api/posts/:id/like', async (req, res) => {
       res.json({ liked: true });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const postId = parseInt(req.params.id);
+    const { amount: amountStr } = req.body;
+
+    const amount = toUnits(amountStr);
+    if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const { rows: [post] } = await pool.query('SELECT user_id, username FROM posts WHERE id=$1 AND deleted=false', [postId]);
+    if (!post) return res.status(404).json({ error: 'Post not found' });
+    if (post.user_id === req.user.id) return res.status(400).json({ error: 'Cannot tip your own post' });
+
+    await client.query('BEGIN');
+    const { rows: [senderBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='TOK' FOR UPDATE",
+      [req.user.id]
+    );
+    if (!senderBal || Number(senderBal.balance) < amount)
+      throw new Error('Insufficient TOK balance');
+
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='TOK'",
+      [amount, req.user.id]
+    );
+    await client.query(
+      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'TOK',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
+      [post.user_id, amount]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','TOK',$2,$3)",
+      [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 app.post('/api/follow', requireWallet, async (req, res) => {
@@ -2717,7 +2758,7 @@ async function start() {
     for (const uid of [9001,9002,9003,9004,9005,9006]) {
       await pool.query(`
         INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES
-          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'ETH',2000000),($1,'BTC',100000)
+          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),($1,'ETH',2000000),($1,'BTC',100000)
         ON CONFLICT DO NOTHING
       `, [uid]);
       await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);

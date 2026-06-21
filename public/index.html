@@ -80,6 +80,27 @@
   <p id="wallet-status" class="text-zinc-600 text-sm"></p>
 </div>
 
+<!-- ───── Tip Modal ───── -->
+<div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+    <h2 class="text-lg font-bold mb-4" id="tip-modal-title">Send TOK</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="text-sm text-zinc-400 block mb-2">Amount (TOK)</label>
+        <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
+      </div>
+      <div class="text-sm text-zinc-400">
+        Your balance: <span id="tip-balance" class="text-amber-400 font-semibold">0 TOK</span>
+      </div>
+      <div id="tip-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-z" onclick="closeTipModal()">Cancel</button>
+        <button class="btn btn-v" onclick="submitTip()" id="tip-submit-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ───── Main App ───── -->
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
@@ -528,6 +549,7 @@ async function renderFeed(sec) {
       <div class="flex items-center gap-4">
         <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
         <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
       </div>
     </div>`;
@@ -649,6 +671,79 @@ async function renderFeed(sec) {
 
   await loadPosts();
 }
+
+// ── Tip Modal ──────────────────────────────────────────────────────────────────
+let tipState = { postId: null, creatorUsername: null };
+
+window.openTipModal = (postId, creatorUsername) => {
+  tipState.postId = postId;
+  tipState.creatorUsername = creatorUsername;
+  const modal = document.getElementById('tip-modal');
+  const title = document.getElementById('tip-modal-title');
+  const balance = document.getElementById('tip-balance');
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+
+  title.textContent = `Send TOK to @${esc(creatorUsername)}`;
+  const tokBal = S.balances['TOK'] || 0;
+  balance.textContent = `${fmtAmt('TOK', tokBal)} TOK`;
+  amountInput.value = '';
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  modal.classList.remove('hidden');
+  amountInput.focus();
+};
+
+window.closeTipModal = () => {
+  const modal = document.getElementById('tip-modal');
+  modal.classList.add('hidden');
+  tipState = { postId: null, creatorUsername: null };
+};
+
+window.submitTip = async () => {
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+  const amount = parseFloat(amountInput.value);
+
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  if (!amount || amount <= 0) {
+    errorDiv.textContent = 'Please enter an amount greater than 0';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  const tokBal = S.balances['TOK'] || 0;
+  const amountUnits = toUnits(amount.toString());
+  if (amountUnits > tokBal) {
+    errorDiv.textContent = 'Insufficient TOK balance';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+
+    await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString() });
+
+    closeTipModal();
+    await refreshBalances();
+    await window._feedFns.loadPosts();
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  } catch (e) {
+    errorDiv.textContent = e.message || 'Failed to send tip';
+    errorDiv.classList.remove('hidden');
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  }
+};
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 async function renderProfile(sec) {
