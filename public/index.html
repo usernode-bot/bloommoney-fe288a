@@ -89,19 +89,28 @@
       <button class="md:hidden text-zinc-400 hover:text-white p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <span class="font-bold text-violet-400">🌸 BloomMoney</span>
+      <button class="font-bold text-violet-400 hover:text-violet-300 transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="flex items-center gap-2 text-xs">
-      <button class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
-      <button id="hdr-verify" class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
+    <div class="hidden sm:flex items-center gap-2 text-xs">
+      <button class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button id="hdr-verify" class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
       <span id="hdr-wallet" class="text-zinc-500 font-mono hidden sm:block"></span>
-      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+      <!-- Mobile: single compact chip showing both balances -->
+      <div class="sm:hidden bg-zinc-800 px-2 py-1 rounded-lg flex gap-1.5 items-center">
         <span class="text-violet-400 font-semibold" id="hdr-bloom">—</span>
-        <span class="text-zinc-500">BLOOM</span>
-      </div>
-      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+        <span class="text-zinc-600">/</span>
         <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-        <span class="text-zinc-500">USDC</span>
+      </div>
+      <!-- Desktop: separate labelled badges -->
+      <div class="hidden sm:flex gap-1.5">
+        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+          <span class="text-violet-400 font-semibold" id="hdr-bloom-lg">—</span>
+          <span class="text-zinc-500">BLOOM</span>
+        </div>
+        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
+          <span class="text-zinc-500">USDC</span>
+        </div>
       </div>
     </div>
   </header>
@@ -113,6 +122,11 @@
 
     <!-- Desktop Sidebar + Mobile Drawer -->
     <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-zinc-900 border-r border-zinc-800 flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
+      <!-- Mobile-only: user identity -->
+      <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-zinc-800 hidden">
+        <div id="drawer-username" class="text-sm font-semibold text-zinc-100"></div>
+        <div id="drawer-wallet" class="text-xs text-zinc-500 font-mono mt-0.5"></div>
+      </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
@@ -124,6 +138,10 @@
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
+      <!-- Mobile-only: logout -->
+      <div class="md:hidden mt-auto pt-2 border-t border-zinc-800">
+        <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; showWalletGate();">🚪 Log out</button>
+      </div>
     </nav>
 
     <!-- Main Content -->
@@ -182,12 +200,12 @@
 
   <!-- Mobile Bottom Nav (six tabs) -->
   <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex z-30">
-    <button data-tab="home" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
-    <button data-tab="trade" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="futures" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
-    <button data-tab="earn" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
-    <button data-tab="predict" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
-    <button data-tab="profile" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+    <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
+    <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
+    <button data-tab="futures" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
+    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
+    <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
+    <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
   </nav>
 </div><!-- /#app -->
 
@@ -430,6 +448,12 @@ function updateHeader() {
     walletEl.textContent = shortAddr(S.user.usernode_pubkey);
     bloomEl.textContent = getBal('BLOOM');
     usdcEl.textContent = getBal('USDC');
+    document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
+    document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
+    const drawerUser = document.getElementById('drawer-user');
+    document.getElementById('drawer-username').textContent = '@' + S.user.username;
+    document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
+    drawerUser.classList.remove('hidden');
   }
 }
 
