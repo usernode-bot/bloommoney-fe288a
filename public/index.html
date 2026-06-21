@@ -695,12 +695,71 @@ async function renderProfile(sec) {
         : `<div class="card text-center py-6 text-zinc-500 text-sm">No holdings yet — add your first one.</div>`}`;
   }
 
+  async function renderActivityTab() {
+    const typeConfig = {
+      swap:         { label: 'Swap',              color: 'text-blue-400',   bg: 'bg-blue-900/30' },
+      market_trade: { label: 'Prediction Market', color: 'text-violet-400', bg: 'bg-violet-900/30' },
+      futures_open: { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
+      ico_invest:   { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+    };
+
+    function activityRows(items) {
+      return items.map(a => {
+        const cfg = typeConfig[a.type] || { label: esc(a.type), color: 'text-zinc-400', bg: 'bg-zinc-800/30' };
+        const rawAmt = Number(a.amount);
+        const formatted = fmtAmt(a.token_symbol || 'USDC', Math.abs(rawAmt));
+        const sign = rawAmt >= 0 ? '+' : '-';
+        const amtColor = rawAmt >= 0 ? 'text-emerald-400' : 'text-red-400';
+        return `
+          <div class="card flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2 min-w-0 flex-1">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${cfg.color} ${cfg.bg}">${cfg.label}</span>
+              <span class="text-sm text-zinc-300 leading-tight">${esc(a.description)}</span>
+            </div>
+            <div class="shrink-0 text-right">
+              <div class="text-sm font-mono ${amtColor}">${sign}${formatted} ${esc(a.token_symbol || '')}</div>
+              <div class="text-xs text-zinc-600">${tsAgo(a.created_at)} ago</div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    const { activities, nextCursor } = await api('GET', '/api/activity?limit=20');
+
+    if (!activities.length) {
+      return `<div class="card text-center py-8 text-zinc-500 text-sm">No on-chain activity yet. Make a swap, trade a market, or open a futures position to get started.</div>`;
+    }
+
+    let actCursor = nextCursor;
+    window.loadMoreActivity = async () => {
+      const btn = document.getElementById('activity-load-more');
+      const list = document.getElementById('activity-list');
+      if (!btn || !list) return;
+      btn.textContent = 'Loading…';
+      btn.disabled = true;
+      try {
+        const { activities: more, nextCursor: nc } = await api('GET', `/api/activity?limit=20&cursor=${encodeURIComponent(actCursor)}`);
+        actCursor = nc;
+        list.insertAdjacentHTML('beforeend', activityRows(more));
+        if (!nc) btn.remove();
+        else { btn.textContent = 'Load more'; btn.disabled = false; }
+      } catch(e) { btn.textContent = 'Error — retry'; btn.disabled = false; }
+    };
+
+    return `
+      <div id="activity-list" class="space-y-2">${activityRows(activities)}</div>
+      ${nextCursor ? `<button id="activity-load-more" class="btn btn-z w-full mt-2" onclick="loadMoreActivity()">Load more</button>` : ''}`;
+  }
+
   async function fullRender() {
     let tabContent = spin();
     if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
     else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
     else if (activeTab === 'nfts') tabContent = await renderNFTTab().catch(() => '');
     else if (activeTab === 'portfolio') tabContent = await renderPortfolioTab().catch(e => err(e.message));
+    else if (activeTab === 'activity') tabContent = await renderActivityTab().catch(e => err(e.message));
 
     sec.innerHTML = `
       <div class="space-y-4">
@@ -762,7 +821,7 @@ async function renderProfile(sec) {
         </div>` : ''}
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
-          ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+          ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio','activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
