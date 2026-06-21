@@ -766,8 +766,8 @@ async function renderProfile(sec) {
               <div class="flex items-center gap-3">
                 <div class="w-14 h-14 rounded-full bg-violet-700 flex items-center justify-center text-xl font-bold">${esc(username[0].toUpperCase())}</div>
                 <div>
-                  <div class="font-bold text-lg">${esc(user.display_name || username)}</div>
-                  <div class="text-zinc-500 text-sm">@${esc(username)}</div>
+                  <div class="font-bold text-lg flex items-center gap-1">${esc(user.display_name || username)}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
+                  <div class="text-zinc-500 text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-violet-400 hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
                   ${user.usernode_pubkey ? `<div class="text-zinc-600 text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
                   <div class="flex gap-1 flex-wrap mt-0.5">${kyc?.level ? kycTag(kyc.level) : ''}</div>
                 </div>
