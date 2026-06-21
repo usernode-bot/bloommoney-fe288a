@@ -1551,13 +1551,16 @@ app.post('/api/admin/posts/:id/delete', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/ico', requireAdmin, async (req, res) => {
   try {
-    const { token_name, token_symbol, description, price_per_token, total_supply, hard_cap } = req.body;
+    const { token_name, token_symbol, description, price_per_token, total_supply, hard_cap, start_date, end_date } = req.body;
     if (!validStr(token_name, 100) || !validStr(token_symbol, 20)) return res.status(400).json({ error: 'Invalid token name/symbol' });
     if ([price_per_token, total_supply, hard_cap].some(v => parseAmount(v) == null)) return res.status(400).json({ error: 'Invalid numbers' });
+    const startDateVal = start_date && String(start_date).trim() ? new Date(start_date).toISOString() : null;
+    const endDateVal = end_date && String(end_date).trim() ? new Date(end_date).toISOString() : null;
+    const status = startDateVal && new Date(startDateVal) > new Date() ? 'upcoming' : 'active';
     const { rows: [ico] } = await pool.query(`
-      INSERT INTO ico_offerings(token_name,token_symbol,description,price_per_token,total_supply,hard_cap,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *
-    `, [token_name, token_symbol, (description || '').slice(0, 500), toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]);
+      INSERT INTO ico_offerings(token_name,token_symbol,description,price_per_token,total_supply,hard_cap,status,start_date,end_date,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
+    `, [token_name, token_symbol, (description || '').slice(0, 500), toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), status, startDateVal, endDateVal, req.user.id]);
     await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
     res.json({ ico });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1777,10 +1780,14 @@ app.get('/admin/ico', requireAdminPage, async (req, res) => {
         <input name="price_per_token" type="number" step="any" placeholder="Price (USDC)" required>
         <input name="total_supply" type="number" step="any" placeholder="Total supply" required>
         <input name="hard_cap" type="number" step="any" placeholder="Hard cap (USDC)" required>
+        <input name="start_date" type="datetime-local" placeholder="Start date (optional)">
+        <input name="end_date" type="datetime-local" placeholder="End date (optional)">
         <button type="submit">Create</button></form>
       <h2>Offerings</h2>
-      <table id="ico-table"><thead><tr><th>Symbol</th><th>Status</th><th>Raised</th><th></th></tr></thead><tbody>${
+      <table id="ico-table"><thead><tr><th>Symbol</th><th>Status</th><th>Raised</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>${
         rows.map(o => `<tr><td>${esc(o.token_symbol)}</td><td>${esc(o.status)}</td><td>${fromUnits(o.raised).toFixed(0)}/${fromUnits(o.hard_cap).toFixed(0)}</td>
+          <td class="muted">${o.start_date ? new Date(o.start_date).toISOString().slice(0,10) : '—'}</td>
+          <td class="muted">${o.end_date ? new Date(o.end_date).toISOString().slice(0,10) : '—'}</td>
           <td>${o.status === 'active' ? `<form method="post" action="/admin/ico/${o.id}/end${t}">${tokenField}<button class="danger">End</button></form>` : ''}</td></tr>`).join('')
       }</tbody></table>`;
     res.send(adminLayout('ICO', body));
@@ -1837,12 +1844,15 @@ app.post('/admin/markets/:id/resolve', requireAdminPage, async (req, res) => {
   res.redirect('/admin/markets' + tok(req));
 });
 app.post('/admin/ico', requireAdminPage, async (req, res) => {
-  const { token_name, token_symbol, price_per_token, total_supply, hard_cap } = req.body;
+  const { token_name, token_symbol, price_per_token, total_supply, hard_cap, start_date, end_date } = req.body;
   if (validStr(token_name, 100) && validStr(token_symbol, 20) &&
       [price_per_token, total_supply, hard_cap].every(v => parseAmount(v) != null)) {
+    const startDateVal = start_date && String(start_date).trim() ? new Date(start_date).toISOString() : null;
+    const endDateVal = end_date && String(end_date).trim() ? new Date(end_date).toISOString() : null;
+    const status = startDateVal && new Date(startDateVal) > new Date() ? 'upcoming' : 'active';
     await pool.query(
-      'INSERT INTO ico_offerings(token_name,token_symbol,price_per_token,total_supply,hard_cap,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6)',
-      [token_name, token_symbol, toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]
+      'INSERT INTO ico_offerings(token_name,token_symbol,price_per_token,total_supply,hard_cap,status,start_date,end_date,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [token_name, token_symbol, toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), status, startDateVal, endDateVal, req.user.id]
     );
     await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
   }
@@ -2146,6 +2156,13 @@ async function start() {
     ON kyc_verifications (anti_sybil_token) WHERE anti_sybil_token IS NOT NULL
   `);
 
+  // ico_offerings — scheduling and icon fields for Live/Upcoming/Completed grouping.
+  await pool.query(`
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ;
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ;
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS icon_url TEXT;
+  `);
+
   // funding_payments — per-position funding settlements (Phase 3, private).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS funding_payments (
@@ -2318,10 +2335,18 @@ async function start() {
     `);
     await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW() WHERE id=9003");
 
-    // Seed ICO
+    // Seed ICO offerings — one live (SDC existing), two more live, two upcoming, two completed.
+    // Amounts are stored as BIGINT micro-units (value × 1_000_000). Dates use interval arithmetic
+    // so countdowns render correctly on every staging preview.
     await pool.query(`
-      INSERT INTO ico_offerings(id,token_name,token_symbol,description,price_per_token,total_supply,hard_cap,status,created_by_user_id) VALUES
-        (9001,'Staging Demo Coin','SDC','Staging demo ICO — A simulated token offering for testing the BloomMoney ICO feature.',1000000,10000000000,5000000000,'active',9006)
+      INSERT INTO ico_offerings(id,token_name,token_symbol,description,price_per_token,total_supply,hard_cap,raised,tokens_sold,status,start_date,end_date,created_by_user_id) VALUES
+        (9001,'Staging Demo Coin','SDC','Staging demo ICO — A simulated token offering for testing the BloomMoney ICO feature.',1000000,10000000000,5000000000,0,0,'active',NOW()-INTERVAL '3 days',NOW()+INTERVAL '7 days',9006),
+        (9002,'Staging AquaFi Protocol','AQF','Staging demo ICO — Cross-chain liquidity layer for DeFi aggregation.',50000,40000000000000,2000000000000,1400000000000,28000000000000,'active',NOW()-INTERVAL '5 days',NOW()+INTERVAL '9 days',9006),
+        (9003,'Staging VaultX','VLX','Staging demo ICO — Automated yield optimizer with auto-compounding vaults.',120000,25000000000000,3000000000000,600000000000,5000000000000,'active',NOW()-INTERVAL '2 days',NOW()+INTERVAL '12 days',9006),
+        (9004,'Staging NovaMesh','NVM','Staging demo ICO — Decentralized compute mesh for AI inference workloads.',80000,62500000000000,5000000000000,0,0,'upcoming',NOW()+INTERVAL '7 days',NOW()+INTERVAL '21 days',9006),
+        (9005,'Staging ChainSpark','CSP','Staging demo ICO — Play-to-earn gaming platform with onchain asset ownership.',30000,50000000000000,1500000000000,0,0,'upcoming',NOW()+INTERVAL '14 days',NOW()+INTERVAL '28 days',9006),
+        (9006,'Staging PixelDAO','PXD','Staging demo ICO — NFT governance DAO with fractionalized art vaults.',250000,4000000000000,1000000000000,1000000000000,4000000000000,'sold_out',NOW()-INTERVAL '60 days',NOW()-INTERVAL '30 days',9006),
+        (9007,'Staging ZephyrNet','ZPN','Staging demo ICO — Layer 2 scaling solution for microtransactions.',100000,40000000000000,4000000000000,2700000000000,27000000000000,'ended',NOW()-INTERVAL '90 days',NOW()-INTERVAL '45 days',9006)
       ON CONFLICT(id) DO NOTHING
     `);
 
