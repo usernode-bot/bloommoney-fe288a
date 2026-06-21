@@ -12,6 +12,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
+// Post-to-Earn: points credited for each successful top-level post to the feed.
+const POST_REWARD_POINTS = 5;
 
 const DAILY_TEMPLATES = [
   {
@@ -574,19 +576,38 @@ app.get('/api/feed', async (req, res) => {
 });
 
 app.post('/api/posts', requireWallet, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { content, parent_id, locked } = req.body;
     if (!content || content.length > 280) return res.status(400).json({ error: 'Invalid content' });
+    const isTopLevel = !parent_id;
     // Only top-level posts can be locked; replies are never lockable.
     const isLocked = !!locked && !parent_id;
-    const { rows: [post] } = await pool.query(`
+    await client.query('BEGIN');
+    const { rows: [post] } = await client.query(`
       INSERT INTO posts (user_id, username, content, parent_id, locked) VALUES ($1,$2,$3,$4,$5) RETURNING *
     `, [req.user.id, req.user.username, content, parent_id || null, isLocked]);
     if (parent_id) {
-      await pool.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
+      await client.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
     }
-    res.json({ post });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    // Post-to-Earn: only top-level posts to the feed earn points; replies award 0.
+    let points = null, awarded = 0;
+    if (isTopLevel) {
+      const { rows: [u] } = await client.query(
+        'UPDATE users SET points = points + $1 WHERE user_id = $2 RETURNING points',
+        [POST_REWARD_POINTS, req.user.id]
+      );
+      points = u ? u.points : null;
+      awarded = POST_REWARD_POINTS;
+    }
+    await client.query('COMMIT');
+    res.json({ post, points, awarded });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(500).json({ error: e.message });
+  } finally {
+    client.release();
+  }
 });
 
 app.get('/api/posts/:id', async (req, res) => {
@@ -2580,6 +2601,7 @@ async function start() {
       is_banned BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS wallet_balances (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -2947,6 +2969,21 @@ async function start() {
         (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','BLOOM staker since day one',false),
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
+    `);
+
+    // Give demo users an obviously-fake non-zero Points available balance so the
+    // Post-to-Earn badge renders a realistic number in staging previews. Scoped
+    // strictly to the 90xx demo ids — never touches real users.
+    await pool.query(`
+      UPDATE users SET points = CASE user_id
+        WHEN 9001 THEN 45
+        WHEN 9002 THEN 30
+        WHEN 9003 THEN 20
+        WHEN 9004 THEN 15
+        WHEN 9005 THEN 60
+        WHEN 9006 THEN 10
+        ELSE points END
+      WHERE user_id BETWEEN 9001 AND 9006
     `);
 
     // Seed verifications (new vocabulary + social-OAuth providers). Each social
