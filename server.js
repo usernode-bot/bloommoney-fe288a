@@ -515,6 +515,17 @@ app.get('/api/profile/:username', async (req, res) => {
 
 // ── Social Feed ───────────────────────────────────────────────────────────────
 
+// Premium "locked" posts: redact body server-side unless the viewer authored it
+// or has paid the mock 5 TOK unlock. `unlocked` is whether a post_unlocks row exists.
+const UNLOCK_COST_UNITS = 5_000_000; // 5 TOK in micro-units (U = 1_000_000)
+function gatePost(post, viewerId, unlocked) {
+  if (!post.locked) return { ...post, unlocked: true };
+  const reveal = unlocked || post.user_id === viewerId;
+  return reveal
+    ? { ...post, unlocked: true }
+    : { ...post, content: null, unlocked: false };
+}
+
 app.get('/api/feed', async (req, res) => {
   try {
     const tab = req.query.tab || 'global';
@@ -545,12 +556,18 @@ app.get('/api/feed', async (req, res) => {
     }
 
     if (rows.length > 0) {
+      const ids = rows.map(r => r.id);
       const { rows: liked } = await pool.query(
         'SELECT post_id FROM post_likes WHERE user_id=$1 AND post_id=ANY($2)',
-        [req.user.id, rows.map(r => r.id)]
+        [req.user.id, ids]
       );
       const likedSet = new Set(liked.map(r => r.post_id));
-      rows = rows.map(r => ({ ...r, liked_by_me: likedSet.has(r.id) }));
+      const { rows: unlocked } = await pool.query(
+        'SELECT post_id FROM post_unlocks WHERE user_id=$1 AND post_id=ANY($2)',
+        [req.user.id, ids]
+      );
+      const unlockedSet = new Set(unlocked.map(r => r.post_id));
+      rows = rows.map(r => gatePost({ ...r, liked_by_me: likedSet.has(r.id) }, req.user.id, unlockedSet.has(r.id)));
     }
     res.json({ posts: rows, nextCursor: rows.length === lim ? rows[rows.length - 1].id : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -558,11 +575,13 @@ app.get('/api/feed', async (req, res) => {
 
 app.post('/api/posts', requireWallet, async (req, res) => {
   try {
-    const { content, parent_id } = req.body;
+    const { content, parent_id, locked } = req.body;
     if (!content || content.length > 280) return res.status(400).json({ error: 'Invalid content' });
+    // Only top-level posts can be locked; replies are never lockable.
+    const isLocked = !!locked && !parent_id;
     const { rows: [post] } = await pool.query(`
-      INSERT INTO posts (user_id, username, content, parent_id) VALUES ($1,$2,$3,$4) RETURNING *
-    `, [req.user.id, req.user.username, content, parent_id || null]);
+      INSERT INTO posts (user_id, username, content, parent_id, locked) VALUES ($1,$2,$3,$4,$5) RETURNING *
+    `, [req.user.id, req.user.username, content, parent_id || null, isLocked]);
     if (parent_id) {
       await pool.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
     }
@@ -580,7 +599,35 @@ app.get('/api/posts/:id', async (req, res) => {
     const { rows: liked } = await pool.query(
       'SELECT 1 FROM post_likes WHERE user_id=$1 AND post_id=$2', [req.user.id, post.id]
     );
-    res.json({ post: { ...post, liked_by_me: liked.length > 0 }, replies });
+    const { rows: unlocked } = await pool.query(
+      'SELECT 1 FROM post_unlocks WHERE user_id=$1 AND post_id=$2', [req.user.id, post.id]
+    );
+    const gated = gatePost({ ...post, liked_by_me: liked.length > 0 }, req.user.id, unlocked.length > 0);
+    res.json({ post: gated, replies });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/posts/:id/unlock', requireWallet, async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id);
+    const { rows: [post] } = await pool.query('SELECT * FROM posts WHERE id=$1 AND deleted=false', [postId]);
+    if (!post) return res.status(404).json({ error: 'Not found' });
+    // Not locked, or already viewable by the author — nothing to charge.
+    if (!post.locked || post.user_id === req.user.id) {
+      return res.json({ ok: true, content: post.content });
+    }
+    // Idempotent: only the first successful insert records the mock 5 TOK charge.
+    const { rows: inserted } = await pool.query(
+      'INSERT INTO post_unlocks(post_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING id',
+      [postId, req.user.id]
+    );
+    if (inserted.length > 0) {
+      await pool.query(
+        "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'post_unlock','TOK',$2,$3)",
+        [req.user.id, -UNLOCK_COST_UNITS, `Unlocked alpha post #${postId}`]
+      );
+    }
+    res.json({ ok: true, content: post.content });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2349,6 +2396,14 @@ async function start() {
       user_id INTEGER NOT NULL,
       UNIQUE(post_id, user_id)
     );
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE;
+    CREATE TABLE IF NOT EXISTS post_unlocks (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id),
+      user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(post_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS follows (
       follower_id INTEGER NOT NULL,
       following_id INTEGER NOT NULL,
@@ -2741,6 +2796,14 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
     await pool.query(`UPDATE posts SET reply_count=2 WHERE id=900001`);
+
+    // Seed one locked "premium" alpha post (un-unlocked) so the paywall
+    // blur + "Pay 5 TOK to read alpha" banner renders out of the box.
+    await pool.query(
+      `INSERT INTO posts(id,user_id,username,content,locked) VALUES
+        (900016,9005,'staging-eve','Staging demo alpha — the secret BLOOM entry I''m not unblurring for free 🌸',TRUE)
+      ON CONFLICT(id) DO NOTHING`
+    );
 
     // Seed follows
     await pool.query(`

@@ -157,6 +157,7 @@
     { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" },
     { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" },
-    { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" }
+    { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
+    { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" }
   ]
 }
