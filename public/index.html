@@ -80,6 +80,27 @@
   <p id="wallet-status" class="text-zinc-600 text-sm"></p>
 </div>
 
+<!-- ───── Tip Modal ───── -->
+<div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+    <h2 class="text-lg font-bold mb-4" id="tip-modal-title">Send TOK</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="text-sm text-zinc-400 block mb-2">Amount (TOK)</label>
+        <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
+      </div>
+      <div class="text-sm text-zinc-400">
+        Your balance: <span id="tip-balance" class="text-amber-400 font-semibold">0 TOK</span>
+      </div>
+      <div id="tip-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-z" onclick="closeTipModal()">Cancel</button>
+        <button class="btn btn-v" onclick="submitTip()" id="tip-submit-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ───── Main App ───── -->
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
@@ -583,6 +604,16 @@ async function renderFeed(sec) {
 
   function postCard(p) {
     const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
+    const isLockedForMe = p.locked && !p.unlocked;
+    const body = isLockedForMe
+      ? `<div class="relative rounded-lg overflow-hidden">
+           <p class="text-sm text-zinc-300 leading-relaxed select-none blur-sm pointer-events-none">Locked alpha — pay 5 TOK to reveal this premium post. Locked alpha — pay 5 TOK to reveal.</p>
+           <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/40 text-center px-2">
+             <span class="text-xs font-semibold text-violet-200">🔒 Pay 5 TOK to read alpha</span>
+             <button class="btn btn-v text-xs px-3 py-1" onclick="unlockPost(${p.id})">Pay 5 TOK</button>
+           </div>
+         </div>`
+      : `<p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2 min-w-0">
@@ -590,14 +621,16 @@ async function renderFeed(sec) {
           <div class="min-w-0">
             <button class="text-sm font-semibold hover:text-violet-300 truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
             ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
+            ${p.locked ? '<span class="text-amber-400 text-xs ml-1" title="Premium locked post">🔒</span>' : ''}
             <span class="text-zinc-600 text-xs ml-2">${tsAgo(p.created_at)}</span>
           </div>
         </div>
       </div>
-      <p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>
+      ${body}
       <div class="flex items-center gap-4">
         <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
         <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
       </div>
     </div>`;
@@ -626,7 +659,13 @@ async function renderFeed(sec) {
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <div class="flex justify-between items-center">
-          <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
+          <div class="flex items-center gap-3">
+            <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
+            <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none" title="Lock this post behind a 5 TOK paywall">
+              <input id="compose-lock" type="checkbox" class="accent-violet-600 w-3.5 h-3.5">
+              <span>🔒 Lock Post</span>
+            </label>
+          </div>
           <button class="btn btn-v" onclick="submitPost()">Post</button>
         </div>
       </div>
@@ -655,12 +694,28 @@ async function renderFeed(sec) {
     const box = document.getElementById('compose-box');
     const content = box?.value.trim();
     if (!content) return;
+    const locked = !!document.getElementById('compose-lock')?.checked;
     try {
-      await api('POST', '/api/posts', { content });
+      await api('POST', '/api/posts', { content, locked });
       box.value = '';
       resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();
+    } catch (e) { alert(e.message); }
+  };
+
+  window.unlockPost = async (id) => {
+    try {
+      const { content } = await api('POST', `/api/posts/${id}/unlock`);
+      const post = feedState.posts.find(p => p.id === id);
+      if (post) { post.unlocked = true; post.content = content; }
+      if (feedState.thread && feedState.thread.post.id === id) {
+        feedState.thread.post.unlocked = true;
+        feedState.thread.post.content = content;
+        sec.innerHTML = threadView(feedState.thread.post, feedState.thread.replies);
+      } else {
+        render();
+      }
     } catch (e) { alert(e.message); }
   };
 
@@ -702,6 +757,79 @@ async function renderFeed(sec) {
   await loadPosts();
 }
 
+// ── Tip Modal ──────────────────────────────────────────────────────────────────
+let tipState = { postId: null, creatorUsername: null };
+
+window.openTipModal = (postId, creatorUsername) => {
+  tipState.postId = postId;
+  tipState.creatorUsername = creatorUsername;
+  const modal = document.getElementById('tip-modal');
+  const title = document.getElementById('tip-modal-title');
+  const balance = document.getElementById('tip-balance');
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+
+  title.textContent = `Send TOK to @${esc(creatorUsername)}`;
+  const tokBal = S.balances['TOK'] || 0;
+  balance.textContent = `${fmtAmt('TOK', tokBal)} TOK`;
+  amountInput.value = '';
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  modal.classList.remove('hidden');
+  amountInput.focus();
+};
+
+window.closeTipModal = () => {
+  const modal = document.getElementById('tip-modal');
+  modal.classList.add('hidden');
+  tipState = { postId: null, creatorUsername: null };
+};
+
+window.submitTip = async () => {
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+  const amount = parseFloat(amountInput.value);
+
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  if (!amount || amount <= 0) {
+    errorDiv.textContent = 'Please enter an amount greater than 0';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  const tokBal = S.balances['TOK'] || 0;
+  const amountUnits = toUnits(amount.toString());
+  if (amountUnits > tokBal) {
+    errorDiv.textContent = 'Insufficient TOK balance';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+
+    await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString() });
+
+    closeTipModal();
+    await refreshBalances();
+    await window._feedFns.loadPosts();
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  } catch (e) {
+    errorDiv.textContent = e.message || 'Failed to send tip';
+    errorDiv.classList.remove('hidden');
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  }
+};
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 async function renderProfile(sec) {
   const username = S.profileUser || S.user?.username;
@@ -731,8 +859,8 @@ async function renderProfile(sec) {
     const userPosts = d.posts.filter(p => p.username === username && (parent === null ? p.parent_id === null : p.parent_id !== null));
     return userPosts.length
       ? userPosts.map(p => `<div class="card space-y-1">
-          <span class="text-xs text-zinc-600">${tsAgo(p.created_at)}</span>
-          <p class="text-sm text-zinc-300">${esc(p.content)}</p>
+          <span class="text-xs text-zinc-600">${p.locked ? '🔒 ' : ''}${tsAgo(p.created_at)}</span>
+          <p class="text-sm ${p.locked && !p.unlocked ? 'text-zinc-500 italic' : 'text-zinc-300'}">${p.locked && !p.unlocked ? 'Locked alpha — open the feed to pay 5 TOK and read.' : esc(p.content)}</p>
           <div class="flex gap-3 text-xs text-zinc-500"><span>♥ ${p.like_count}</span><span>💬 ${p.reply_count}</span></div>
         </div>`).join('')
       : '<p class="text-zinc-600 text-sm">No posts yet</p>';

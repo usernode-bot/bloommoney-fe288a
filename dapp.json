@@ -158,6 +158,8 @@
     { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" },
     { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" },
     { "name": "Ticker prices API returns JSON", "path": "/api/ticker-prices?symbols=BTC,ETH", "expectSelector": "body" },
-    { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" }
+    { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
+    { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
+    { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" }
   ]
 }
