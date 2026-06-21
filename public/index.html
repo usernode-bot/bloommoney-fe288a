@@ -629,49 +629,38 @@ async function renderProfile(sec) {
   }
 
   async function renderPortfolioTab() {
-    const [holdingsData, pricesData] = await Promise.all([
-      api('GET', '/api/holdings'),
-      api('GET', '/api/prices'),
-    ]);
-    const holdings = holdingsData.holdings;
-    const priceMap = {};
-    (pricesData.prices || []).forEach(p => { priceMap[p.symbol.toUpperCase()] = parseFloat(p.price_usd); });
+    const data = await fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r => r.json());
+    const holdings = data.holdings || [];
+    const prices = data.prices || {};
 
-    let totalKnownValue = 0;
-    let unknownCount = 0;
+    let totalValue = 0, totalCost = 0;
     const rows = holdings.map(h => {
       const qty = parseFloat(h.quantity);
-      const costBasis = qty * parseFloat(h.purchase_price);
-      const price = h.ticker ? priceMap[h.ticker.toUpperCase()] : null;
+      const buyPrice = parseFloat(h.purchase_price);
+      const livePrice = prices[h.ticker?.toUpperCase()] ?? null;
+      const costBasis = qty * buyPrice;
       let currentValue = null, pnl = null, pnlPct = null;
-      if (price != null) {
-        currentValue = qty * price;
+      if (livePrice != null) {
+        currentValue = qty * livePrice;
         pnl = currentValue - costBasis;
         pnlPct = costBasis > 0 ? (pnl / costBasis * 100) : 0;
-        totalKnownValue += currentValue;
-      } else {
-        unknownCount++;
+        totalValue += currentValue;
+        totalCost += costBasis;
       }
       const pnlCls = (pnl != null && pnl >= 0) ? 'text-emerald-400' : 'text-red-400';
-      const purchasePrice = parseFloat(h.purchase_price);
+      const qtyStr = qty < 1 ? qty.toFixed(6) : qty < 10 ? qty.toFixed(4) : qty.toFixed(2);
       return `
-        <div class="card space-y-2" data-holding-id="${h.id}">
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="font-semibold text-sm">${esc(h.asset_name)}${h.ticker ? ` <span class="text-zinc-500 font-mono text-xs">${esc(h.ticker)}</span>` : ''}</div>
-              <div class="text-xs text-zinc-500 capitalize">${esc(h.asset_type)}</div>
-            </div>
-            <div class="flex gap-1 shrink-0">
-              <button class="btn btn-z text-xs px-2 py-1" onclick="editHolding(${h.id})">Edit</button>
-              <button class="btn btn-r text-xs px-2 py-1" onclick="removeHolding(${h.id})">Remove</button>
-            </div>
+        <div class="card space-y-2">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-semibold text-sm">${esc(h.asset_name)}</span>
+            ${h.ticker ? `<span class="text-zinc-500 font-mono text-xs bg-zinc-800 px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div><div class="text-zinc-500">Quantity</div><div class="font-mono">${qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(qty < 1 ? 6 : 4)}</div></div>
-            <div><div class="text-zinc-500">Cost/unit</div><div class="font-mono">$${purchasePrice.toFixed(purchasePrice < 1 ? 4 : 2)}</div></div>
-            <div><div class="text-zinc-500">Cost basis</div><div class="font-mono">$${costBasis.toFixed(2)}</div></div>
+            <div><div class="text-zinc-500">Quantity</div><div class="font-mono">${qtyStr}</div></div>
+            <div><div class="text-zinc-500">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
+            <div><div class="text-zinc-500">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-zinc-600">—</span>'}</div></div>
             <div>
-              <div class="text-zinc-500">Current value</div>
+              <div class="text-zinc-500">Value / P&amp;L</div>
               ${currentValue != null
                 ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
                 : `<div class="text-zinc-600">—</div>`}
@@ -680,19 +669,19 @@ async function renderProfile(sec) {
         </div>`;
     });
 
+    const totalPnl = totalValue - totalCost;
+    const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
+    const totalPnlCls = totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+
     return `
-      <div class="card flex items-center justify-between gap-4 bg-zinc-900/50">
-        <div>
-          <div class="text-xs text-zinc-500">Estimated portfolio value</div>
-          <div class="text-xl font-bold text-violet-300">$${totalKnownValue.toFixed(2)}</div>
-          ${unknownCount > 0 ? `<div class="text-xs text-zinc-600">${unknownCount} holding${unknownCount > 1 ? 's' : ''} without live price excluded</div>` : ''}
-        </div>
-        <button class="btn btn-v shrink-0" onclick="showAddHolding()">+ Add Holding</button>
+      <div class="card bg-zinc-900/50 space-y-1">
+        <div class="text-xs text-zinc-500">Portfolio value</div>
+        <div class="text-2xl font-bold text-violet-300">$${totalValue.toFixed(2)}</div>
+        ${totalCost > 0 ? `<div class="text-sm ${totalPnlCls} font-mono">${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} (${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%) overall P&L</div>` : ''}
       </div>
-      <div id="holding-form-container"></div>
       ${holdings.length
         ? `<div class="space-y-3">${rows.join('')}</div>`
-        : `<div class="card text-center py-6 text-zinc-500 text-sm">No holdings yet — add your first one.</div>`}`;
+        : `<div class="card text-center py-6 text-zinc-500 text-sm">Portfolio not yet generated.</div>`}`;
   }
 
   async function renderActivityTab() {
@@ -797,7 +786,7 @@ async function renderProfile(sec) {
         </div>
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
-          ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio','activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+          ${['posts','replies','nfts','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
@@ -852,87 +841,6 @@ async function renderProfile(sec) {
     try {
       await api('POST', following ? '/api/unfollow' : '/api/follow', { username: uname });
       await renderProfile(sec);
-    } catch (e) { alert(e.message); }
-  };
-
-  window.showAddHolding = (h) => {
-    const container = document.getElementById('holding-form-container');
-    if (!container) return;
-    const editing = !!h;
-    container.innerHTML = `
-      <div class="card space-y-3 border-violet-700/50">
-        <h3 class="font-semibold text-sm">${editing ? 'Edit Holding' : 'Add Holding'}</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div>
-            <label class="text-xs text-zinc-500">Asset name *</label>
-            <input id="h-name" class="inp mt-1" placeholder="e.g. Apple Inc." value="${editing ? esc(h.asset_name) : ''}">
-          </div>
-          <div>
-            <label class="text-xs text-zinc-500">Ticker (optional)</label>
-            <input id="h-ticker" class="inp mt-1" placeholder="e.g. AAPL, ETH" value="${editing && h.ticker ? esc(h.ticker) : ''}">
-          </div>
-          <div>
-            <label class="text-xs text-zinc-500">Asset type *</label>
-            <select id="h-type" class="inp mt-1">
-              ${['crypto','stock','etf','other'].map(t => `<option value="${t}"${editing && h.asset_type === t ? ' selected' : ''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label class="text-xs text-zinc-500">Quantity *</label>
-            <input id="h-qty" type="number" class="inp mt-1" placeholder="0.00" min="0" step="any" value="${editing ? h.quantity : ''}">
-          </div>
-          <div class="sm:col-span-2">
-            <label class="text-xs text-zinc-500">Purchase price (USD per unit) *</label>
-            <input id="h-price" type="number" class="inp mt-1" placeholder="0.00" min="0" step="any" value="${editing ? h.purchase_price : ''}">
-          </div>
-        </div>
-        <div class="flex gap-2 justify-end">
-          <button class="btn btn-z" onclick="cancelHoldingForm()">Cancel</button>
-          <button class="btn btn-v" onclick="saveHolding(${editing ? h.id : 'null'})">${editing ? 'Save changes' : 'Add holding'}</button>
-        </div>
-        <p id="h-msg" class="text-sm"></p>
-      </div>`;
-  };
-
-  window.cancelHoldingForm = () => {
-    const c = document.getElementById('holding-form-container');
-    if (c) c.innerHTML = '';
-  };
-
-  window.saveHolding = async (id) => {
-    const asset_name = document.getElementById('h-name')?.value?.trim();
-    const ticker = document.getElementById('h-ticker')?.value?.trim();
-    const asset_type = document.getElementById('h-type')?.value;
-    const quantity = document.getElementById('h-qty')?.value;
-    const purchase_price = document.getElementById('h-price')?.value;
-    const msg = document.getElementById('h-msg');
-    try {
-      if (id) {
-        await api('PATCH', `/api/holdings/${id}`, { asset_name, ticker: ticker || null, asset_type, quantity, purchase_price });
-      } else {
-        await api('POST', '/api/holdings', { asset_name, ticker: ticker || null, asset_type, quantity, purchase_price });
-      }
-      activeTab = 'portfolio';
-      await fullRender();
-    } catch (e) {
-      if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
-    }
-  };
-
-  window.editHolding = async (id) => {
-    try {
-      const { holdings } = await api('GET', '/api/holdings');
-      const h = holdings.find(x => x.id === id);
-      if (h) showAddHolding(h);
-    } catch (e) { alert(e.message); }
-  };
-
-  window.removeHolding = async (id) => {
-    if (!confirm('Remove this holding?')) return;
-    try {
-      await api('DELETE', `/api/holdings/${id}`);
-      activeTab = 'portfolio';
-      await fullRender();
     } catch (e) { alert(e.message); }
   };
 
@@ -1205,37 +1113,135 @@ async function renderLiquidity(sec) {
 
 // ── ICO ───────────────────────────────────────────────────────────────────────
 async function renderICO(sec) {
+  function tokenBadge(o) {
+    if (o.icon_url) {
+      return `<img src="${esc(o.icon_url)}" class="w-8 h-8 rounded-full object-cover flex-shrink-0" onerror="this.style.display='none'" alt="">`;
+    }
+    const cols = ['bg-violet-700','bg-emerald-700','bg-blue-700','bg-amber-700','bg-rose-700','bg-teal-700','bg-indigo-700'];
+    const c = cols[(o.token_symbol || 'X').charCodeAt(0) % cols.length];
+    return `<div class="w-8 h-8 rounded-full ${c} flex items-center justify-center text-xs font-bold flex-shrink-0">${esc((o.token_symbol||'?')[0])}</div>`;
+  }
+
+  function timeUntil(d) {
+    const ms = new Date(d) - Date.now();
+    if (ms <= 0) return 'now';
+    const s = ms / 1000;
+    if (s < 3600) return 'in ' + Math.floor(s / 60) + 'm';
+    if (s < 86400) return 'in ' + Math.floor(s / 3600) + 'h';
+    return 'in ' + Math.floor(s / 86400) + 'd';
+  }
+
+  function liveCard(o) {
+    const pct = Number(o.hard_cap) > 0 ? Math.min(100, Number(o.raised) / Number(o.hard_cap) * 100) : 0;
+    return `<div class="card space-y-3">
+      <div class="flex items-start gap-3">
+        ${tokenBadge(o)}
+        <div class="flex-1 min-w-0">
+          <div class="flex justify-between items-start gap-2">
+            <div class="min-w-0">
+              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
+            </div>
+            <span class="text-emerald-400 text-xs font-semibold shrink-0">LIVE</span>
+          </div>
+        </div>
+      </div>
+      <div class="text-sm space-y-0.5">
+        <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-zinc-500">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+      </div>
+      <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
+        <div class="bg-violet-600 h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <div class="flex gap-2">
+        <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
+        <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
+      </div>
+      <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
+      <p id="ico-msg-${o.id}" class="text-sm"></p>
+    </div>`;
+  }
+
+  function upcomingCard(o) {
+    const startStr = o.start_date
+      ? new Date(o.start_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      : 'TBA';
+    const countdown = o.start_date ? timeUntil(o.start_date) : '';
+    return `<div class="card space-y-3">
+      <div class="flex items-start gap-3">
+        ${tokenBadge(o)}
+        <div class="flex-1 min-w-0">
+          <div class="flex justify-between items-start gap-2">
+            <div class="min-w-0">
+              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
+            </div>
+            <span class="text-amber-400 text-xs font-semibold shrink-0">UPCOMING</span>
+          </div>
+        </div>
+      </div>
+      <div class="text-sm space-y-0.5">
+        <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-zinc-500">Raise goal</span><span>${fmtUSD(o.hard_cap)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-zinc-500">Opens</span><span class="text-amber-300">${esc(startStr)}${countdown ? ` (${countdown})` : ''}</span></div>
+      </div>
+      <div class="flex justify-end">
+        <span class="text-xs text-zinc-500 bg-zinc-800 px-3 py-1.5 rounded-lg">Coming soon</span>
+      </div>
+    </div>`;
+  }
+
+  function completedCard(o) {
+    const pct = Number(o.hard_cap) > 0 ? Math.min(100, Number(o.raised) / Number(o.hard_cap) * 100) : 0;
+    const isSoldOut = o.status === 'sold_out';
+    const badgeCls = isSoldOut ? 'text-violet-400' : 'text-zinc-500';
+    const badgeLbl = isSoldOut ? 'SOLD OUT' : 'ENDED';
+    return `<div class="card space-y-3 opacity-70">
+      <div class="flex items-start gap-3">
+        ${tokenBadge(o)}
+        <div class="flex-1 min-w-0">
+          <div class="flex justify-between items-start gap-2">
+            <div class="min-w-0">
+              <h3 class="font-bold text-zinc-400 truncate">${esc(o.token_name)} <span class="text-zinc-600 text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-zinc-600 mt-0.5">${esc(o.description)}</p>` : ''}
+            </div>
+            <span class="${badgeCls} text-xs font-semibold shrink-0">${badgeLbl}</span>
+          </div>
+        </div>
+      </div>
+      <div class="text-sm space-y-0.5">
+        <div class="flex justify-between"><span class="text-zinc-600">Price</span><span class="text-zinc-400">${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-zinc-600">Raised</span><span class="text-zinc-400">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+      </div>
+      <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
+        <div class="${isSoldOut ? 'bg-violet-800' : 'bg-zinc-700'} h-full rounded-full" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+    </div>`;
+  }
+
+  function renderSection(title, cards) {
+    if (!cards.length) return '';
+    return `<div class="mb-6">
+      <h3 class="text-sm font-semibold text-zinc-400 mb-3">${title}</h3>
+      <div class="space-y-3">${cards.join('')}</div>
+    </div>`;
+  }
+
   async function load() {
     await refreshBalances();
     const { offerings } = await api('GET', '/api/ico');
+    const live = offerings.filter(o => o.status === 'active');
+    const upcoming = offerings.filter(o => o.status === 'upcoming');
+    const completed = offerings.filter(o => o.status === 'sold_out' || o.status === 'ended');
+    const empty = !live.length && !upcoming.length && !completed.length;
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">Token Offerings</h2>
-      ${offerings.length ? `<div class="space-y-4">${offerings.map(o => {
-        const pct = o.hard_cap > 0 ? Math.min(100, Number(o.raised)/Number(o.hard_cap)*100) : 0;
-        const statusCls = { active:'text-emerald-400', sold_out:'text-red-400', ended:'text-zinc-500' }[o.status]||'text-zinc-400';
-        return `<div class="card space-y-3">
-          <div class="flex justify-between items-start">
-            <div>
-              <h3 class="font-bold">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
-            </div>
-            <span class="${statusCls} text-xs font-semibold">${o.status.replace('_',' ').toUpperCase()}</span>
-          </div>
-          <div class="text-sm space-y-0.5">
-            <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
-            <div class="flex justify-between"><span class="text-zinc-500">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
-          </div>
-          <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
-            <div class="bg-violet-600 h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%"></div>
-          </div>
-          ${o.status === 'active' ? `
-            <div class="flex gap-2">
-              <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
-              <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
-            </div>
-            <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
-            <p id="ico-msg-${o.id}" class="text-sm"></p>` : ''}
-        </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No ICO offerings</p>'}`;
+      ${empty
+        ? '<p class="text-zinc-600 text-sm">No ICO offerings</p>'
+        : renderSection('🟢 Live ICOs', live.map(liveCard)) +
+          renderSection('🕐 Upcoming ICOs', upcoming.map(upcomingCard)) +
+          renderSection('✅ Completed ICOs', completed.map(completedCard))
+      }`;
   }
 
   window.investICO = async (id) => {
@@ -1243,9 +1249,9 @@ async function renderICO(sec) {
     const msg = document.getElementById(`ico-msg-${id}`);
     try {
       const d = await api('POST', `/api/ico/${id}/invest`, { usdc_amount: amt });
-      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`Received ${d.tokens_received.toFixed(4)} ${d.symbol}`; }
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = `Received ${d.tokens_received.toFixed(4)} ${d.symbol}`; }
       await refreshBalances();
-    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+    } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
   };
   await load();
 }

@@ -93,7 +93,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|holdings|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -205,10 +205,8 @@ function maxLeverageFor(level) {
   return 1;
 }
 
-function featureLimits(tier) {
-  return {
-    maxHoldings: tier === 'premium' ? 20 : 10,
-  };
+function featureLimits(_tier) {
+  return {};
 }
 
 // Per-day Basic-tier trade cap (Phase 4). Returns true when allowed.
@@ -226,6 +224,94 @@ async function userTier(userId) {
   const { rows } = await pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [userId]);
   return effectiveTier(rows[0]);
 }
+// ── CoinGecko price fetching ──────────────────────────────────────────────────
+
+const COINGECKO_TICKER_MAP = {
+  BTC:  'bitcoin',
+  ETH:  'ethereum',
+  SOL:  'solana',
+  DOGE: 'dogecoin',
+  ADA:  'cardano',
+  LINK: 'chainlink',
+  DOT:  'polkadot',
+  AVAX: 'avalanche-2',
+};
+const COINGECKO_IDS = Object.values(COINGECKO_TICKER_MAP).join(',');
+const cgCache = { prices: {}, fetchedAt: 0 };
+
+async function getCoinGeckoPrices() {
+  const now = Date.now();
+  if (now - cgCache.fetchedAt < 60000 && Object.keys(cgCache.prices).length > 0) return cgCache.prices;
+  try {
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${COINGECKO_IDS}&vs_currencies=usd`;
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) { console.warn('CoinGecko non-200:', res.status); return cgCache.prices; }
+    const data = await res.json();
+    const prices = {};
+    for (const [ticker, cgId] of Object.entries(COINGECKO_TICKER_MAP)) {
+      if (data[cgId]?.usd != null) prices[ticker] = data[cgId].usd;
+    }
+    cgCache.prices = prices;
+    cgCache.fetchedAt = now;
+    return prices;
+  } catch (e) {
+    console.warn('CoinGecko fetch error:', e.message);
+    return cgCache.prices;
+  }
+}
+
+// ── Auto-generate portfolio ────────────────────────────────────────────────────
+
+const PORTFOLIO_COINS = [
+  { ticker: 'BTC',  name: 'Bitcoin',   qtyMin: 0.01, qtyMax: 0.5,   priceMin: 30000, priceMax: 65000 },
+  { ticker: 'ETH',  name: 'Ethereum',  qtyMin: 0.1,  qtyMax: 5.0,   priceMin: 1500,  priceMax: 2500  },
+  { ticker: 'SOL',  name: 'Solana',    qtyMin: 1,    qtyMax: 50,    priceMin: 50,    priceMax: 150   },
+  { ticker: 'DOGE', name: 'Dogecoin',  qtyMin: 100,  qtyMax: 10000, priceMin: 0.05,  priceMax: 0.20  },
+  { ticker: 'ADA',  name: 'Cardano',   qtyMin: 100,  qtyMax: 5000,  priceMin: 0.20,  priceMax: 0.60  },
+  { ticker: 'LINK', name: 'Chainlink', qtyMin: 5,    qtyMax: 200,   priceMin: 5,     priceMax: 15    },
+  { ticker: 'DOT',  name: 'Polkadot',  qtyMin: 5,    qtyMax: 200,   priceMin: 4,     priceMax: 10    },
+  { ticker: 'AVAX', name: 'Avalanche', qtyMin: 1,    qtyMax: 50,    priceMin: 15,    priceMax: 40    },
+];
+
+function randBetween(min, max) { return min + Math.random() * (max - min); }
+
+async function generatePortfolio(userId) {
+  // Quick non-locking check first
+  const { rows: [cnt] } = await pool.query('SELECT COUNT(*)::int AS n FROM investment_holdings WHERE user_id=$1', [userId]);
+  if ((cnt?.n || 0) > 0) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock user row to prevent race
+    await client.query('SELECT user_id FROM users WHERE user_id=$1 FOR UPDATE', [userId]);
+    // Re-check inside transaction
+    const { rows: [cnt2] } = await client.query('SELECT COUNT(*)::int AS n FROM investment_holdings WHERE user_id=$1', [userId]);
+    if ((cnt2?.n || 0) > 0) { await client.query('ROLLBACK'); return; }
+
+    // Shuffle and pick 3–6 coins
+    const shuffled = PORTFOLIO_COINS.slice().sort(() => Math.random() - 0.5);
+    const count = 3 + Math.floor(Math.random() * 4); // 3–6
+    const chosen = shuffled.slice(0, count);
+
+    for (const coin of chosen) {
+      const qty = parseFloat(randBetween(coin.qtyMin, coin.qtyMax).toFixed(coin.qtyMin < 1 ? 6 : coin.qtyMin < 10 ? 4 : 2));
+      const price = parseFloat(randBetween(coin.priceMin, coin.priceMax).toFixed(coin.priceMin < 1 ? 4 : 2));
+      await client.query(
+        'INSERT INTO investment_holdings(user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES($1,$2,$3,$4,$5,$6)',
+        [userId, coin.name, coin.ticker, 'crypto', qty, price]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('generatePortfolio err:', e.message);
+  } finally { client.release(); }
+}
+
 // ── Background price drift + liquidation ─────────────────────────────────────
 
 setInterval(async () => {
@@ -349,6 +435,8 @@ app.get('/api/me', async (req, res) => {
       pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC', [req.user.id]),
     ]);
+    // Pre-generate portfolio on first login so first portfolio view is instant
+    generatePortfolio(req.user.id).catch(() => {});
     res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -525,79 +613,25 @@ app.get('/api/price-history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Investment Holdings ────────────────────────────────────────────────────────
+// ── Public Portfolio (explorer-api) ──────────────────────────────────────────
 
-app.get('/api/holdings', async (req, res) => {
+app.get('/explorer-api/portfolio/:username', async (req, res) => {
   try {
+    const username = req.params.username;
+    const { rows: [user] } = await pool.query(
+      'SELECT u.user_id, u.username, u.display_name, k.level AS kyc_level FROM users u LEFT JOIN kyc_verifications k ON k.user_id=u.user_id WHERE u.username=$1',
+      [username]
+    );
+    if (!user) return res.status(404).json({ error: 'Not found' });
+
+    await generatePortfolio(user.user_id);
+
     const { rows: holdings } = await pool.query(
-      'SELECT * FROM investment_holdings WHERE user_id=$1 ORDER BY added_at DESC',
-      [req.user.id]
+      'SELECT * FROM investment_holdings WHERE user_id=$1 ORDER BY added_at ASC',
+      [user.user_id]
     );
-    const { rows: prices } = await pool.query('SELECT symbol, price_usd::float FROM market_prices');
-    const priceMap = {};
-    prices.forEach(p => { priceMap[p.symbol.toUpperCase()] = p.price_usd; });
-    res.json({ holdings, prices: priceMap });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/holdings', async (req, res) => {
-  try {
-    const { asset_name, ticker, asset_type, quantity, purchase_price } = req.body;
-    if (!validStr(asset_name, 150)) return res.status(400).json({ error: 'Invalid asset name' });
-    if (ticker != null && String(ticker).length > 20) return res.status(400).json({ error: 'Ticker too long' });
-    if (!['crypto', 'stock', 'etf', 'other'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset type' });
-    const qty = parseFloat(quantity);
-    if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
-    const price = parseFloat(purchase_price);
-    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
-    const tier = await userTier(req.user.id);
-    const limits = featureLimits(tier);
-    const { rows: [cnt] } = await pool.query(
-      'SELECT COUNT(*)::int AS n FROM investment_holdings WHERE user_id=$1', [req.user.id]
-    );
-    if ((cnt?.n || 0) >= limits.maxHoldings) {
-      return res.status(400).json({ error: `Holdings cap reached (${limits.maxHoldings}). Get Premium tier via zkPassport to increase it.` });
-    }
-    const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
-    const { rows: [holding] } = await pool.query(
-      'INSERT INTO investment_holdings(user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.user.id, asset_name, tickerUpper, asset_type, qty, price]
-    );
-    res.json({ holding });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.patch('/api/holdings/:id', async (req, res) => {
-  try {
-    const { rows: [existing] } = await pool.query(
-      'SELECT id FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]
-    );
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    const { asset_name, ticker, asset_type, quantity, purchase_price } = req.body;
-    if (!validStr(asset_name, 150)) return res.status(400).json({ error: 'Invalid asset name' });
-    if (ticker != null && String(ticker).length > 20) return res.status(400).json({ error: 'Ticker too long' });
-    if (!['crypto', 'stock', 'etf', 'other'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset type' });
-    const qty = parseFloat(quantity);
-    if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
-    const price = parseFloat(purchase_price);
-    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
-    const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
-    const { rows: [holding] } = await pool.query(
-      'UPDATE investment_holdings SET asset_name=$1,ticker=$2,asset_type=$3,quantity=$4,purchase_price=$5,updated_at=NOW() WHERE id=$6 AND user_id=$7 RETURNING *',
-      [asset_name, tickerUpper, asset_type, qty, price, req.params.id, req.user.id]
-    );
-    res.json({ holding });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/holdings/:id', async (req, res) => {
-  try {
-    const { rows: [existing] } = await pool.query(
-      'SELECT id FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]
-    );
-    if (!existing) return res.status(404).json({ error: 'Not found' });
-    await pool.query('DELETE FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-    res.json({ ok: true });
+    const prices = await getCoinGeckoPrices();
+    res.json({ user: { username: user.username, display_name: user.display_name, kyc_level: user.kyc_level }, holdings, prices });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1551,13 +1585,16 @@ app.post('/api/admin/posts/:id/delete', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/ico', requireAdmin, async (req, res) => {
   try {
-    const { token_name, token_symbol, description, price_per_token, total_supply, hard_cap } = req.body;
+    const { token_name, token_symbol, description, price_per_token, total_supply, hard_cap, start_date, end_date } = req.body;
     if (!validStr(token_name, 100) || !validStr(token_symbol, 20)) return res.status(400).json({ error: 'Invalid token name/symbol' });
     if ([price_per_token, total_supply, hard_cap].some(v => parseAmount(v) == null)) return res.status(400).json({ error: 'Invalid numbers' });
+    const startDateVal = start_date && String(start_date).trim() ? new Date(start_date).toISOString() : null;
+    const endDateVal = end_date && String(end_date).trim() ? new Date(end_date).toISOString() : null;
+    const status = startDateVal && new Date(startDateVal) > new Date() ? 'upcoming' : 'active';
     const { rows: [ico] } = await pool.query(`
-      INSERT INTO ico_offerings(token_name,token_symbol,description,price_per_token,total_supply,hard_cap,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *
-    `, [token_name, token_symbol, (description || '').slice(0, 500), toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]);
+      INSERT INTO ico_offerings(token_name,token_symbol,description,price_per_token,total_supply,hard_cap,status,start_date,end_date,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *
+    `, [token_name, token_symbol, (description || '').slice(0, 500), toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), status, startDateVal, endDateVal, req.user.id]);
     await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
     res.json({ ico });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1777,10 +1814,14 @@ app.get('/admin/ico', requireAdminPage, async (req, res) => {
         <input name="price_per_token" type="number" step="any" placeholder="Price (USDC)" required>
         <input name="total_supply" type="number" step="any" placeholder="Total supply" required>
         <input name="hard_cap" type="number" step="any" placeholder="Hard cap (USDC)" required>
+        <input name="start_date" type="datetime-local" placeholder="Start date (optional)">
+        <input name="end_date" type="datetime-local" placeholder="End date (optional)">
         <button type="submit">Create</button></form>
       <h2>Offerings</h2>
-      <table id="ico-table"><thead><tr><th>Symbol</th><th>Status</th><th>Raised</th><th></th></tr></thead><tbody>${
+      <table id="ico-table"><thead><tr><th>Symbol</th><th>Status</th><th>Raised</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>${
         rows.map(o => `<tr><td>${esc(o.token_symbol)}</td><td>${esc(o.status)}</td><td>${fromUnits(o.raised).toFixed(0)}/${fromUnits(o.hard_cap).toFixed(0)}</td>
+          <td class="muted">${o.start_date ? new Date(o.start_date).toISOString().slice(0,10) : '—'}</td>
+          <td class="muted">${o.end_date ? new Date(o.end_date).toISOString().slice(0,10) : '—'}</td>
           <td>${o.status === 'active' ? `<form method="post" action="/admin/ico/${o.id}/end${t}">${tokenField}<button class="danger">End</button></form>` : ''}</td></tr>`).join('')
       }</tbody></table>`;
     res.send(adminLayout('ICO', body));
@@ -1837,12 +1878,15 @@ app.post('/admin/markets/:id/resolve', requireAdminPage, async (req, res) => {
   res.redirect('/admin/markets' + tok(req));
 });
 app.post('/admin/ico', requireAdminPage, async (req, res) => {
-  const { token_name, token_symbol, price_per_token, total_supply, hard_cap } = req.body;
+  const { token_name, token_symbol, price_per_token, total_supply, hard_cap, start_date, end_date } = req.body;
   if (validStr(token_name, 100) && validStr(token_symbol, 20) &&
       [price_per_token, total_supply, hard_cap].every(v => parseAmount(v) != null)) {
+    const startDateVal = start_date && String(start_date).trim() ? new Date(start_date).toISOString() : null;
+    const endDateVal = end_date && String(end_date).trim() ? new Date(end_date).toISOString() : null;
+    const status = startDateVal && new Date(startDateVal) > new Date() ? 'upcoming' : 'active';
     await pool.query(
-      'INSERT INTO ico_offerings(token_name,token_symbol,price_per_token,total_supply,hard_cap,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6)',
-      [token_name, token_symbol, toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]
+      'INSERT INTO ico_offerings(token_name,token_symbol,price_per_token,total_supply,hard_cap,status,start_date,end_date,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [token_name, token_symbol, toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), status, startDateVal, endDateVal, req.user.id]
     );
     await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
   }
@@ -2146,6 +2190,13 @@ async function start() {
     ON kyc_verifications (anti_sybil_token) WHERE anti_sybil_token IS NOT NULL
   `);
 
+  // ico_offerings — scheduling and icon fields for Live/Upcoming/Completed grouping.
+  await pool.query(`
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ;
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ;
+    ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS icon_url TEXT;
+  `);
+
   // funding_payments — per-position funding settlements (Phase 3, private).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS funding_payments (
@@ -2187,7 +2238,6 @@ async function start() {
     COMMENT ON TABLE kyc_verifications IS 'staging:private';
     COMMENT ON TABLE admin_actions IS 'staging:private';
     COMMENT ON TABLE transactions IS 'staging:private';
-    COMMENT ON TABLE investment_holdings IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
   `);
@@ -2318,10 +2368,18 @@ async function start() {
     `);
     await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW() WHERE id=9003");
 
-    // Seed ICO
+    // Seed ICO offerings — one live (SDC existing), two more live, two upcoming, two completed.
+    // Amounts are stored as BIGINT micro-units (value × 1_000_000). Dates use interval arithmetic
+    // so countdowns render correctly on every staging preview.
     await pool.query(`
-      INSERT INTO ico_offerings(id,token_name,token_symbol,description,price_per_token,total_supply,hard_cap,status,created_by_user_id) VALUES
-        (9001,'Staging Demo Coin','SDC','Staging demo ICO — A simulated token offering for testing the BloomMoney ICO feature.',1000000,10000000000,5000000000,'active',9006)
+      INSERT INTO ico_offerings(id,token_name,token_symbol,description,price_per_token,total_supply,hard_cap,raised,tokens_sold,status,start_date,end_date,created_by_user_id) VALUES
+        (9001,'Staging Demo Coin','SDC','Staging demo ICO — A simulated token offering for testing the BloomMoney ICO feature.',1000000,10000000000,5000000000,0,0,'active',NOW()-INTERVAL '3 days',NOW()+INTERVAL '7 days',9006),
+        (9002,'Staging AquaFi Protocol','AQF','Staging demo ICO — Cross-chain liquidity layer for DeFi aggregation.',50000,40000000000000,2000000000000,1400000000000,28000000000000,'active',NOW()-INTERVAL '5 days',NOW()+INTERVAL '9 days',9006),
+        (9003,'Staging VaultX','VLX','Staging demo ICO — Automated yield optimizer with auto-compounding vaults.',120000,25000000000000,3000000000000,600000000000,5000000000000,'active',NOW()-INTERVAL '2 days',NOW()+INTERVAL '12 days',9006),
+        (9004,'Staging NovaMesh','NVM','Staging demo ICO — Decentralized compute mesh for AI inference workloads.',80000,62500000000000,5000000000000,0,0,'upcoming',NOW()+INTERVAL '7 days',NOW()+INTERVAL '21 days',9006),
+        (9005,'Staging ChainSpark','CSP','Staging demo ICO — Play-to-earn gaming platform with onchain asset ownership.',30000,50000000000000,1500000000000,0,0,'upcoming',NOW()+INTERVAL '14 days',NOW()+INTERVAL '28 days',9006),
+        (9006,'Staging PixelDAO','PXD','Staging demo ICO — NFT governance DAO with fractionalized art vaults.',250000,4000000000000,1000000000000,1000000000000,4000000000000,'sold_out',NOW()-INTERVAL '60 days',NOW()-INTERVAL '30 days',9006),
+        (9007,'Staging ZephyrNet','ZPN','Staging demo ICO — Layer 2 scaling solution for microtransactions.',100000,40000000000000,4000000000000,2700000000000,27000000000000,'ended',NOW()-INTERVAL '90 days',NOW()-INTERVAL '45 days',9006)
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -2335,18 +2393,28 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
-    // Seed investment holdings
+    // Seed auto-generated crypto portfolios for staging users (8-coin pool only)
     await pool.query(`
       INSERT INTO investment_holdings(id,user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES
         (900101,9001,'Staging demo holding — Ethereum','ETH','crypto',2.0,2200.0),
-        (900102,9001,'Staging demo holding — BloomMoney Token','BLOOM','crypto',10.0,0.40),
-        (900103,9002,'Staging demo holding — Bitcoin','BTC','crypto',0.05,60000.0),
-        (900104,9002,'Staging demo holding — Apple Inc.','AAPL','stock',5.0,185.0),
-        (900105,9003,'Staging demo holding — BloomMoney Token','BLOOM','crypto',100.0,0.35),
-        (900106,9003,'Staging demo holding — Ethereum','ETH','crypto',1.0,2100.0),
-        (900107,9004,'Staging demo holding — Bitcoin','BTC','crypto',0.1,65000.0),
-        (900108,9005,'Staging demo holding — BloomMoney Token','BLOOM','crypto',500.0,0.30),
-        (900109,9005,'Staging demo holding — Ethereum','ETH','crypto',2.0,2300.0)
+        (900102,9001,'Staging demo holding — Solana','SOL','crypto',15.0,95.0),
+        (900103,9001,'Staging demo holding — Cardano','ADA','crypto',1000.0,0.45),
+        (900104,9002,'Staging demo holding — Bitcoin','BTC','crypto',0.1,58000.0),
+        (900105,9002,'Staging demo holding — Ethereum','ETH','crypto',1.5,2100.0),
+        (900106,9002,'Staging demo holding — Polkadot','DOT','crypto',50.0,7.50),
+        (900107,9003,'Staging demo holding — Ethereum','ETH','crypto',3.0,2000.0),
+        (900108,9003,'Staging demo holding — Solana','SOL','crypto',25.0,80.0),
+        (900109,9003,'Staging demo holding — Dogecoin','DOGE','crypto',5000.0,0.12),
+        (900110,9003,'Staging demo holding — Chainlink','LINK','crypto',30.0,12.0),
+        (900111,9004,'Staging demo holding — Bitcoin','BTC','crypto',0.05,65000.0),
+        (900112,9004,'Staging demo holding — Ethereum','ETH','crypto',2.0,2300.0),
+        (900113,9004,'Staging demo holding — Avalanche','AVAX','crypto',20.0,35.0),
+        (900114,9004,'Staging demo holding — Solana','SOL','crypto',10.0,100.0),
+        (900115,9005,'Staging demo holding — Ethereum','ETH','crypto',1.0,2400.0),
+        (900116,9005,'Staging demo holding — Dogecoin','DOGE','crypto',2000.0,0.15),
+        (900117,9005,'Staging demo holding — Cardano','ADA','crypto',500.0,0.50),
+        (900118,9005,'Staging demo holding — Chainlink','LINK','crypto',20.0,10.0),
+        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0)
       ON CONFLICT(id) DO NOTHING
     `);
 
