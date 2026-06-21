@@ -97,6 +97,7 @@ const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
+  if (req.path.startsWith('/api/admin/')) return next();
   const id = req.user ? `u:${req.user.id}` : `ip:${req.ip}`;
   const sensitive = SENSITIVE_RE.test(req.path);
   const ok = sensitive
@@ -1499,6 +1500,181 @@ app.post('/api/admin/markets', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Admin list endpoints for markets, ico, prices, futures ───────────────────
+
+app.get('/api/admin/markets', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM opinion_markets ORDER BY created_at DESC LIMIT 100');
+    res.json({ markets: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/ico', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM ico_offerings ORDER BY created_at DESC LIMIT 100');
+    res.json({ offerings: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/prices', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM market_prices ORDER BY symbol');
+    res.json({ prices: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/futures', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM futures_markets ORDER BY symbol');
+    res.json({ futures: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/markets/:id/resolve', requireAdmin, async (req, res) => {
+  try {
+    const outcome = ['YES', 'NO'].includes(req.body.outcome) ? req.body.outcome : null;
+    if (!outcome) return res.status(400).json({ error: 'outcome must be YES or NO' });
+    await pool.query("UPDATE opinion_markets SET status='resolved', resolved_outcome=$1, resolved_at=NOW() WHERE id=$2", [outcome, req.params.id]);
+    await logAdmin(req.user.id, 'resolve_market', { target_market_id: parseInt(req.params.id), reason: outcome });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin full-coverage JSON API endpoints ────────────────────────────────────
+
+app.get('/api/admin/posts', requireAdmin, async (req, res) => {
+  try {
+    const search = (req.query.search || '').slice(0, 80);
+    const showDeleted = req.query.deleted === '1';
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    const { rows } = await pool.query(
+      `SELECT p.*, u.display_name FROM posts p LEFT JOIN users u ON u.user_id=p.user_id
+       WHERE ($1='' OR p.content ILIKE $2 OR p.username ILIKE $2)
+         AND ($3 OR p.deleted=false)
+       ORDER BY p.id DESC LIMIT $4 OFFSET $5`,
+      [search, `%${search}%`, showDeleted, limit, offset]
+    );
+    res.json({ posts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/posts/:id/undelete', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE posts SET deleted=false WHERE id=$1', [req.params.id]);
+    await logAdmin(req.user.id, 'undelete_post', { target_post_id: parseInt(req.params.id) });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/balances', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT wb.user_id, u.username, wb.token_symbol, wb.balance, wb.updated_at
+       FROM wallet_balances wb JOIN users u ON u.user_id=wb.user_id
+       ORDER BY wb.updated_at DESC LIMIT 200`
+    );
+    res.json({ balances: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/balances/adjust', requireAdmin, async (req, res) => {
+  try {
+    const { user_id, token_symbol, delta } = req.body;
+    if (!user_id || !validStr(token_symbol, 20)) return res.status(400).json({ error: 'Missing fields' });
+    const d = parseFloat(delta);
+    if (!Number.isFinite(d)) return res.status(400).json({ error: 'Invalid delta' });
+    const deltaUnits = Math.round(d * UNITS);
+    const { rows } = await pool.query(
+      `INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,GREATEST(0,$3))
+       ON CONFLICT(user_id,token_symbol) DO UPDATE
+         SET balance=GREATEST(0,wallet_balances.balance+$3), updated_at=NOW()
+       RETURNING balance`,
+      [user_id, token_symbol, deltaUnits]
+    );
+    await logAdmin(req.user.id, 'adjust_balance', { target_user_id: parseInt(user_id), reason: `${token_symbol} ${d > 0 ? '+' : ''}${d}` });
+    res.json({ balance: rows[0].balance });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/transactions', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+    const uid = req.query.user_id ? parseInt(req.query.user_id) : null;
+    const { rows } = await pool.query(
+      `SELECT t.*, u.username FROM transactions t LEFT JOIN users u ON u.user_id=t.user_id
+       WHERE ($1::int IS NULL OR t.user_id=$1)
+       ORDER BY t.id DESC LIMIT $2 OFFSET $3`,
+      [uid, limit, offset]
+    );
+    res.json({ transactions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/admin/prices/:symbol', requireAdmin, async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase().slice(0, 20);
+    const price = parseFloat(req.body.price_usd);
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: 'Invalid price' });
+    await pool.query(
+      `INSERT INTO market_prices(symbol,price_usd) VALUES($1,$2)
+       ON CONFLICT(symbol) DO UPDATE SET price_usd=$2, updated_at=NOW()`,
+      [symbol, price]
+    );
+    await logAdmin(req.user.id, 'update_price', { reason: `${symbol}=${price}` });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/admin/futures/markets/:id', requireAdmin, async (req, res) => {
+  try {
+    const { mark_price, funding_rate } = req.body;
+    const mp = parseFloat(mark_price);
+    const fr = parseFloat(funding_rate);
+    if (mark_price !== undefined && (!Number.isFinite(mp) || mp <= 0)) return res.status(400).json({ error: 'Invalid mark_price' });
+    if (funding_rate !== undefined && !Number.isFinite(fr)) return res.status(400).json({ error: 'Invalid funding_rate' });
+    if (mark_price !== undefined) {
+      await pool.query('UPDATE futures_markets SET mark_price=$1, index_price=$1, updated_at=NOW() WHERE id=$2', [mp, req.params.id]);
+    }
+    if (funding_rate !== undefined) {
+      await pool.query('UPDATE futures_markets SET funding_rate=$1, updated_at=NOW() WHERE id=$2', [fr, req.params.id]);
+    }
+    await logAdmin(req.user.id, 'update_futures_market', { reason: `id=${req.params.id}` });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/nfts', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT n.*, u.username AS current_owner FROM nfts n LEFT JOIN users u ON u.user_id=n.owner_user_id
+       ORDER BY n.id DESC LIMIT 200`
+    );
+    res.json({ nfts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/nfts/:id/burn', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE nfts SET burned=true WHERE id=$1', [req.params.id]);
+    await logAdmin(req.user.id, 'burn_nft', { reason: `nft_id=${req.params.id}` });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/audit', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const { rows } = await pool.query(
+      `SELECT a.*, u.username FROM admin_actions a LEFT JOIN users u ON u.user_id=a.admin_user_id
+       ORDER BY a.id DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ actions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Suggested people for the Explore screen (Phase 2): top users by follower
 // count, excluding self and anyone already followed.
 app.get('/api/explore/people', async (req, res) => {
@@ -1556,6 +1732,9 @@ function adminLayout(title, body) {
   <a href="/admin/verifications">Verifications</a>
   <a href="/admin/markets">Markets</a>
   <a href="/admin/ico">ICO</a>
+  <a href="/admin/financials">Financials</a>
+  <a href="/admin/nfts">NFTs</a>
+  <a href="/admin/prices">Prices</a>
 </header>
 <main id="admin-root">${body}</main>
 </body></html>`;
@@ -1767,6 +1946,133 @@ app.post('/admin/ico/:id/end', requireAdminPage, async (req, res) => {
   await pool.query("UPDATE ico_offerings SET status='ended' WHERE id=$1", [req.params.id]);
   await logAdmin(req.user.id, 'end_ico', { reason: String(req.params.id) });
   res.redirect('/admin/ico' + tok(req));
+});
+
+// ── New admin pages: Financials, NFTs, Prices ─────────────────────────────────
+
+app.get('/admin/financials', requireAdminPage, async (req, res) => {
+  try {
+    const t = tok(req);
+    const tokenField = req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : '';
+    const { rows: balances } = await pool.query(
+      `SELECT wb.user_id, u.username, wb.token_symbol, wb.balance
+       FROM wallet_balances wb JOIN users u ON u.user_id=wb.user_id
+       ORDER BY wb.updated_at DESC LIMIT 100`
+    );
+    const { rows: txns } = await pool.query(
+      `SELECT t.*, u.username FROM transactions t LEFT JOIN users u ON u.user_id=t.user_id
+       ORDER BY t.id DESC LIMIT 50`
+    );
+    const body = `
+      <h2 id="admin-balances">Wallet Balances</h2>
+      <form method="post" action="/admin/financials/adjust${t}" class="grid-form">${tokenField}
+        <input name="user_id" placeholder="User ID" required type="number">
+        <input name="token_symbol" placeholder="Symbol (e.g. USDC)" required>
+        <input name="delta" type="number" step="any" placeholder="Delta (±)" required>
+        <button type="submit">Adjust</button></form>
+      <table><thead><tr><th>User</th><th>Token</th><th>Balance</th></tr></thead><tbody>${
+        balances.map(b => `<tr><td>@${esc(b.username)}</td><td>${esc(b.token_symbol)}</td><td>${fromUnits(b.balance).toFixed(4)}</td></tr>`).join('')
+      }</tbody></table>
+      <h2>Recent Transactions</h2>
+      <table><thead><tr><th>ID</th><th>User</th><th>Type</th><th>Token</th><th>Amount</th><th>Desc</th><th>When</th></tr></thead><tbody>${
+        txns.map(tx => `<tr><td>${tx.id}</td><td>@${esc(tx.username||'?')}</td><td>${esc(tx.type)}</td><td>${esc(tx.token_symbol)}</td><td>${fromUnits(tx.amount).toFixed(4)}</td><td class="muted">${esc(tx.description||'')}</td><td class="muted">${new Date(tx.created_at).toISOString().slice(0,16).replace('T',' ')}</td></tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('Financials', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.post('/admin/financials/adjust', requireAdminPage, async (req, res) => {
+  const { user_id, token_symbol, delta } = req.body;
+  if (user_id && validStr(token_symbol, 20) && parseAmount(Math.abs(parseFloat(delta))) != null) {
+    const d = parseFloat(delta);
+    const deltaUnits = Math.round(d * UNITS);
+    await pool.query(
+      `INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,GREATEST(0,$3))
+       ON CONFLICT(user_id,token_symbol) DO UPDATE
+         SET balance=GREATEST(0,wallet_balances.balance+$3), updated_at=NOW()`,
+      [user_id, token_symbol.slice(0,20).toUpperCase(), deltaUnits]
+    );
+    await logAdmin(req.user.id, 'adjust_balance', { target_user_id: parseInt(user_id), reason: `${token_symbol} ${d>0?'+':''}${d}` });
+  }
+  res.redirect('/admin/financials' + tok(req));
+});
+
+app.get('/admin/nfts', requireAdminPage, async (req, res) => {
+  try {
+    const t = tok(req);
+    const tokenField = req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : '';
+    const { rows } = await pool.query(
+      `SELECT n.*, u.username AS owner FROM nfts n LEFT JOIN users u ON u.user_id=n.owner_user_id
+       ORDER BY n.id DESC LIMIT 200`
+    );
+    const body = `<h2 id="admin-nfts">NFTs</h2>
+      <table><thead><tr><th>ID</th><th>Token ID</th><th>Name</th><th>Owner</th><th>Collection</th><th>Burned</th><th>Action</th></tr></thead><tbody>${
+        rows.map(n => `<tr>
+          <td>${n.id}</td><td class="muted">${esc(n.token_id)}</td><td>${esc(n.name)}</td>
+          <td>@${esc(n.owner||'?')}</td><td class="muted">${esc(n.collection||'')}</td>
+          <td>${n.burned ? '🔥' : ''}</td>
+          <td>${!n.burned ? `<form method="post" action="/admin/nfts/${n.id}/burn${t}">${tokenField}<button class="danger">Burn</button></form>` : ''}</td>
+        </tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('NFTs', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.post('/admin/nfts/:id/burn', requireAdminPage, async (req, res) => {
+  await pool.query('UPDATE nfts SET burned=true WHERE id=$1', [req.params.id]);
+  await logAdmin(req.user.id, 'burn_nft', { reason: `nft_id=${req.params.id}` });
+  res.redirect('/admin/nfts' + tok(req));
+});
+
+app.get('/admin/prices', requireAdminPage, async (req, res) => {
+  try {
+    const t = tok(req);
+    const tokenField = req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : '';
+    const { rows: prices } = await pool.query('SELECT * FROM market_prices ORDER BY symbol');
+    const { rows: futures } = await pool.query('SELECT * FROM futures_markets ORDER BY symbol');
+    const body = `<h2 id="admin-prices">Market Prices</h2>
+      <form method="post" action="/admin/prices${t}" class="grid-form">${tokenField}
+        <input name="symbol" placeholder="Symbol (e.g. ETH)" required>
+        <input name="price_usd" type="number" step="any" placeholder="Price USD" required>
+        <button type="submit">Set Price</button></form>
+      <table><thead><tr><th>Symbol</th><th>Price (USD)</th><th>Updated</th></tr></thead><tbody>${
+        prices.map(p => `<tr><td>${esc(p.symbol)}</td><td>${p.price_usd}</td><td class="muted">${new Date(p.updated_at).toISOString().slice(0,16).replace('T',' ')}</td></tr>`).join('')
+      }</tbody></table>
+      <h2>Futures Markets</h2>
+      <table><thead><tr><th>Symbol</th><th>Mark Price</th><th>Funding Rate</th><th>Set Mark Price</th></tr></thead><tbody>${
+        futures.map(f => `<tr>
+          <td>${esc(f.symbol)}</td><td>${f.mark_price}</td><td>${f.funding_rate}</td>
+          <td><form method="post" action="/admin/prices/futures/${f.id}${t}">${tokenField}
+            <input name="mark_price" type="number" step="any" placeholder="New price" style="width:7rem">
+            <button>Set</button></form></td>
+        </tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('Prices', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.post('/admin/prices', requireAdminPage, async (req, res) => {
+  const { symbol, price_usd } = req.body;
+  const p = parseFloat(price_usd);
+  if (validStr(symbol, 20) && Number.isFinite(p) && p > 0) {
+    const sym = symbol.toUpperCase().slice(0, 20);
+    await pool.query(
+      `INSERT INTO market_prices(symbol,price_usd) VALUES($1,$2)
+       ON CONFLICT(symbol) DO UPDATE SET price_usd=$2, updated_at=NOW()`,
+      [sym, p]
+    );
+    await logAdmin(req.user.id, 'update_price', { reason: `${sym}=${p}` });
+  }
+  res.redirect('/admin/prices' + tok(req));
+});
+
+app.post('/admin/prices/futures/:id', requireAdminPage, async (req, res) => {
+  const mp = parseFloat(req.body.mark_price);
+  if (Number.isFinite(mp) && mp > 0) {
+    await pool.query('UPDATE futures_markets SET mark_price=$1, index_price=$1, updated_at=NOW() WHERE id=$2', [mp, req.params.id]);
+    await logAdmin(req.user.id, 'update_futures_market', { reason: `id=${req.params.id} price=${mp}` });
+  }
+  res.redirect('/admin/prices' + tok(req));
 });
 
 // ── Static + HTML shell ────────────────────────────────────────────────────────
@@ -2272,6 +2578,32 @@ async function start() {
         WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo funding ETH-PERP')
       `).catch(() => {});
     }
+
+    // Extra transaction seeds for admin financials demo
+    await pool.query(`
+      INSERT INTO transactions(user_id,type,token_symbol,amount,description)
+      SELECT * FROM (VALUES
+        (9001,'swap','BLOOM',200000000,'Staging demo swap USDC→BLOOM'),
+        (9002,'stake','BLOOM',500000000,'Staging demo BLOOM stake deposit'),
+        (9003,'buy','USDC',50000000,'Staging demo ICO investment'),
+        (9004,'swap','USDC',1000000000,'Staging demo swap BLOOM→USDC'),
+        (9005,'stake','BLOOM',1000000000,'Staging demo BLOOM stake deposit 2'),
+        (9006,'airdrop','BLOOM',100000000,'Staging demo admin airdrop')
+      ) v(user_id,type,token_symbol,amount,description)
+      WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo swap USDC→BLOOM')
+    `).catch(() => {});
+
+    // Admin action seeds for audit log demo
+    await pool.query(`
+      INSERT INTO admin_actions(admin_user_id,action_type,target_user_id,reason)
+      SELECT * FROM (VALUES
+        (9006,'ban_user',9003,'Staging demo — spam activity detected'),
+        (9006,'unban_user',9003,'Staging demo — appeal approved'),
+        (9006,'verify_override',9005,'Staging demo — manual social tier grant'),
+        (9006,'adjust_balance',9001,'Staging demo — compensation USDC +50')
+      ) v(admin_user_id,action_type,target_user_id,reason)
+      WHERE NOT EXISTS (SELECT 1 FROM admin_actions WHERE reason='Staging demo — spam activity detected')
+    `).catch(() => {});
   }
 
   app.listen(port, () => console.log(`BloomMoney listening on :${port}`));

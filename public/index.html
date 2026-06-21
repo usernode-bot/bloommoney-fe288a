@@ -1664,6 +1664,7 @@ async function renderVerify(sec) {
 // ── Admin (in-SPA panel for #section-admin) ──────────────────────────────────
 async function renderAdmin(sec) {
   let adminTab = 'stats';
+  const ADMIN_TABS = ['stats','users','kyc','posts','markets','ico','prices','financials','nfts','audit'];
 
   async function loadStats() {
     const { stats } = await api('GET', '/api/admin/stats');
@@ -1712,11 +1713,152 @@ async function renderAdmin(sec) {
       </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No pending KYC requests</p>';
   }
 
+  async function loadPosts(search = '', showDeleted = false) {
+    const { posts } = await api('GET', `/api/admin/posts?search=${encodeURIComponent(search)}&deleted=${showDeleted?'1':'0'}`);
+    return `<div class="flex gap-2 mb-3 flex-wrap">
+      <input id="post-search" class="inp flex-1" placeholder="Search posts…" value="${esc(search)}" oninput="adminPostSearch(this.value)">
+      <label class="flex items-center gap-1 text-sm text-zinc-400"><input type="checkbox" ${showDeleted?'checked':''} onchange="adminPostDeleted(this.checked)"> Show deleted</label>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['ID','User','Content','Del','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${posts.map(p => `<tr class="border-t border-zinc-800 ${p.deleted?'opacity-40':''}">
+        <td class="py-1 pr-3 text-zinc-500">${p.id}</td>
+        <td class="pr-3">@${esc(p.username)}</td>
+        <td class="pr-3 max-w-xs truncate">${esc(p.content.slice(0,80))}</td>
+        <td class="pr-3">${p.deleted?'🗑':''}</td>
+        <td class="flex gap-1 py-1">
+          ${p.deleted
+            ? `<button class="btn btn-g text-xs px-2 py-0.5" onclick="adminUndeletePost(${p.id})">Restore</button>`
+            : `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminDeletePost(${p.id})">Delete</button>`}
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadMarketsAdmin() {
+    const { markets } = await api('GET', '/api/admin/markets');
+    return `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['ID','Title','Status','Yes Pool','No Pool','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${markets.map(m => `<tr class="border-t border-zinc-800">
+        <td class="py-1 pr-3 text-zinc-500">${m.id}</td>
+        <td class="pr-3 max-w-xs truncate">${esc(m.title)}</td>
+        <td class="pr-3">${esc(m.status)}</td>
+        <td class="pr-3">${fmtUSD(m.yes_pool/1e6)}</td>
+        <td class="pr-3">${fmtUSD(m.no_pool/1e6)}</td>
+        <td class="flex gap-1 py-1">
+          ${m.status==='open' ? `
+            <button class="btn btn-g text-xs px-2 py-0.5" onclick="adminResolveMarket(${m.id},'YES')">YES</button>
+            <button class="btn btn-r text-xs px-2 py-0.5" onclick="adminResolveMarket(${m.id},'NO')">NO</button>
+          ` : esc(m.resolved_outcome||'—')}
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadICOAdmin() {
+    const { offerings } = await api('GET', '/api/admin/ico');
+    return `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['Symbol','Name','Status','Raised','Hard Cap','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${offerings.map(o => `<tr class="border-t border-zinc-800">
+        <td class="py-1 pr-3 font-medium">${esc(o.token_symbol)}</td>
+        <td class="pr-3">${esc(o.token_name)}</td>
+        <td class="pr-3">${esc(o.status)}</td>
+        <td class="pr-3">${fmtUSD(o.raised/1e6)}</td>
+        <td class="pr-3">${fmtUSD(o.hard_cap/1e6)}</td>
+        <td class="py-1">
+          ${o.status==='active' ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminEndICO(${o.id})">End</button>` : ''}
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadPrices() {
+    const [{ prices }, { futures }] = await Promise.all([
+      api('GET', '/api/admin/prices').catch(() => ({ prices: [] })),
+      api('GET', '/api/admin/futures').catch(() => ({ futures: [] })),
+    ]);
+    const priceRows = (prices||[]).map(p => `<tr class="border-t border-zinc-800">
+      <td class="py-1 pr-3 font-medium">${esc(p.symbol)}</td>
+      <td class="pr-3">$${parseFloat(p.price_usd).toFixed(4)}</td>
+      <td class="pr-3 text-zinc-500 text-xs">${new Date(p.updated_at).toISOString().slice(0,16).replace('T',' ')}</td>
+      <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminEditPrice('${esc(p.symbol)}',${p.price_usd})">Edit</button></td>
+    </tr>`).join('');
+    const futRows = (futures||[]).map(f => `<tr class="border-t border-zinc-800">
+      <td class="py-1 pr-3 font-medium">${esc(f.symbol)}</td>
+      <td class="pr-3">$${parseFloat(f.mark_price).toFixed(2)}</td>
+      <td class="pr-3 text-zinc-500">${f.funding_rate}</td>
+      <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminEditFutures(${f.id},'${esc(f.symbol)}',${f.mark_price})">Edit</button></td>
+    </tr>`).join('');
+    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Spot Prices</h3>
+      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['Symbol','Price','Updated',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${priceRows}</tbody></table></div>
+      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Futures Markets</h3>
+      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['Symbol','Mark Price','Funding Rate',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${futRows}</tbody></table></div>`;
+  }
+
+  async function loadFinancials() {
+    const [{ balances }, { transactions }] = await Promise.all([
+      api('GET', '/api/admin/balances'),
+      api('GET', '/api/admin/transactions'),
+    ]);
+    const balRows = balances.map(b => `<tr class="border-t border-zinc-800">
+      <td class="py-1 pr-3">@${esc(b.username)}</td>
+      <td class="pr-3">${esc(b.token_symbol)}</td>
+      <td class="pr-3">${(b.balance/1e6).toFixed(4)}</td>
+      <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminAdjustBalance(${b.user_id},'${esc(b.token_symbol)}')">Adjust</button></td>
+    </tr>`).join('');
+    const txRows = transactions.map(t => `<tr class="border-t border-zinc-800">
+      <td class="py-1 pr-3 text-zinc-500">${t.id}</td>
+      <td class="pr-3">@${esc(t.username||'?')}</td>
+      <td class="pr-3">${esc(t.type)}</td>
+      <td class="pr-3">${esc(t.token_symbol)}</td>
+      <td class="pr-3">${(t.amount/1e6).toFixed(4)}</td>
+      <td class="pr-3 text-zinc-500 text-xs truncate max-w-xs">${esc(t.description||'')}</td>
+    </tr>`).join('');
+    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Wallet Balances</h3>
+      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['User','Token','Balance',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${balRows}</tbody></table></div>
+      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Transactions</h3>
+      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['ID','User','Type','Token','Amount','Desc'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${txRows}</tbody></table></div>`;
+  }
+
+  async function loadNFTs() {
+    const { nfts } = await api('GET', '/api/admin/nfts');
+    return `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['ID','Token ID','Name','Owner','Collection','Burned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${nfts.map(n => `<tr class="border-t border-zinc-800 ${n.burned?'opacity-40':''}">
+        <td class="py-1 pr-3 text-zinc-500">${n.id}</td>
+        <td class="pr-3 font-mono text-xs">${esc(n.token_id)}</td>
+        <td class="pr-3">${esc(n.name)}</td>
+        <td class="pr-3">@${esc(n.owner_username||'?')}</td>
+        <td class="pr-3 text-zinc-500">${esc(n.collection||'')}</td>
+        <td class="pr-3">${n.burned?'🔥':''}</td>
+        <td class="py-1">${!n.burned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminBurnNFT(${n.id})">Burn</button>` : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadAudit() {
+    const { actions } = await api('GET', '/api/admin/audit');
+    return actions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['When','Admin','Action','Target','Note'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${actions.map(a => `<tr class="border-t border-zinc-800">
+        <td class="py-1 pr-3 text-zinc-500 text-xs">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td>
+        <td class="pr-3">@${esc(a.username||'?')}</td>
+        <td class="pr-3">${esc(a.action_type)}</td>
+        <td class="pr-3">${esc(String(a.target_user_id||a.target_market_id||a.target_post_id||''))}</td>
+        <td class="pr-3 text-zinc-500">${esc(a.reason||'')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '<p class="text-zinc-600 text-sm">No admin actions logged yet.</p>';
+  }
+
   async function fullRender() {
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">⚙️ Admin Dashboard</h2>
       <div class="flex flex-wrap gap-2 mb-4 border-b border-zinc-800 pb-3">
-        ${['stats','users','kyc'].map(t=>`<button class="btn ${adminTab===t?'btn-v':'btn-z'} text-xs" onclick="switchAdminTab('${t}')">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`).join('')}
+        ${ADMIN_TABS.map(t=>`<button class="btn ${adminTab===t?'btn-v':'btn-z'} text-xs" onclick="switchAdminTab('${t}')">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`).join('')}
       </div>
       <div id="admin-content">${spin()}</div>`;
 
@@ -1725,6 +1867,13 @@ async function renderAdmin(sec) {
       if (adminTab === 'stats') content.innerHTML = await loadStats();
       else if (adminTab === 'users') content.innerHTML = await loadUsers();
       else if (adminTab === 'kyc') content.innerHTML = await loadKYCQueue();
+      else if (adminTab === 'posts') content.innerHTML = await loadPosts();
+      else if (adminTab === 'markets') content.innerHTML = await loadMarketsAdmin();
+      else if (adminTab === 'ico') content.innerHTML = await loadICOAdmin();
+      else if (adminTab === 'prices') content.innerHTML = await loadPrices();
+      else if (adminTab === 'financials') content.innerHTML = await loadFinancials();
+      else if (adminTab === 'nfts') content.innerHTML = await loadNFTs();
+      else if (adminTab === 'audit') content.innerHTML = await loadAudit();
     } catch (e) { content.innerHTML = err(e.message); }
   }
 
@@ -1747,6 +1896,49 @@ async function renderAdmin(sec) {
     const reason = prompt('Rejection reason:');
     if (!reason) return;
     try { await api('POST', `/api/admin/kyc/${id}/reject`, { reason }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminDeletePost = async (id) => {
+    if (!confirm('Delete post?')) return;
+    try { await api('POST', `/api/admin/posts/${id}/delete`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminUndeletePost = async (id) => {
+    try { await api('POST', `/api/admin/posts/${id}/undelete`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminPostSearch = async (q) => {
+    const content = document.getElementById('admin-content');
+    if (content) content.innerHTML = await loadPosts(q).catch(e => err(e.message));
+  };
+  window.adminPostDeleted = async (show) => {
+    const content = document.getElementById('admin-content');
+    const q = document.getElementById('post-search')?.value || '';
+    if (content) content.innerHTML = await loadPosts(q, show).catch(e => err(e.message));
+  };
+  window.adminResolveMarket = async (id, outcome) => {
+    if (!confirm(`Resolve market ${id} as ${outcome}?`)) return;
+    try { await api('POST', `/api/admin/markets/${id}/resolve`, { outcome }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminEndICO = async (id) => {
+    if (!confirm('End ICO offering?')) return;
+    try { await api('DELETE', `/api/admin/ico/${id}`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminEditPrice = async (symbol, current) => {
+    const val = prompt(`New price for ${symbol} (current: ${current}):`, current);
+    if (!val) return;
+    try { await api('PATCH', `/api/admin/prices/${symbol}`, { price_usd: val }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminEditFutures = async (id, symbol, current) => {
+    const val = prompt(`New mark price for ${symbol} (current: ${current}):`, current);
+    if (!val) return;
+    try { await api('PATCH', `/api/admin/futures/markets/${id}`, { mark_price: val }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminAdjustBalance = async (userId, token) => {
+    const delta = prompt(`Adjust ${token} balance for user ${userId} (e.g. +50 or -10):`);
+    if (!delta) return;
+    try { await api('POST', '/api/admin/balances/adjust', { user_id: userId, token_symbol: token, delta }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminBurnNFT = async (id) => {
+    if (!confirm('Burn this NFT? This cannot be undone.')) return;
+    try { await api('POST', `/api/admin/nfts/${id}/burn`); fullRender(); } catch (e) { alert(e.message); }
   };
   await fullRender();
 }

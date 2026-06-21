@@ -136,6 +136,8 @@
     { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
     { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" },
     { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" },
+    { "name": "Admin financials page renders", "path": "/admin/financials?demo=1", "expectSelector": "#admin-balances" },
+    { "name": "Admin NFTs page renders", "path": "/admin/nfts?demo=1", "expectSelector": "#admin-nfts" },
     { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" },
     { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
     { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" }
