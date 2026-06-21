@@ -1974,6 +1974,187 @@ app.get('/api/explore/people', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── ROI & Copy Trade (Phase 6) ──────────────────────────────────────────────────
+
+app.get('/api/users/:username/roi', async (req, res) => {
+  try {
+    const { rows: [user] } = await pool.query(
+      'SELECT user_id FROM users WHERE username=$1', [req.params.username]
+    );
+    if (!user) return res.status(404).json({ error: 'Not found' });
+
+    const { rows: [stats] } = await pool.query(`
+      SELECT
+        COALESCE(SUM(realized_pnl), 0)::bigint AS total_realized_pnl,
+        COALESCE(SUM(margin), 0)::bigint AS total_margin_deployed,
+        COUNT(*)::int AS closed_trade_count
+      FROM futures_positions
+      WHERE user_id=$1 AND status='closed'
+    `, [user.user_id]);
+
+    const totalMargin = Number(stats.total_margin_deployed) || 0;
+    const totalPnl = Number(stats.total_realized_pnl) || 0;
+    const roiPct = totalMargin > 0 ? (totalPnl / totalMargin * 100) : 0;
+
+    res.json({
+      username: req.params.username,
+      all_time_roi_pct: parseFloat(roiPct.toFixed(1)),
+      total_realized_pnl: totalPnl,
+      total_margin_deployed: totalMargin,
+      closed_trade_count: stats.closed_trade_count
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/users/:username/open-positions', async (req, res) => {
+  try {
+    const { rows: [user] } = await pool.query(
+      'SELECT user_id FROM users WHERE username=$1', [req.params.username]
+    );
+    if (!user) return res.status(404).json({ error: 'Not found' });
+
+    const { rows } = await pool.query(`
+      SELECT
+        fp.id, fp.side, fp.leverage, fp.quantity::text,
+        fp.entry_price::text, fp.margin, fp.mode,
+        fm.symbol, fm.mark_price::float
+      FROM futures_positions fp
+      JOIN futures_markets fm ON fp.market_id = fm.id
+      WHERE fp.user_id=$1 AND fp.status='open'
+      ORDER BY fp.opened_at DESC
+    `, [user.user_id]);
+
+    const positions = rows.map(p => {
+      const qty = parseFloat(p.quantity);
+      const markPrice = p.mark_price;
+      const entryPrice = parseFloat(p.entry_price);
+      const pnl = Math.round((markPrice - entryPrice) * qty * (p.side === 'long' ? 1 : -1) * UNITS);
+      return {
+        id: p.id,
+        symbol: p.symbol,
+        side: p.side,
+        leverage: p.leverage,
+        quantity: p.quantity,
+        entry_price: p.entry_price,
+        mark_price: markPrice.toFixed(2),
+        margin: p.margin,
+        unrealized_pnl: pnl,
+        mode: p.mode
+      };
+    });
+
+    res.json({ username: req.params.username, positions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { idempotency_key } = req.body;
+    const targetUsername = req.params.username;
+
+    const { rows: [targetUser] } = await pool.query(
+      'SELECT user_id FROM users WHERE username=$1', [targetUsername]
+    );
+    if (!targetUser) return res.status(404).json({ error: 'Target user not found' });
+    if (targetUser.user_id === req.user.id) return res.status(400).json({ error: 'Cannot copy from yourself' });
+
+    // Idempotency check
+    if (idempotency_key) {
+      const { rows: dup } = await pool.query(
+        "SELECT 1 FROM idempotency_keys WHERE user_id=$1 AND key=$2", [req.user.id, idempotency_key]
+      );
+      if (dup.length) return res.status(409).json({ error: 'duplicate_request' });
+    }
+
+    await client.query('BEGIN');
+    if (idempotency_key) {
+      await client.query(
+        "INSERT INTO idempotency_keys(user_id,key) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [req.user.id, idempotency_key]
+      );
+    }
+
+    // Fetch target user's open positions
+    const { rows: sourcePositions } = await client.query(`
+      SELECT
+        fp.id, fp.market_id, fp.side, fp.leverage, fp.quantity,
+        fm.mark_price::float
+      FROM futures_positions fp
+      JOIN futures_markets fm ON fp.market_id = fm.id
+      WHERE fp.user_id=$1 AND fp.status='open'
+    `, [targetUser.user_id]);
+
+    if (!sourcePositions.length) {
+      await client.query('ROLLBACK');
+      return res.json({ ok: true, copied_count: 0, positions: [] });
+    }
+
+    // Check paper balance
+    const { rows: [paperBal] } = await client.query(
+      'SELECT usdc_balance FROM paper_balances WHERE user_id=$1 FOR UPDATE', [req.user.id]
+    );
+    let availableBalance = Number(paperBal?.usdc_balance || 10000000000);
+
+    const copiedPositions = [];
+    const totalMarginNeeded = sourcePositions.reduce((sum, p) => {
+      const qty = parseFloat(p.quantity);
+      const markPrice = p.mark_price;
+      const margin = Math.ceil(qty * markPrice * UNITS / p.leverage);
+      return sum + margin;
+    }, 0);
+
+    if (availableBalance < totalMarginNeeded) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient paper balance' });
+    }
+
+    // Create copied positions
+    for (const src of sourcePositions) {
+      const qty = parseFloat(src.quantity);
+      const markPrice = src.mark_price;
+      const lev = src.leverage;
+      const margin = Math.ceil(qty * markPrice * UNITS / lev);
+      const liqPrice = src.side === 'long'
+        ? markPrice * (1 - 0.9 / lev)
+        : markPrice * (1 + 0.9 / lev);
+
+      const { rows: [newPos] } = await client.query(`
+        INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
+        VALUES($1,$2,'paper',$3,$4,$5,$6,$7,$8) RETURNING *
+      `, [req.user.id, src.market_id, src.side, lev, markPrice, qty, margin, liqPrice]);
+
+      await client.query(
+        "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
+        [req.user.id, -margin, `Copy trade from ${targetUsername}`]
+      );
+
+      const symbol = (await client.query('SELECT symbol FROM futures_markets WHERE id=$1', [src.market_id])).rows[0].symbol;
+      copiedPositions.push({
+        id: newPos.id,
+        symbol,
+        side: newPos.side,
+        leverage: newPos.leverage,
+        quantity: newPos.quantity.toString(),
+        entry_price: newPos.entry_price.toString(),
+        margin: newPos.margin,
+        mode: 'paper'
+      });
+
+      availableBalance -= margin;
+    }
+
+    await client.query('UPDATE paper_balances SET usdc_balance=$1 WHERE user_id=$2',
+      [availableBalance, req.user.id]);
+
+    await client.query('COMMIT');
+    res.json({ ok: true, copied_count: copiedPositions.length, positions: copiedPositions });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── Server-rendered Admin console (Phase 5) ─────────────────────────────────────
 // Standalone HTML pages at /admin pathnames. They pass the GET branch of the
 // auth gate, so each handler re-checks admin explicitly and renders a "not
@@ -2975,6 +3156,50 @@ async function start() {
         `);
       }
     }
+
+    // Seed closed futures positions for ROI calculation
+    const ethFutMarket = (await pool.query("SELECT id FROM futures_markets WHERE symbol='ETH-PERP'")).rows[0];
+    const btcFutMarket = (await pool.query("SELECT id FROM futures_markets WHERE symbol='BTC-PERP'")).rows[0];
+    if (ethFutMarket && btcFutMarket) {
+      // staging-alice: 5 closed positions with mix of profit/loss (total ROI ~+30%)
+      await pool.query(`
+        INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
+          (900101,9001,$1,'paper','long',3,2000,0.5,333333333,1600,'closed',50000000,NOW()-INTERVAL '30 days',NOW()-INTERVAL '20 days'),
+          (900102,9001,$2,'paper','long',5,65000,0.02,260000000,52000,'closed',26000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '15 days'),
+          (900103,9001,$1,'paper','short',2,2300,1.0,383333333,2645,'closed',-57500000,NOW()-INTERVAL '20 days',NOW()-INTERVAL '10 days'),
+          (900104,9001,$2,'paper','short',4,66000,0.01,165000000,79200,'closed',66000000,NOW()-INTERVAL '15 days',NOW()-INTERVAL '5 days'),
+          (900105,9001,$1,'paper','long',2,2100,0.8,336000000,2310,'closed',32000000,NOW()-INTERVAL '10 days',NOW()-INTERVAL '2 days')
+        ON CONFLICT(id) DO NOTHING
+      `, [ethFutMarket.id, btcFutMarket.id]);
+
+      // staging-bob: 3 closed positions with net loss (total ROI ~-10%)
+      await pool.query(`
+        INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
+          (900201,9002,$1,'paper','long',5,2200,2.0,880000000,1760,'closed',-88000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '18 days'),
+          (900202,9002,$2,'paper','short',3,68000,0.05,340000000,85000,'closed',-17000000,NOW()-INTERVAL '18 days',NOW()-INTERVAL '12 days'),
+          (900203,9002,$1,'paper','long',1,2300,3.0,690000000,2300,'closed',23000000,NOW()-INTERVAL '12 days',NOW()-INTERVAL '3 days')
+        ON CONFLICT(id) DO NOTHING
+      `, [ethFutMarket.id, btcFutMarket.id]);
+
+      // staging-charlie: 2 open positions for copy-trade demo
+      await pool.query(`
+        INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
+          (900301,9003,$1,'paper','long',5,2400,0.5,480000000,1920,'open',NOW()-INTERVAL '7 days'),
+          (900302,9003,$2,'paper','short',3,67000,0.03,201000000,79900,'open',NOW()-INTERVAL '5 days')
+        ON CONFLICT(id) DO NOTHING
+      `, [ethFutMarket.id, btcFutMarket.id]);
+
+      // staging-diana: 1 open position for copy-trade demo
+      const bloomFut = (await pool.query("SELECT id FROM futures_markets WHERE symbol='BLOOM-PERP'")).rows[0];
+      if (bloomFut) {
+        await pool.query(`
+          INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
+            (900401,9005,$1,'paper','long',2,0.5,1000,500000,0.35,'open',NOW()-INTERVAL '3 days')
+          ON CONFLICT(id) DO NOTHING
+        `, [bloomFut.id]);
+      }
+    }
+
     }
 
     // Seed opinion market snapshots

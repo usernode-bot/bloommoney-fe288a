@@ -157,6 +157,8 @@
     { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" },
     { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" },
+    { "name": "ROI API returns JSON", "path": "/api/users/staging-alice/roi", "expectSelector": "body" },
+    { "name": "Open positions API returns JSON", "path": "/api/users/staging-charlie/open-positions", "expectSelector": "body" },
     { "name": "Post card avatar renders", "path": "/?demo=1", "expectSelector": ".post-avatar" },
     { "name": "Ticker prices API returns JSON", "path": "/api/ticker-prices?symbols=BTC,ETH", "expectSelector": "body" },
     { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
