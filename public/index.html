@@ -89,19 +89,28 @@
       <button class="md:hidden text-zinc-400 hover:text-white p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <span class="font-bold text-violet-400">🌸 BloomMoney</span>
+      <button class="font-bold text-violet-400 hover:text-violet-300 transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
     <div class="flex items-center gap-2 text-xs">
       <button class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
       <button id="hdr-verify" class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
       <span id="hdr-wallet" class="text-zinc-500 font-mono hidden sm:block"></span>
-      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+      <!-- Mobile: single compact chip showing both balances -->
+      <div class="sm:hidden bg-zinc-800 px-2 py-1 rounded-lg flex gap-1.5 items-center">
         <span class="text-violet-400 font-semibold" id="hdr-bloom">—</span>
-        <span class="text-zinc-500 hidden sm:inline">BLOOM</span>
-      </div>
-      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+        <span class="text-zinc-600">/</span>
         <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-        <span class="text-zinc-500 hidden sm:inline">USDC</span>
+      </div>
+      <!-- Desktop: separate labelled badges -->
+      <div class="hidden sm:flex gap-1.5">
+        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+          <span class="text-violet-400 font-semibold" id="hdr-bloom-lg">—</span>
+          <span class="text-zinc-500">BLOOM</span>
+        </div>
+        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
+          <span class="text-zinc-500">USDC</span>
+        </div>
       </div>
     </div>
   </header>
@@ -439,6 +448,8 @@ function updateHeader() {
     walletEl.textContent = shortAddr(S.user.usernode_pubkey);
     bloomEl.textContent = getBal('BLOOM');
     usdcEl.textContent = getBal('USDC');
+    document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
+    document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
     const drawerUser = document.getElementById('drawer-user');
     document.getElementById('drawer-username').textContent = '@' + S.user.username;
     document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
