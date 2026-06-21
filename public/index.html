@@ -80,6 +80,27 @@
   <p id="wallet-status" class="text-zinc-600 text-sm"></p>
 </div>
 
+<!-- ───── Tip Modal ───── -->
+<div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+    <h2 class="text-lg font-bold mb-4" id="tip-modal-title">Send TOK</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="text-sm text-zinc-400 block mb-2">Amount (TOK)</label>
+        <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
+      </div>
+      <div class="text-sm text-zinc-400">
+        Your balance: <span id="tip-balance" class="text-amber-400 font-semibold">0 TOK</span>
+      </div>
+      <div id="tip-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-z" onclick="closeTipModal()">Cancel</button>
+        <button class="btn btn-v" onclick="submitTip()" id="tip-submit-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ───── Main App ───── -->
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
@@ -316,6 +337,26 @@ function fmtAmt(sym, v) {
   return n.toFixed(2);
 }
 function fmtUSD(v) { return (Number(v) / U).toFixed(2); }
+// AI Trade Helper: client-side mirror of server COINGECKO_TICKER_MAP keys.
+const KNOWN_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+const TICKER_RE = /\$([A-Za-z]{2,6})\b/g;
+function detectTickers(text) {
+  const seen = [];
+  let m;
+  TICKER_RE.lastIndex = 0;
+  while ((m = TICKER_RE.exec(text || '')) !== null) {
+    const sym = m[1].toUpperCase();
+    if (KNOWN_TICKERS.has(sym) && !seen.includes(sym)) seen.push(sym);
+    if (seen.length >= 3) break;
+  }
+  return seen;
+}
+function fmtTickerPrice(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return '';
+  if (n >= 1) return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + n.toFixed(4);
+}
 function getBal(sym) { return fmtAmt(sym, S.balances[sym] || 0); }
 function shortAddr(a) { return a ? a.slice(0,6)+'…'+a.slice(-4) : ''; }
 function tsAgo(d) {
@@ -342,6 +383,44 @@ function fundingCountdown(ts) {
 function err(msg) { return `<div class="text-red-400 text-sm py-2">${msg}</div>`; }
 function spin() { return `<div class="flex justify-center py-8"><div class="spinner"></div></div>`; }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Avatar placeholder ─────────────────────────────────────────────────────────
+// Deterministic, stylish initials avatar rendered as an inline SVG data-URI image.
+// Same username always yields the same gradient, so avatars stay consistent across
+// the feed, threads, and profiles without any upload flow.
+function _avatarHash(str) {
+  let h = 0;
+  str = String(str || '?');
+  for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+function avatarDataUri(username) {
+  const name = String(username || '?');
+  const initial = (name.replace(/[^a-zA-Z0-9]/g, '')[0] || name[0] || '?').toUpperCase();
+  const h = _avatarHash(name);
+  const hue = h % 360;
+  const hue2 = (hue + 48) % 360;
+  const c1 = `hsl(${hue},68%,58%)`;
+  const c2 = `hsl(${hue2},72%,42%)`;
+  const gid = 'g' + h;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+      `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">` +
+        `<stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/>` +
+      `</linearGradient></defs>` +
+      `<rect width="64" height="64" fill="url(#${gid})"/>` +
+      `<text x="32" y="34" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" ` +
+        `font-size="30" font-weight="600" fill="#fff" fill-opacity="0.95" ` +
+        `text-anchor="middle" dominant-baseline="central">${initial}</text>` +
+    `</svg>`;
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+// Reusable circular <img> avatar. `cls` adds Tailwind sizing/extra classes.
+function avatarImg(username, cls) {
+  return `<img src="${avatarDataUri(username)}" alt="@${esc(username)}" ` +
+    `class="rounded-full object-cover shrink-0 ring-1 ring-white/10 ${cls || 'w-8 h-8'}" ` +
+    `loading="lazy" draggable="false">`;
+}
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Six primary tabs (home/trade/futures/earn/predict/profile) plus explore,
@@ -560,6 +639,67 @@ document.getElementById('connect-wallet-btn').addEventListener('click', connectW
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
   let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+  // AI Trade Helper composer badge state (lives across re-renders).
+  const tickerCache = {};        // TICKER -> price (number) or 'err'
+  let tickerDebounce = null;     // pending debounce timer
+  let lastTickerKey = '';        // last looked-up recognized-ticker set
+
+  function renderTickerBadge(symbols) {
+    const el = document.getElementById('compose-ticker-badge');
+    if (!el) return;
+    if (!symbols.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'flex';
+    el.innerHTML = symbols.map(sym => {
+      const v = tickerCache[sym];
+      let body;
+      if (v === undefined) body = '<span class="text-zinc-500">…</span>';
+      else if (v === 'err') body = '<span class="text-zinc-500">price unavailable</span>';
+      else body = `<span class="text-emerald-400 font-semibold">${fmtTickerPrice(v)}</span>`;
+      return `<span class="inline-flex items-center gap-1 text-xs bg-zinc-800/70 border border-zinc-700 rounded-full px-2 py-0.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        <span class="text-zinc-300 font-medium">$${sym}</span>
+        <span class="text-zinc-600">·</span>${body}</span>`;
+    }).join('');
+  }
+
+  async function refreshTickers(symbols) {
+    const need = symbols.filter(s => tickerCache[s] === undefined);
+    renderTickerBadge(symbols);
+    if (!need.length) return;
+    try {
+      const d = await api('GET', '/api/ticker-prices?symbols=' + encodeURIComponent(need.join(',')));
+      for (const s of need) {
+        const p = d.prices && d.prices[s];
+        tickerCache[s] = (p != null) ? p : 'err';
+      }
+    } catch {
+      for (const s of need) if (tickerCache[s] === undefined) tickerCache[s] = 'err';
+    }
+    // Re-render against the current composer text (user may have kept typing).
+    const box = document.getElementById('compose-box');
+    renderTickerBadge(detectTickers(box ? box.value : ''));
+  }
+
+  function onComposeInput() {
+    const box = document.getElementById('compose-box');
+    if (!box) return;
+    const cnt = document.getElementById('compose-count');
+    if (cnt) cnt.textContent = box.value.length + '/280';
+    const symbols = detectTickers(box.value);
+    const key = symbols.join(',');
+    renderTickerBadge(symbols);
+    if (key === lastTickerKey) return;
+    lastTickerKey = key;
+    if (tickerDebounce) clearTimeout(tickerDebounce);
+    if (!symbols.length) return;
+    tickerDebounce = setTimeout(() => refreshTickers(symbols), 500);
+  }
+
+  function resetComposerTicker() {
+    if (tickerDebounce) { clearTimeout(tickerDebounce); tickerDebounce = null; }
+    lastTickerKey = '';
+    renderTickerBadge([]);
+  }
 
   async function loadPosts() {
     const params = new URLSearchParams({ tab: feedState.tab, limit: 20 });
@@ -572,21 +712,33 @@ async function renderFeed(sec) {
 
   function postCard(p) {
     const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
+    const isLockedForMe = p.locked && !p.unlocked;
+    const body = isLockedForMe
+      ? `<div class="relative rounded-lg overflow-hidden">
+           <p class="text-sm text-zinc-300 leading-relaxed select-none blur-sm pointer-events-none">Locked alpha — pay 5 TOK to reveal this premium post. Locked alpha — pay 5 TOK to reveal.</p>
+           <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/40 text-center px-2">
+             <span class="text-xs font-semibold text-violet-200">🔒 Pay 5 TOK to read alpha</span>
+             <button class="btn btn-v text-xs px-3 py-1" onclick="unlockPost(${p.id})">Pay 5 TOK</button>
+           </div>
+         </div>`
+      : `<p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
-        <div class="flex items-center gap-2 min-w-0">
-          <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold shrink-0">${esc(p.username[0].toUpperCase())}</div>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10')}</button>
           <div class="min-w-0">
             <button class="text-sm font-semibold hover:text-violet-300 truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
             ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
+            ${p.locked ? '<span class="text-amber-400 text-xs ml-1" title="Premium locked post">🔒</span>' : ''}
             <span class="text-zinc-600 text-xs ml-2">${tsAgo(p.created_at)}</span>
           </div>
         </div>
       </div>
-      <p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>
+      ${body}
       <div class="flex items-center gap-4">
         <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
         <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
       </div>
     </div>`;
@@ -613,8 +765,15 @@ async function renderFeed(sec) {
     sec.innerHTML = `
       <div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
+        <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <div class="flex justify-between items-center">
-          <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
+          <div class="flex items-center gap-3">
+            <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
+            <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none" title="Lock this post behind a 5 TOK paywall">
+              <input id="compose-lock" type="checkbox" class="accent-violet-600 w-3.5 h-3.5">
+              <span>🔒 Lock Post</span>
+            </label>
+          </div>
           <button class="btn btn-v" onclick="submitPost()">Post</button>
         </div>
       </div>
@@ -628,9 +787,11 @@ async function renderFeed(sec) {
       ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
     `;
     const box = document.getElementById('compose-box');
-    if (box) box.addEventListener('input', () => {
-      document.getElementById('compose-count').textContent = box.value.length + '/280';
-    });
+    if (box) {
+      box.addEventListener('input', onComposeInput);
+      // Restore any previously-detected ticker badge after a background re-render.
+      renderTickerBadge(detectTickers(box.value));
+    }
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
@@ -641,14 +802,31 @@ async function renderFeed(sec) {
     const box = document.getElementById('compose-box');
     const content = box?.value.trim();
     if (!content) return;
+    const locked = !!document.getElementById('compose-lock')?.checked;
     try {
-      const res = await api('POST', '/api/posts', { content });
+      const res = await api('POST', '/api/posts', { content, locked });
       box.value = '';
+      resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();
       // Post-to-Earn: animate the confirmed points credit (server-driven).
       if (res && res.awarded > 0 && res.points != null) {
         animatePointsGain(Number(res.points), Number(res.awarded));
+      }
+    } catch (e) { alert(e.message); }
+  };
+
+  window.unlockPost = async (id) => {
+    try {
+      const { content } = await api('POST', `/api/posts/${id}/unlock`);
+      const post = feedState.posts.find(p => p.id === id);
+      if (post) { post.unlocked = true; post.content = content; }
+      if (feedState.thread && feedState.thread.post.id === id) {
+        feedState.thread.post.unlocked = true;
+        feedState.thread.post.content = content;
+        sec.innerHTML = threadView(feedState.thread.post, feedState.thread.replies);
+      } else {
+        render();
       }
     } catch (e) { alert(e.message); }
   };
@@ -691,12 +869,89 @@ async function renderFeed(sec) {
   await loadPosts();
 }
 
+// ── Tip Modal ──────────────────────────────────────────────────────────────────
+let tipState = { postId: null, creatorUsername: null };
+
+window.openTipModal = (postId, creatorUsername) => {
+  tipState.postId = postId;
+  tipState.creatorUsername = creatorUsername;
+  const modal = document.getElementById('tip-modal');
+  const title = document.getElementById('tip-modal-title');
+  const balance = document.getElementById('tip-balance');
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+
+  title.textContent = `Send TOK to @${esc(creatorUsername)}`;
+  const tokBal = S.balances['TOK'] || 0;
+  balance.textContent = `${fmtAmt('TOK', tokBal)} TOK`;
+  amountInput.value = '';
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  modal.classList.remove('hidden');
+  amountInput.focus();
+};
+
+window.closeTipModal = () => {
+  const modal = document.getElementById('tip-modal');
+  modal.classList.add('hidden');
+  tipState = { postId: null, creatorUsername: null };
+};
+
+window.submitTip = async () => {
+  const amountInput = document.getElementById('tip-amount');
+  const errorDiv = document.getElementById('tip-error');
+  const amount = parseFloat(amountInput.value);
+
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  if (!amount || amount <= 0) {
+    errorDiv.textContent = 'Please enter an amount greater than 0';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  const tokBal = S.balances['TOK'] || 0;
+  const amountUnits = toUnits(amount.toString());
+  if (amountUnits > tokBal) {
+    errorDiv.textContent = 'Insufficient TOK balance';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+
+    await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString() });
+
+    closeTipModal();
+    await refreshBalances();
+    await window._feedFns.loadPosts();
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  } catch (e) {
+    errorDiv.textContent = e.message || 'Failed to send tip';
+    errorDiv.classList.remove('hidden');
+    const submitBtn = document.getElementById('tip-submit-btn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  }
+};
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 async function renderProfile(sec) {
   const username = S.profileUser || S.user?.username;
   if (!username) { sec.innerHTML = err('No profile selected'); return; }
 
-  const { user, counts, kyc, isFollowing } = await api('GET', `/api/profile/${encodeURIComponent(username)}`);
+  const [profile, roiData] = await Promise.all([
+    api('GET', `/api/profile/${encodeURIComponent(username)}`),
+    api('GET', `/api/users/${encodeURIComponent(username)}/roi`).catch(() => null)
+  ]);
+  const { user, counts, kyc, isFollowing } = profile;
   const isMe = S.user && user.user_id === S.user.user_id;
 
   let activeTab = 'posts';
@@ -720,8 +975,8 @@ async function renderProfile(sec) {
     const userPosts = d.posts.filter(p => p.username === username && (parent === null ? p.parent_id === null : p.parent_id !== null));
     return userPosts.length
       ? userPosts.map(p => `<div class="card space-y-1">
-          <span class="text-xs text-zinc-600">${tsAgo(p.created_at)}</span>
-          <p class="text-sm text-zinc-300">${esc(p.content)}</p>
+          <span class="text-xs text-zinc-600">${p.locked ? '🔒 ' : ''}${tsAgo(p.created_at)}</span>
+          <p class="text-sm ${p.locked && !p.unlocked ? 'text-zinc-500 italic' : 'text-zinc-300'}">${p.locked && !p.unlocked ? 'Locked alpha — open the feed to pay 5 TOK and read.' : esc(p.content)}</p>
           <div class="flex gap-3 text-xs text-zinc-500"><span>♥ ${p.like_count}</span><span>💬 ${p.reply_count}</span></div>
         </div>`).join('')
       : '<p class="text-zinc-600 text-sm">No posts yet</p>';
@@ -865,7 +1120,7 @@ async function renderProfile(sec) {
               <div class="flex items-center gap-3">
                 <div class="w-14 h-14 rounded-full bg-violet-700 flex items-center justify-center text-xl font-bold">${esc(username[0].toUpperCase())}</div>
                 <div>
-                  <div class="font-bold text-lg flex items-center gap-1">${esc(user.display_name || username)}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
+                  <div class="font-bold text-lg flex items-center gap-2">${esc(user.display_name || username)}${roiData && roiData.closed_trade_count > 0 ? `<span class="${roiData.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} text-xs font-semibold">📈 ${roiData.all_time_roi_pct >= 0 ? '+' : ''}${roiData.all_time_roi_pct}%</span>` : ''}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
                   <div class="text-zinc-500 text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-violet-400 hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
                   ${user.usernode_pubkey ? `<div class="text-zinc-600 text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
                   <div class="flex gap-1 flex-wrap mt-0.5">${kyc?.level ? kycTag(kyc.level) : ''}</div>
@@ -873,7 +1128,8 @@ async function renderProfile(sec) {
               </div>
               <div class="flex gap-2">
                 ${isMe ? `<button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
-                  `<button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
+                  `<button class="btn btn-v text-xs" onclick="openCopyTradeModal('${esc(username)}')">Copy Trade</button>
+                   <button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
               </div>
             </div>
             ${user.bio ? `<p class="text-sm text-zinc-400 mt-2">${esc(user.bio)}</p>` : ''}
@@ -945,6 +1201,82 @@ async function renderProfile(sec) {
 
   await fullRender();
 }
+
+// ── Copy Trade Modal ───────────────────────────────────────────────────────────
+window.openCopyTradeModal = async (username) => {
+  try {
+    const { positions } = await api('GET', `/api/users/${encodeURIComponent(username)}/open-positions`);
+
+    if (!positions.length) {
+      alert(`${username} has no open positions to copy`);
+      return;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'copy-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full max-h-96 overflow-y-auto space-y-4 p-6">
+        <div class="flex justify-between items-center">
+          <h2 class="font-bold text-lg">Copy Positions from @${esc(username)}</h2>
+          <button onclick="document.getElementById('copy-trade-modal')?.remove()" class="text-zinc-400 hover:text-white text-xl">✕</button>
+        </div>
+        <div class="space-y-3">
+          ${positions.map(p => `
+            <div class="bg-zinc-800 rounded-lg p-3 space-y-2">
+              <div class="flex justify-between items-start">
+                <div class="font-semibold">${esc(p.symbol)}</div>
+                <div class="text-xs text-zinc-400">${p.mode === 'live' ? '💰 Live' : '📄 Paper'}</div>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs">
+                <div><span class="text-zinc-500">Side</span><div class="font-mono ${p.side === 'long' ? 'text-emerald-400' : 'text-red-400'}">${p.side.toUpperCase()} ${p.leverage}x</div></div>
+                <div><span class="text-zinc-500">Quantity</span><div class="font-mono">${parseFloat(p.quantity).toFixed(4)}</div></div>
+                <div><span class="text-zinc-500">Entry Price</span><div class="font-mono">$${parseFloat(p.entry_price).toFixed(2)}</div></div>
+                <div><span class="text-zinc-500">Current Price</span><div class="font-mono">$${p.mark_price}</div></div>
+                <div><span class="text-zinc-500">Unrealized P&L</span><div class="font-mono ${p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${(p.unrealized_pnl / 1000000).toFixed(2)} USDC</div></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="text-xs text-zinc-500 bg-zinc-800 p-2 rounded">
+          ℹ️ Positions will be copied in <strong>paper mode</strong> at current market price (${positions.length} position${positions.length !== 1 ? 's' : ''})
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button class="btn btn-v flex-1" onclick="doCopyTrade('${esc(username)}')">Confirm & Copy</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('copy-trade-modal')?.remove()">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  } catch (e) {
+    alert('Failed to load positions: ' + e.message);
+  }
+};
+
+window.doCopyTrade = async (username) => {
+  try {
+    const modal = document.getElementById('copy-trade-modal');
+    const btn = modal?.querySelector('button.btn-v');
+    if (btn) { btn.textContent = 'Copying…'; btn.disabled = true; }
+
+    const idempKey = `copy-${username}-${Date.now()}`;
+    const result = await api('POST', `/api/futures/positions/copy-from/${encodeURIComponent(username)}`, { idempotency_key: idempKey });
+
+    if (result.ok && result.copied_count > 0) {
+      if (modal) modal.remove();
+      alert(`✓ Copied ${result.copied_count} position${result.copied_count !== 1 ? 's' : ''} from ${username}!`);
+      await refreshBalances();
+      const futSec = document.getElementById('section-futures');
+      if (futSec && futSec.offsetParent !== null) {
+        await renderFutures(futSec);
+      }
+    } else {
+      alert('No positions were copied');
+    }
+  } catch (e) {
+    alert('Error copying positions: ' + e.message);
+  }
+};
 
 // ── Token detail ──────────────────────────────────────────────────────────────
 window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('trade'); };
@@ -1684,6 +2016,13 @@ async function renderExplore(sec) {
     api('GET', '/api/ico').then(d => d.offerings).catch(() => []),
     api('GET', '/api/nfts').then(d => d.nfts).catch(() => []),
   ]);
+
+  // Fetch ROI for each person
+  const peopleWithRoi = await Promise.all(people.map(async (p) => {
+    const roi = await api('GET', `/api/users/${encodeURIComponent(p.username)}/roi`).catch(() => null);
+    return { ...p, roi };
+  }));
+
   const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
   const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
   const topNfts = nfts.slice(0, 6);
@@ -1691,12 +2030,12 @@ async function renderExplore(sec) {
     <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
 
     <h3 class="font-semibold mb-2">People to follow</h3>
-    ${people.length ? `<div class="space-y-2 mb-5">${people.map(p => `
+    ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
         <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
           <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold">${esc((p.username||'?')[0].toUpperCase())}</div>
           <div class="text-left min-w-0">
-            <div class="text-sm font-medium truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''}</div>
+            <div class="text-sm font-medium flex items-center gap-1 truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''} ${p.roi && p.roi.closed_trade_count > 0 ? `<span class="text-xs font-semibold ${p.roi.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} shrink-0">📈 ${p.roi.all_time_roi_pct >= 0 ? '+' : ''}${p.roi.all_time_roi_pct}%</span>` : ''}</div>
             <div class="text-xs text-zinc-500">${p.followers} followers</div>
           </div>
         </button>
