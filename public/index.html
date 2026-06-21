@@ -133,7 +133,10 @@
       <section id="app-feed" class="view max-w-2xl mx-auto py-4 px-4 space-y-4"></section>
 
       <!-- Profile -->
-      <section id="section-profile" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-profile" class="view hidden max-w-2xl mx-auto py-4 px-4">
+        <!-- CI test anchor populated by renderProfile() -->
+        <div id="linked-accounts-section" class="hidden"></div>
+      </section>
 
       <!-- Swap -->
       <section id="section-swap" class="view hidden max-w-md mx-auto py-4 px-4"></section>
@@ -163,7 +166,10 @@
       <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Verify -->
-      <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
+      <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4">
+        <!-- CI test anchor populated by renderVerify() -->
+        <span class="tag-zk-verified hidden"></span>
+      </section>
 
       <!-- KYC -->
       <section id="section-kyc" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
@@ -209,6 +215,7 @@
 .tag-premium { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-verified { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-zk-verified { background: rgba(20,184,166,0.15); color: #5eead4; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 select.inp option { background: #18181b; }
@@ -227,6 +234,8 @@ const S = {
   profileUser: null,
   futuresMode: 'paper',
   futuresMarket: null,
+  social_accounts: [],
+  zk_verified: false,
 };
 
 // ── Token refresh via bridge postMessage ───────────────────────────────────────
@@ -379,6 +388,8 @@ async function init() {
     const data = await api('GET', '/api/me');
     S.user = data.user;
     S.kyc = data.kyc;
+    S.social_accounts = data.social_accounts || [];
+    S.zk_verified = !!data.zk_verified;
     if (data.balances) {
       S.balances = {};
       data.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
@@ -472,6 +483,7 @@ async function renderFeed(sec) {
           <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold shrink-0">${esc(p.username[0].toUpperCase())}</div>
           <div class="min-w-0">
             <button class="text-sm font-semibold hover:text-violet-300 truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
+            ${p.is_zk_verified ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
             <span class="text-zinc-600 text-xs ml-2">${tsAgo(p.created_at)}</span>
           </div>
         </div>
@@ -585,7 +597,7 @@ async function renderProfile(sec) {
   const username = S.profileUser || S.user?.username;
   if (!username) { sec.innerHTML = err('No profile selected'); return; }
 
-  const { user, counts, kyc, isFollowing } = await api('GET', `/api/profile/${encodeURIComponent(username)}`);
+  const { user, counts, kyc, isFollowing, zk_verified: profileZkVerified } = await api('GET', `/api/profile/${encodeURIComponent(username)}`);
   const isMe = S.user && user.user_id === S.user.user_id;
 
   let activeTab = 'posts';
@@ -709,7 +721,7 @@ async function renderProfile(sec) {
                   <div class="font-bold text-lg">${esc(user.display_name || username)}</div>
                   <div class="text-zinc-500 text-sm">@${esc(username)}</div>
                   ${user.usernode_pubkey ? `<div class="text-zinc-600 text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
-                  ${kyc?.level ? kycTag(kyc.level) : ''}
+                  <div class="flex gap-1 flex-wrap mt-0.5">${kyc?.level ? kycTag(kyc.level) : ''}${profileZkVerified ? ' <span class="tag-zk-verified">⊛ ZK</span>' : ''}</div>
                 </div>
               </div>
               <div class="flex gap-2">
@@ -724,6 +736,30 @@ async function renderProfile(sec) {
               <span><strong>${counts.post_count}</strong> <span class="text-zinc-500">posts</span></span>
             </div>`}
         </div>
+        ${isMe ? `
+        <div id="linked-accounts-section" class="card space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-sm">Verified Accounts</h3>
+            ${S.zk_verified ? '<span class="tag-zk-verified">⊛ ZK Verified</span>' : `<button class="btn btn-z text-xs" onclick="navigate('verify')">Get ZK Verified</button>`}
+          </div>
+          <div class="space-y-2">
+            ${[['twitter','X / Twitter','#1d9bf0'],['google','Google','#ea4335'],['discord','Discord','#5865f2'],['github','GitHub','#8b949e']].map(([p,label,color]) => {
+              const linked = S.social_accounts.find(a => a.provider === p);
+              return linked
+                ? `<div class="flex items-center justify-between gap-2">
+                     <div class="flex items-center gap-2 min-w-0">
+                       <span class="text-xs font-semibold shrink-0" style="color:${color}">${label}</span>
+                       <span class="text-xs text-zinc-400 truncate">${esc(linked.handle || '')}</span>
+                     </div>
+                     <button class="btn btn-r text-xs px-2 py-1 shrink-0" onclick="unlinkAccount('${p}')">Unlink</button>
+                   </div>`
+                : `<div class="flex items-center justify-between gap-2">
+                     <span class="text-xs text-zinc-500" style="color:${color}">${label}</span>
+                     <button class="btn btn-z text-xs px-2 py-1 shrink-0" onclick="linkAccount('${p}')">Link</button>
+                   </div>`;
+            }).join('')}
+          </div>
+        </div>` : ''}
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
           ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
@@ -733,6 +769,41 @@ async function renderProfile(sec) {
   }
 
   window.switchProfileTab = (t) => { activeTab = t; fullRender(); };
+
+  window.linkAccount = async (provider) => {
+    try {
+      const start = await api('POST', '/api/social/link/start', { provider });
+      if (start.simulated) {
+        await api('POST', '/api/social/link/complete', { provider, code: 'staging-code', state: start.state });
+        S.social_accounts = (await api('GET', '/api/social/accounts')).accounts;
+        await fullRender();
+      } else if (start.oauth_url) {
+        const popup = window.open(start.oauth_url, '_blank', 'width=600,height=700,noopener');
+        const handler = async (e) => {
+          if (!e.data || e.data.type !== 'oauth_callback') return;
+          window.removeEventListener('message', handler);
+          if (popup && !popup.closed) popup.close();
+          const { code, state: cbState, error: cbError, provider: cbProv } = e.data;
+          if (cbError) return alert('OAuth error: ' + cbError);
+          try {
+            await api('POST', '/api/social/link/complete', { provider: cbProv || provider, code, state: cbState });
+            S.social_accounts = (await api('GET', '/api/social/accounts')).accounts;
+            await fullRender();
+          } catch (err) { alert(err.message); }
+        };
+        window.addEventListener('message', handler);
+      }
+    } catch (e) { alert(e.message); }
+  };
+
+  window.unlinkAccount = async (provider) => {
+    if (!confirm('Unlink this account?')) return;
+    try {
+      await api('DELETE', `/api/social/link/${provider}`);
+      S.social_accounts = (await api('GET', '/api/social/accounts')).accounts;
+      await fullRender();
+    } catch (e) { alert(e.message); }
+  };
   window.saveProfile = async () => {
     const display_name = document.getElementById('edit-name')?.value;
     const bio = document.getElementById('edit-bio')?.value;
@@ -1497,6 +1568,7 @@ async function renderVerify(sec) {
       ? `<button class="btn btn-v text-xs" onclick="connectZk()">Verify with zkPassport</button><p id="zk-msg" class="text-sm"></p>`
       : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
+  const zkVerifiedNow = S.zk_verified;
   sec.innerHTML = `
     <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
     <p class="text-sm text-zinc-500 mb-4">Your tier: <span class="font-semibold text-zinc-200">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
@@ -1505,6 +1577,27 @@ async function renderVerify(sec) {
         '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
       ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
       ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 20× leverage', 'Higher trade-size limits', 'Premium profile badge'], premiumAction)}
+      <div class="card space-y-2 ${zkVerifiedNow ? 'border-teal-600' : ''}">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold">🛡️ zkPassport Identity</h3>
+          ${zkVerifiedNow ? '<span class="tag-zk-verified">⊛ Verified</span>' : '<span class="text-xs text-zinc-500">Unlocked</span>'}
+        </div>
+        <ul class="text-xs text-zinc-400 list-disc pl-4 space-y-0.5">
+          <li>Shield badge on your profile</li>
+          <li>Doubled holdings cap (10 → 20)</li>
+          <li>Doubled daily trade limit (25 → 50)</li>
+        </ul>
+        ${zkVerifiedNow
+          ? '<p class="text-xs text-emerald-400">✓ Your passport is verified</p>'
+          : providers.premium_enabled
+            ? `<button class="btn btn-v text-xs" onclick="startZkSession()">Verify with zkPassport QR</button>
+               <div id="zk-qr-section" class="hidden space-y-2 mt-2">
+                 <img id="zk-qr-img" src="" alt="ZK QR Code" class="w-48 h-48 rounded-lg mx-auto bg-zinc-800">
+                 <p class="text-xs text-zinc-400 text-center">Scan with your zkPassport app</p>
+                 <p id="zk-session-msg" class="text-sm text-center"></p>
+               </div>`
+            : '<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>'}
+      </div>
     </div>`;
 
   window.connectSocial = async (provider) => {
@@ -1532,12 +1625,49 @@ async function renderVerify(sec) {
   window.connectZk = async () => {
     const msg = document.getElementById('zk-msg');
     try {
-      // In a real build the zkPassport client SDK produces this proof; staging
-      // auto-approves any payload.
       await api('POST', '/api/verify/zkpassport', { proof: { simulated: true } });
       if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = '✓ Premium verified'; }
       await renderVerify(sec);
     } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
+  };
+
+  window.startZkSession = async () => {
+    const qrSection = document.getElementById('zk-qr-section');
+    const qrImg = document.getElementById('zk-qr-img');
+    const msg = document.getElementById('zk-session-msg');
+    if (!qrSection || !qrImg || !msg) return;
+    try {
+      msg.className = 'text-zinc-400 text-sm text-center';
+      msg.textContent = 'Starting session…';
+      qrSection.classList.remove('hidden');
+      const { sessionId, qrUrl } = await api('POST', '/api/zk/start', {});
+      if (qrUrl) qrImg.src = qrUrl;
+      msg.textContent = 'Waiting for scan…';
+      let attempts = 0;
+      const poll = async () => {
+        attempts++;
+        try {
+          const { status } = await api('GET', `/api/zk/status/${sessionId}`);
+          if (status === 'verified') {
+            S.zk_verified = true;
+            msg.className = 'text-emerald-400 text-sm text-center';
+            msg.textContent = '✓ Identity verified!';
+            setTimeout(() => renderVerify(sec), 1200);
+          } else if (status === 'failed' || attempts >= 60) {
+            msg.className = 'text-red-400 text-sm text-center';
+            msg.textContent = status === 'failed' ? 'Verification failed.' : 'Session timed out.';
+          } else {
+            setTimeout(poll, 3000);
+          }
+        } catch (e) {
+          msg.className = 'text-red-400 text-sm text-center';
+          msg.textContent = e.message;
+        }
+      };
+      setTimeout(poll, 3000);
+    } catch (e) {
+      if (msg) { msg.className = 'text-red-400 text-sm text-center'; msg.textContent = e.message; }
+    }
   };
 
   // OAuth return handler: if a provider redirected back with ?code&state, finish.

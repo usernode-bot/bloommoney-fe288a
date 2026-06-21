@@ -20,7 +20,7 @@ const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
 // Per-day caps applied to Basic-tier users (security layer, Phase 4).
 const BASIC_DAILY_TRADE_COUNT = 25;
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '64kb' }));
@@ -93,7 +93,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|holdings)/;
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|holdings|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -205,16 +205,30 @@ function maxLeverageFor(level) {
   return 1;
 }
 
+async function isZkVerified(userId) {
+  const { rows } = await pool.query('SELECT is_zk_verified FROM users WHERE user_id=$1', [userId]);
+  return !!rows[0]?.is_zk_verified;
+}
+
+function featureLimits(zkVerified) {
+  return {
+    maxHoldings: zkVerified ? 20 : 10,
+    maxDailyTrades: zkVerified ? BASIC_DAILY_TRADE_COUNT * 2 : BASIC_DAILY_TRADE_COUNT,
+  };
+}
+
 // Per-day Basic-tier trade cap (Phase 4). Returns true when allowed.
-async function withinBasicDailyCap(userId, tier) {
+// zkVerified doubles the cap for Basic-tier users with a verified zkPassport.
+async function withinBasicDailyCap(userId, tier, zkVerified = false) {
   if (tier !== 'basic') return true;
+  const cap = featureLimits(zkVerified).maxDailyTrades;
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM transactions
      WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
        AND type IN ('swap','futures_open','market_trade','ico_invest')`,
     [userId]
   );
-  return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
+  return (rows[0]?.n || 0) < cap;
 }
 async function userTier(userId) {
   const { rows } = await pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [userId]);
@@ -335,12 +349,14 @@ app.get('/api/me', async (req, res) => {
   try {
     await upsertUser(req.user);
     await ensureBalances(req.user.id, req.user.usernode_pubkey);
-    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }] = await Promise.all([
+    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }, { rows: socialAccounts }] = await Promise.all([
       pool.query('SELECT * FROM users WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT token_symbol, balance FROM wallet_balances WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]),
+      pool.query('SELECT provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC', [req.user.id]),
     ]);
-    res.json({ user, balances: bals, kyc: kyc || null });
+    const zkVerified = !!user?.is_zk_verified;
+    res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, zk_verified: zkVerified, feature_limits: featureLimits(zkVerified) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -358,7 +374,7 @@ app.patch('/api/me', async (req, res) => {
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,is_zk_verified,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -370,7 +386,7 @@ app.get('/api/profile/:username', async (req, res) => {
       pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [user.user_id]),
       pool.query('SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, user.user_id]),
     ]);
-    res.json({ user, counts: cnts, kyc: kyc || null, isFollowing: isF.length > 0 });
+    res.json({ user, counts: cnts, kyc: kyc || null, isFollowing: isF.length > 0, zk_verified: !!user.is_zk_verified });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -387,7 +403,8 @@ app.get('/api/feed', async (req, res) => {
       const params = [req.user.id, lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.* FROM posts p
+        SELECT p.*, COALESCE(u.is_zk_verified, false) AS is_zk_verified FROM posts p
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
@@ -397,7 +414,8 @@ app.get('/api/feed', async (req, res) => {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.* FROM posts p
+        SELECT p.*, COALESCE(u.is_zk_verified, false) AS is_zk_verified FROM posts p
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
@@ -524,6 +542,14 @@ app.post('/api/holdings', async (req, res) => {
     if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
     const price = parseFloat(purchase_price);
     if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
+    const zkVerified = await isZkVerified(req.user.id);
+    const limits = featureLimits(zkVerified);
+    const { rows: [cnt] } = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM investment_holdings WHERE user_id=$1', [req.user.id]
+    );
+    if ((cnt?.n || 0) >= limits.maxHoldings) {
+      return res.status(400).json({ error: `Holdings cap reached (${limits.maxHoldings}). Verify with zkPassport to increase it.` });
+    }
     const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
     const { rows: [holding] } = await pool.query(
       'INSERT INTO investment_holdings(user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
@@ -564,6 +590,111 @@ app.delete('/api/holdings/:id', async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Not found' });
     await pool.query('DELETE FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Social Account Linking ────────────────────────────────────────────────────
+
+app.get('/api/social/accounts', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC',
+      [req.user.id]
+    );
+    res.json({ accounts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/social/link/start', async (req, res) => {
+  try {
+    const { provider } = req.body;
+    if (!verify.isLinkProvider(provider)) return res.status(400).json({ error: 'Invalid provider' });
+    const result = verify.startSocialLink(provider, req.user.id);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/social/link/complete', async (req, res) => {
+  try {
+    const { provider, code, state } = req.body;
+    if (!verify.isLinkProvider(provider)) return res.status(400).json({ error: 'Invalid provider' });
+    const result = await verify.completeSocialLink(provider, code, state);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    if (result.user_id !== req.user.id) return res.status(400).json({ error: 'Invalid state' });
+    await pool.query(
+      `INSERT INTO social_accounts(user_id, provider, provider_user_id, handle)
+       VALUES($1,$2,$3,$4)
+       ON CONFLICT(user_id, provider) DO UPDATE SET provider_user_id=$3, handle=$4, linked_at=NOW()`,
+      [req.user.id, provider, result.provider_user_id, result.handle]
+    );
+    res.json({ ok: true, provider, handle: result.handle });
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That account is already linked to another user' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/social/link/:provider', async (req, res) => {
+  try {
+    const { provider } = req.params;
+    if (!verify.isLinkProvider(provider)) return res.status(400).json({ error: 'Invalid provider' });
+    await pool.query(
+      'DELETE FROM social_accounts WHERE user_id=$1 AND provider=$2',
+      [req.user.id, provider]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── OAuth popup callback ──────────────────────────────────────────────────────
+// Receives the provider redirect, extracts code/state, and postMessages back
+// to the opener (which is the BloomMoney iframe). Values are sanitized before
+// embedding so no provider-controlled data can escape into script context.
+
+app.get('/oauth/callback', (req, res) => {
+  const safeOrigin = 'https://social-vibecoding.usernodelabs.org';
+  const code = String(req.query.code || '').replace(/[^a-zA-Z0-9._~-]/g, '').slice(0, 1000);
+  const state = String(req.query.state || '').replace(/[^a-zA-Z0-9._~=+/-]/g, '').slice(0, 500);
+  const provider = String(req.query.provider || '').replace(/[^a-z]/g, '').slice(0, 20);
+  const oauthError = String(req.query.error || '').replace(/[^a-zA-Z0-9_ ]/g, '').slice(0, 200);
+  const payload = JSON.stringify({ type: 'oauth_callback', code, state, provider, error: oauthError });
+  res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self' ${safeOrigin}`);
+  res.send(`<!doctype html><html><body><script>
+    try { window.opener && window.opener.postMessage(${payload}, '*'); } catch(e) {}
+    window.close();
+  </script></body></html>`);
+});
+
+// ── zkPassport Premium Verification ──────────────────────────────────────────
+
+app.post('/api/zk/start', async (req, res) => {
+  try {
+    const result = await verify.startZkPassportSession(req.user.id);
+    if (!result.ok) return res.status(503).json({ error: result.error });
+    res.json({ sessionId: result.sessionId, qrUrl: result.qrUrl, deepLinkUrl: result.deepLinkUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/zk/status/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!sessionId || sessionId.length > 300) return res.status(400).json({ error: 'Invalid sessionId' });
+    const result = await verify.pollZkPassportSession(sessionId);
+    if (result.status === 'verified' && result.nullifier) {
+      const nullifier = crypto.createHash('sha256').update(result.nullifier).digest('hex');
+      try {
+        await pool.query(
+          `INSERT INTO zk_verifications(user_id, nullifier) VALUES($1,$2)
+           ON CONFLICT(user_id) DO UPDATE SET nullifier=$2, zk_verified_at=NOW()`,
+          [req.user.id, nullifier]
+        );
+        await pool.query('UPDATE users SET is_zk_verified=true WHERE user_id=$1', [req.user.id]);
+      } catch (dbErr) {
+        if (dbErr.code === '23505') return res.status(409).json({ error: 'Passport already used by another account' });
+        throw dbErr;
+      }
+    }
+    res.json({ status: result.status });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1874,6 +2005,23 @@ async function start() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS investment_holdings_user_idx ON investment_holdings (user_id);
+    CREATE TABLE IF NOT EXISTS social_accounts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      provider VARCHAR(20) NOT NULL,
+      provider_user_id VARCHAR(255) NOT NULL,
+      handle VARCHAR(255),
+      linked_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, provider),
+      UNIQUE(provider, provider_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS social_accounts_user_idx ON social_accounts (user_id);
+    CREATE TABLE IF NOT EXISTS zk_verifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE,
+      nullifier TEXT NOT NULL UNIQUE,
+      zk_verified_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -1888,6 +2036,7 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_zk_verified BOOLEAN DEFAULT FALSE;
   `);
   // UNIQUE on anti_sybil_token enforces one social account per wallet.
   await pool.query(`
@@ -1937,6 +2086,8 @@ async function start() {
     COMMENT ON TABLE admin_actions IS 'staging:private';
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE investment_holdings IS 'staging:private';
+    COMMENT ON TABLE social_accounts IS 'staging:private';
+    COMMENT ON TABLE zk_verifications IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -2071,6 +2222,28 @@ async function start() {
         (900108,9005,'Staging demo holding — BloomMoney Token','BLOOM','crypto',500.0,0.30),
         (900109,9005,'Staging demo holding — Ethereum','ETH','crypto',2.0,2300.0)
       ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed social account links (staging-alice and staging-bob have linked accounts)
+    await pool.query(`
+      INSERT INTO social_accounts(user_id, provider, provider_user_id, handle) VALUES
+        (9001,'twitter','staging-twitter-9001','@staging-alice'),
+        (9001,'github','staging-github-9001','staging-gh-alice'),
+        (9002,'google','staging-google-9002','Alice Staging'),
+        (9003,'discord','staging-discord-9003','staging-carol#9003'),
+        (9004,'github','staging-github-9004','staging-gh-dave')
+      ON CONFLICT(user_id, provider) DO NOTHING
+    `);
+
+    // Seed zkPassport verifications (staging-bob and staging-dave are ZK verified)
+    await pool.query(`
+      INSERT INTO zk_verifications(user_id, nullifier) VALUES
+        (9002,'staging-zk-nullifier-9002'),
+        (9004,'staging-zk-nullifier-9004')
+      ON CONFLICT(user_id) DO NOTHING
+    `);
+    await pool.query(`
+      UPDATE users SET is_zk_verified=true WHERE user_id IN (9002,9004)
     `);
 
     // Seed open futures positions (one paper, one live) so PnL + funding

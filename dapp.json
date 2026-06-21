@@ -10,14 +10,14 @@
     },
     {
       "key": "X_OAUTH_CLIENT_ID",
-      "description": "X (Twitter) OAuth2 client id for Social-tier verification",
+      "description": "X (Twitter) OAuth2 client id for Social-tier verification and Twitter account linking",
       "required": false,
       "private": true,
       "staging_default": ""
     },
     {
       "key": "X_OAUTH_CLIENT_SECRET",
-      "description": "X (Twitter) OAuth2 client secret for Social-tier verification",
+      "description": "X (Twitter) OAuth2 client secret for Social-tier verification and Twitter account linking",
       "required": false,
       "private": true,
       "staging_default": ""
@@ -65,6 +65,48 @@
       "staging_default": ""
     },
     {
+      "key": "GOOGLE_OAUTH_CLIENT_ID",
+      "description": "Google OAuth client id for account linking",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
+      "key": "GOOGLE_OAUTH_CLIENT_SECRET",
+      "description": "Google OAuth client secret for account linking",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "DISCORD_OAUTH_CLIENT_ID",
+      "description": "Discord OAuth client id for account linking",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
+      "key": "DISCORD_OAUTH_CLIENT_SECRET",
+      "description": "Discord OAuth client secret for account linking",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "GITHUB_OAUTH_CLIENT_ID",
+      "description": "GitHub OAuth client id for account linking",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
+      "key": "GITHUB_OAUTH_CLIENT_SECRET",
+      "description": "GitHub OAuth client secret for account linking",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
       "key": "BLOOM_OAUTH_REDIRECT_URI",
       "description": "Registered OAuth redirect URI providers send users back to (prod only)",
       "required": false,
@@ -94,6 +136,8 @@
     { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
     { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" },
     { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" },
-    { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" }
+    { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" },
+    { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
+    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" }
   ]
 }
