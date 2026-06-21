@@ -1571,15 +1571,55 @@ async function renderMarkets(sec) {
 
   let showCreate = false;
 
+  function fmtCountdown(closesAt) {
+    const ms = new Date(closesAt) - Date.now();
+    if (ms <= 0) return 'closing';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 1) return `${h}h ${m}m`;
+    return m > 0 ? `${m}m` : 'closing';
+  }
+
+  function marketCard(m, opts = {}) {
+    const yesPct = (Number(m.yes_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
+    const noPct = (100 - parseFloat(yesPct)).toFixed(1);
+    const statusCls = { open:'text-emerald-400', closed:'text-zinc-500', resolved:'text-blue-400' };
+    return `<div class="card space-y-2 cursor-pointer hover:border-zinc-600 transition-colors" onclick="openMarket(${m.id})">
+      <div class="flex justify-between items-start gap-2">
+        <div class="flex flex-wrap items-start gap-2 min-w-0">
+          <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
+          ${opts.daily ? '<span class="shrink-0 text-xs font-semibold bg-amber-900/40 border border-amber-700/50 text-amber-300 px-2 py-0.5 rounded-full">Daily</span>' : ''}
+        </div>
+        <span class="${statusCls[m.status]||'text-zinc-400'} text-xs shrink-0 ml-1">${m.status}</span>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <div class="flex-1 bg-emerald-900/40 border border-emerald-800/50 rounded px-2 py-1">YES <span class="font-bold text-emerald-300">${yesPct}%</span></div>
+        <div class="flex-1 bg-red-900/40 border border-red-800/50 rounded px-2 py-1">NO <span class="font-bold text-red-300">${noPct}%</span></div>
+      </div>
+      <div class="flex justify-between text-xs text-zinc-500">
+        <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
+        ${opts.daily && m.closes_at ? `<span class="text-amber-400">&#x23f1; ${fmtCountdown(m.closes_at)}</span>` :
+          m.closes_at ? `<span>Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : ''}
+      </div>
+      ${m.resolved_outcome ? `<div class="text-xs text-blue-300">&#x2713; Resolved: ${m.resolved_outcome}</div>` : ''}
+    </div>`;
+  }
+
   async function load() {
     const { markets } = await api('GET', '/api/markets');
-    const statusCls = { open:'text-emerald-400', closed:'text-zinc-500', resolved:'text-blue-400' };
+    const dailyToday = markets.filter(m => m.is_daily && m.status === 'open');
+    const otherMarkets = markets.filter(m => !(m.is_daily && m.status === 'open'));
 
     sec.innerHTML = `
       <div class="flex justify-between items-center mb-4">
         <h2 class="text-xl font-bold">Opinion Markets</h2>
         <button class="btn btn-z text-xs" onclick="toggleCreate()">+ New Market</button>
       </div>
+      ${dailyToday.length ? `
+      <div class="mb-5">
+        <h3 class="font-semibold text-sm text-amber-400 mb-2">&#x1f4c5; Today's Markets</h3>
+        <div class="space-y-3">${dailyToday.map(m => marketCard(m, { daily: true })).join('')}</div>
+      </div>` : ''}
       <div id="create-market-form" class="${showCreate ? '' : 'hidden'} card space-y-2 mb-4">
         <h3 class="font-semibold text-sm">Create Market</h3>
         <input id="mk-title" class="inp" placeholder="Question (e.g. Will ETH hit $5k?)">
@@ -1589,24 +1629,11 @@ async function renderMarkets(sec) {
         <button class="btn btn-v w-full" onclick="createMarket()">Create Market</button>
         <p id="mk-msg" class="text-sm"></p>
       </div>
-      ${markets.length ? `<div class="space-y-3">${markets.map(m => {
-        const yesPct = (Number(m.yes_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
-        const noPct = (100 - parseFloat(yesPct)).toFixed(1);
-        return `<div class="card space-y-2 cursor-pointer hover:border-zinc-600 transition-colors" onclick="openMarket(${m.id})">
-          <div class="flex justify-between items-start gap-2">
-            <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
-            <span class="${statusCls[m.status]||'text-zinc-400'} text-xs shrink-0">${m.status}</span>
-          </div>
-          <div class="flex gap-2 text-xs">
-            <div class="flex-1 bg-emerald-900/40 border border-emerald-800/50 rounded px-2 py-1">YES <span class="font-bold text-emerald-300">${yesPct}%</span></div>
-            <div class="flex-1 bg-red-900/40 border border-red-800/50 rounded px-2 py-1">NO <span class="font-bold text-red-300">${noPct}%</span></div>
-          </div>
-          <div class="flex justify-between text-xs text-zinc-500">
-            <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
-            ${m.closes_at ? `<span>Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : ''}
-          </div>
-          ${m.resolved_outcome ? `<div class="text-xs text-blue-300">✓ Resolved: ${m.resolved_outcome}</div>` : ''}
-        </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No markets</p>'}`;
+      ${otherMarkets.length ? `
+      ${dailyToday.length ? '<h3 class="font-semibold text-sm text-zinc-400 mb-2">Community Markets</h3>' : ''}
+      <div class="space-y-3">${otherMarkets.map(m => marketCard(m)).join('')}</div>` :
+      dailyToday.length ? '' : '<p class="text-zinc-600 text-sm">No markets</p>'}
+    `;
 
     window.toggleCreate = () => { showCreate = !showCreate; load(); };
     window.openMarket = (id) => { S.marketId = id; clearInterval(_activeInterval); _activeInterval = null; renderMarkets(sec); };
@@ -1618,7 +1645,7 @@ async function renderMarkets(sec) {
       const msg = document.getElementById('mk-msg');
       try {
         await api('POST', '/api/markets', { title, description: desc, resolution_criteria: criteria, closes_at: closes || null });
-        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Market created'; }
+        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='&#x2713; Market created'; }
         showCreate = false;
         setTimeout(() => load(), 800);
       } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }

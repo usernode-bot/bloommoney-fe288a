@@ -148,6 +148,7 @@
     { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" },
     { "name": "Trade tab section in DOM", "path": "/?demo=1", "expectSelector": "#section-swap" },
     { "name": "Opinion market history API returns JSON", "path": "/api/markets/9001/history", "expectSelector": "body" },
+    { "name": "Daily opinion market history API returns JSON", "path": "/api/markets/9010/history", "expectSelector": "body" },
     { "name": "Futures history API returns JSON", "path": "/api/futures/markets/1/history", "expectSelector": "body" },
     { "name": "Activity API returns JSON", "path": "/api/activity", "expectSelector": "body" },
     { "name": "Public portfolio API returns JSON", "path": "/explorer-api/portfolio/staging-alice", "expectSelector": "body" },

@@ -13,6 +13,45 @@ const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
 
+const DAILY_TEMPLATES = [
+  {
+    slug: 'eth_above_price',
+    titleFn: (dateLabel, price) => `Will ETH close above $${price} today (${dateLabel})?`,
+    description: 'Daily market: end-of-day ETH/USD price prediction.',
+    resolution_criteria: 'Resolved YES if ETH/USD mark price on BloomMoney closes above the threshold at midnight UTC.',
+    priceSymbol: 'ETH',
+    priceMultiplier: 1.02,
+    priceRound: 50,
+  },
+  {
+    slug: 'btc_above_price',
+    titleFn: (dateLabel, price) => `Will BTC close above $${price} today (${dateLabel})?`,
+    description: 'Daily market: end-of-day BTC/USD price prediction.',
+    resolution_criteria: 'Resolved YES if BTC/USD mark price on BloomMoney closes above the threshold at midnight UTC.',
+    priceSymbol: 'BTC',
+    priceMultiplier: 1.02,
+    priceRound: 500,
+  },
+  {
+    slug: 'bloom_price_up',
+    titleFn: (dateLabel) => `Will BLOOM token price increase today (${dateLabel})?`,
+    description: 'Daily market: will BLOOM end the day higher than it started?',
+    resolution_criteria: 'Resolved YES if BLOOM/USDC mark price at midnight UTC tonight is higher than at midnight UTC yesterday.',
+    priceSymbol: null,
+    priceMultiplier: null,
+    priceRound: null,
+  },
+  {
+    slug: 'eth_btc_ratio',
+    titleFn: (dateLabel) => `Will ETH/BTC ratio stay above 0.037 today (${dateLabel})?`,
+    description: 'Daily market: ETH/BTC relative strength prediction.',
+    resolution_criteria: 'Resolved YES if ETH mark price divided by BTC mark price is above 0.037 at midnight UTC.',
+    priceSymbol: null,
+    priceMultiplier: null,
+    priceRound: null,
+  },
+];
+
 // Funding interval: hourly in prod, accelerated (~2 min) in staging so seeded
 // history and the next-funding countdown are observable during a preview.
 const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
@@ -331,6 +370,7 @@ setInterval(async () => {
     `);
     await pool.query(`INSERT INTO futures_price_snapshots(market_id, mark_price) SELECT id, mark_price FROM futures_markets`);
     await pool.query(`DELETE FROM futures_price_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM futures_price_snapshots) r WHERE rn > 200)`);
+    await pool.query(`UPDATE opinion_markets SET status='closed' WHERE is_daily=true AND status='open' AND closes_at <= NOW()`);
     await runLiquidations();
     await runFunding();
   } catch (e) { console.error('drift err:', e.message); }
@@ -2183,6 +2223,9 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS is_daily BOOLEAN DEFAULT FALSE;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS template_slug VARCHAR(40);
+    ALTER TABLE opinion_markets ALTER COLUMN created_by_user_id DROP NOT NULL;
   `);
   // UNIQUE on anti_sybil_token enforces one social account per wallet.
   await pool.query(`
@@ -2523,6 +2566,93 @@ async function start() {
         }
         if (seedRows.length) await pool.query(`INSERT INTO futures_price_snapshots(market_id,mark_price,created_at) VALUES ${seedRows.join(',')}`);
       }
+    }
+
+    // Seed daily opinion markets
+    {
+      const todayUTCSeed = new Date().toISOString().slice(0, 10);
+      const yesterdayUTCSeed = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const todayEndSeed = new Date(todayUTCSeed + 'T23:59:59Z');
+      const yesterdayEndSeed = new Date(yesterdayUTCSeed + 'T23:59:59Z');
+      const todayLabelSeed = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const yesterdayLabelSeed = new Date(Date.now() - 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const t9010 = `Staging demo daily — Will ETH close above $2,450 today (${todayLabelSeed})?`;
+      const t9011 = `Staging demo daily — Will BTC close above $66,000 today (${todayLabelSeed})?`;
+      const t9012 = `Staging demo daily — Will ETH close above $2,500? (${yesterdayLabelSeed})`;
+      const t9013 = `Staging demo daily — Will BTC close above $68,000? (${yesterdayLabelSeed})`;
+      await pool.query(
+        `INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,is_daily,template_slug,created_by_user_id,closes_at)
+         VALUES(9010,$1,'Daily market: end-of-day ETH price prediction.','Resolved YES if ETH/USD mark price is above $2,450 at midnight UTC.',350000000,250000000,'open',true,'eth_above_price',NULL,$2)
+         ON CONFLICT(id) DO NOTHING`,
+        [t9010, todayEndSeed]
+      );
+      await pool.query(
+        `INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,is_daily,template_slug,created_by_user_id,closes_at)
+         VALUES(9011,$1,'Daily market: end-of-day BTC price prediction.','Resolved YES if BTC/USD mark price is above $66,000 at midnight UTC.',200000000,300000000,'open',true,'btc_above_price',NULL,$2)
+         ON CONFLICT(id) DO NOTHING`,
+        [t9011, todayEndSeed]
+      );
+      await pool.query(
+        `INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,is_daily,template_slug,created_by_user_id,closes_at)
+         VALUES(9012,$1,'Daily market: end-of-day ETH price prediction.','Resolved YES if ETH/USD mark price was above $2,500 at midnight UTC.',420000000,180000000,'resolved',true,'eth_above_price',NULL,$2)
+         ON CONFLICT(id) DO NOTHING`,
+        [t9012, yesterdayEndSeed]
+      );
+      await pool.query(
+        `INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,is_daily,template_slug,created_by_user_id,closes_at)
+         VALUES(9013,$1,'Daily market: end-of-day BTC price prediction.','Resolved YES if BTC/USD mark price was above $68,000 at midnight UTC.',150000000,350000000,'resolved',true,'btc_above_price',NULL,$2)
+         ON CONFLICT(id) DO NOTHING`,
+        [t9013, yesterdayEndSeed]
+      );
+      await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
+      await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
+    }
+
+    // Seed daily opinion market snapshots
+    {
+      const { rows: [cntDaily] } = await pool.query('SELECT COUNT(*)::int AS n FROM opinion_market_snapshots WHERE market_id IN (9010,9011,9012,9013)');
+      if (cntDaily.n === 0) {
+        const dailySeeds = [
+          ...[55.2,55.8,56.1,56.7,57.0,57.3,57.8,58.0,58.2,58.3].map((v,i)=>`(9010,${v},NOW()-INTERVAL '${(9-i)*5} minutes')`),
+          ...[42.1,41.8,41.5,41.2,40.9,40.7,40.5,40.3,40.1,40.0].map((v,i)=>`(9011,${v},NOW()-INTERVAL '${(9-i)*5} minutes')`),
+          ...[60.0,61.5,62.3,63.1,64.2,65.0,65.8,66.5,67.1,67.8,68.4,68.9,69.3,69.7,70.0].map((v,i)=>`(9012,${v},NOW()-INTERVAL '${1510-i*5} minutes')`),
+          ...[45.0,43.9,42.7,41.6,40.5,39.4,38.2,37.1,36.0,34.9,33.8,32.6,31.5,30.7,30.0].map((v,i)=>`(9013,${v},NOW()-INTERVAL '${1510-i*5} minutes')`),
+        ];
+        await pool.query(`INSERT INTO opinion_market_snapshots(market_id,yes_pct,created_at) VALUES ${dailySeeds.join(',')}`);
+      }
+    }
+  }
+
+  // ── Boot-time daily market creation (all environments) ──────────────────────
+  {
+    const todayUTC = new Date().toISOString().slice(0, 10);
+    const closesAt = new Date(todayUTC + 'T23:59:59Z');
+    const todayStart = new Date(todayUTC + 'T00:00:00Z');
+    const dateLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const { rows: prices } = await pool.query('SELECT symbol, price_usd::float FROM market_prices');
+    const priceMapDaily = {};
+    prices.forEach(p => { priceMapDaily[p.symbol] = parseFloat(p.price_usd); });
+
+    for (const tmpl of DAILY_TEMPLATES) {
+      const { rows: existing } = await pool.query(
+        'SELECT 1 FROM opinion_markets WHERE template_slug=$1 AND created_at >= $2',
+        [tmpl.slug, todayStart]
+      );
+      if (existing.length > 0) continue;
+
+      let title;
+      if (tmpl.priceSymbol) {
+        const currentPrice = priceMapDaily[tmpl.priceSymbol] || 0;
+        const rounded = Math.round(currentPrice * tmpl.priceMultiplier / tmpl.priceRound) * tmpl.priceRound;
+        title = tmpl.titleFn(dateLabel, rounded.toLocaleString('en-US'));
+      } else {
+        title = tmpl.titleFn(dateLabel);
+      }
+      await pool.query(
+        `INSERT INTO opinion_markets(title,description,resolution_criteria,is_daily,template_slug,closes_at,created_by_user_id)
+         VALUES($1,$2,$3,true,$4,$5,NULL)`,
+        [title, tmpl.description, tmpl.resolution_criteria, tmpl.slug, closesAt]
+      );
     }
   }
 
