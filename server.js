@@ -205,30 +205,22 @@ function maxLeverageFor(level) {
   return 1;
 }
 
-async function isZkVerified(userId) {
-  const { rows } = await pool.query('SELECT is_zk_verified FROM users WHERE user_id=$1', [userId]);
-  return !!rows[0]?.is_zk_verified;
-}
-
-function featureLimits(zkVerified) {
+function featureLimits(tier) {
   return {
-    maxHoldings: zkVerified ? 20 : 10,
-    maxDailyTrades: zkVerified ? BASIC_DAILY_TRADE_COUNT * 2 : BASIC_DAILY_TRADE_COUNT,
+    maxHoldings: tier === 'premium' ? 20 : 10,
   };
 }
 
 // Per-day Basic-tier trade cap (Phase 4). Returns true when allowed.
-// zkVerified doubles the cap for Basic-tier users with a verified zkPassport.
-async function withinBasicDailyCap(userId, tier, zkVerified = false) {
+async function withinBasicDailyCap(userId, tier) {
   if (tier !== 'basic') return true;
-  const cap = featureLimits(zkVerified).maxDailyTrades;
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM transactions
      WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
        AND type IN ('swap','futures_open','market_trade','ico_invest')`,
     [userId]
   );
-  return (rows[0]?.n || 0) < cap;
+  return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
 }
 async function userTier(userId) {
   const { rows } = await pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [userId]);
@@ -355,8 +347,7 @@ app.get('/api/me', async (req, res) => {
       pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC', [req.user.id]),
     ]);
-    const zkVerified = !!user?.is_zk_verified;
-    res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, zk_verified: zkVerified, feature_limits: featureLimits(zkVerified) });
+    res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -374,7 +365,7 @@ app.patch('/api/me', async (req, res) => {
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,is_zk_verified,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -386,7 +377,7 @@ app.get('/api/profile/:username', async (req, res) => {
       pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [user.user_id]),
       pool.query('SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, user.user_id]),
     ]);
-    res.json({ user, counts: cnts, kyc: kyc || null, isFollowing: isF.length > 0, zk_verified: !!user.is_zk_verified });
+    res.json({ user, counts: cnts, kyc: kyc || null, isFollowing: isF.length > 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -403,8 +394,8 @@ app.get('/api/feed', async (req, res) => {
       const params = [req.user.id, lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, COALESCE(u.is_zk_verified, false) AS is_zk_verified FROM posts p
-        LEFT JOIN users u ON u.user_id = p.user_id
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
@@ -414,8 +405,8 @@ app.get('/api/feed', async (req, res) => {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, COALESCE(u.is_zk_verified, false) AS is_zk_verified FROM posts p
-        LEFT JOIN users u ON u.user_id = p.user_id
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
@@ -542,13 +533,13 @@ app.post('/api/holdings', async (req, res) => {
     if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
     const price = parseFloat(purchase_price);
     if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
-    const zkVerified = await isZkVerified(req.user.id);
-    const limits = featureLimits(zkVerified);
+    const tier = await userTier(req.user.id);
+    const limits = featureLimits(tier);
     const { rows: [cnt] } = await pool.query(
       'SELECT COUNT(*)::int AS n FROM investment_holdings WHERE user_id=$1', [req.user.id]
     );
     if ((cnt?.n || 0) >= limits.maxHoldings) {
-      return res.status(400).json({ error: `Holdings cap reached (${limits.maxHoldings}). Verify with zkPassport to increase it.` });
+      return res.status(400).json({ error: `Holdings cap reached (${limits.maxHoldings}). Get Premium tier via zkPassport to increase it.` });
     }
     const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
     const { rows: [holding] } = await pool.query(
@@ -688,7 +679,13 @@ app.get('/api/zk/status/:sessionId', async (req, res) => {
            ON CONFLICT(user_id) DO UPDATE SET nullifier=$2, zk_verified_at=NOW()`,
           [req.user.id, nullifier]
         );
-        await pool.query('UPDATE users SET is_zk_verified=true WHERE user_id=$1', [req.user.id]);
+        await pool.query(
+          `INSERT INTO kyc_verifications(user_id,level,status,provider,attestation_ref,verified_at)
+           VALUES($1,'premium','approved','zkpassport',$2,NOW())
+           ON CONFLICT(user_id) DO UPDATE SET level='premium', status='approved',
+             provider='zkpassport', attestation_ref=$2, verified_at=NOW(), rejection_reason=NULL`,
+          [req.user.id, sessionId]
+        );
       } catch (dbErr) {
         if (dbErr.code === '23505') return res.status(409).json({ error: 'Passport already used by another account' });
         throw dbErr;
@@ -2036,7 +2033,6 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_zk_verified BOOLEAN DEFAULT FALSE;
   `);
   // UNIQUE on anti_sybil_token enforces one social account per wallet.
   await pool.query(`
@@ -2242,8 +2238,12 @@ async function start() {
         (9004,'staging-zk-nullifier-9004')
       ON CONFLICT(user_id) DO NOTHING
     `);
+    // Seed premium kyc tier for staging-dave (9002 is already seeded as premium above)
     await pool.query(`
-      UPDATE users SET is_zk_verified=true WHERE user_id IN (9002,9004)
+      INSERT INTO kyc_verifications(user_id,level,status,provider,attestation_ref,verified_at)
+      VALUES (9004,'premium','approved','zkpassport','staging-zk-session-9004',NOW())
+      ON CONFLICT(user_id) DO UPDATE SET level='premium', status='approved',
+        provider='zkpassport', attestation_ref='staging-zk-session-9004', verified_at=NOW()
     `);
 
     // Seed open futures positions (one paper, one live) so PnL + funding
