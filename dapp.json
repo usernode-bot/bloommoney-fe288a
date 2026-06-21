@@ -1,3 +1,98 @@
 {
-  "secrets": []
+  "name": "BloomMoney",
+  "secrets": [
+    {
+      "key": "BLOOM_ADMIN_USERNAME",
+      "description": "Usernode username that receives the admin role on first sign-in",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
+      "key": "X_OAUTH_CLIENT_ID",
+      "description": "X (Twitter) OAuth2 client id for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "X_OAUTH_CLIENT_SECRET",
+      "description": "X (Twitter) OAuth2 client secret for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "INSTAGRAM_OAUTH_CLIENT_ID",
+      "description": "Instagram OAuth client id for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "INSTAGRAM_OAUTH_CLIENT_SECRET",
+      "description": "Instagram OAuth client secret for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "TIKTOK_OAUTH_CLIENT_ID",
+      "description": "TikTok OAuth client id for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "TIKTOK_OAUTH_CLIENT_SECRET",
+      "description": "TikTok OAuth client secret for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "COINBASE_OAUTH_CLIENT_ID",
+      "description": "Coinbase OAuth client id for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "COINBASE_OAUTH_CLIENT_SECRET",
+      "description": "Coinbase OAuth client secret for Social-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "BLOOM_OAUTH_REDIRECT_URI",
+      "description": "Registered OAuth redirect URI providers send users back to (prod only)",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
+      "key": "ZKPASSPORT_VERIFIER_URL",
+      "description": "zkPassport proof verifier endpoint for Premium-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    },
+    {
+      "key": "ZKPASSPORT_API_KEY",
+      "description": "zkPassport verifier API key for Premium-tier verification",
+      "required": false,
+      "private": true,
+      "staging_default": ""
+    }
+  ],
+  "tests": [
+    { "name": "Feed renders", "path": "/?demo=1", "expectSelector": "#app-feed" },
+    { "name": "Opinion markets section in DOM", "path": "/?demo=1", "expectSelector": "#section-markets" },
+    { "name": "Futures terminal in DOM", "path": "/?demo=1", "expectSelector": "#section-futures" },
+    { "name": "Verify screen in DOM", "path": "/?demo=1", "expectSelector": "#section-verify" },
+    { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
+    { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" },
+    { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" }
+  ]
 }

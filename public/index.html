@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <script>
   // usernode-dev-console@1
   (function () {
@@ -63,59 +63,1437 @@
     try { post('info', ['[dev-console ready]'], { kind: 'ready' }); } catch (_) {}
   })();
   </script>
+
   <title>BloomMoney</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-  <h1 class="text-2xl font-bold">BloomMoney</h1>
+<body class="bg-zinc-950 text-zinc-100 h-screen overflow-hidden flex flex-col">
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+<!-- ───── Wallet Gate ───── -->
+<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col items-center justify-center gap-6 p-8 text-center">
+  <div class="text-6xl">🌸</div>
+  <h1 class="text-3xl font-bold text-white">BloomMoney</h1>
+  <p class="text-zinc-400 max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
+  <button id="connect-wallet-btn" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-8 py-3 rounded-xl font-semibold text-lg">Connect Wallet</button>
+  <p id="wallet-status" class="text-zinc-600 text-sm"></p>
+</div>
 
-  <div id="count" class="text-lg text-zinc-400">0 total presses</div>
+<!-- ───── Main App ───── -->
+<div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
-  <div class="w-full max-w-sm">
-    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Leaderboard</h2>
-    <div id="leaderboard" class="space-y-1"></div>
+  <!-- Top Bar -->
+  <header class="h-14 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 shrink-0 z-30">
+    <div class="flex items-center gap-3">
+      <button class="md:hidden text-zinc-400 hover:text-white p-1" onclick="toggleMobileSidebar()">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="font-bold text-violet-400">🌸 BloomMoney</span>
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <button class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button id="hdr-verify" class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
+      <span id="hdr-wallet" class="text-zinc-500 font-mono hidden sm:block"></span>
+      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+        <span class="text-violet-400 font-semibold" id="hdr-bloom">—</span>
+        <span class="text-zinc-500">BLOOM</span>
+      </div>
+      <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
+        <span class="text-zinc-500">USDC</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Mobile sidebar overlay -->
+    <div id="mob-overlay" class="hidden fixed inset-0 z-40 bg-black/60" onclick="toggleMobileSidebar()"></div>
+
+    <!-- Desktop Sidebar + Mobile Drawer -->
+    <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-zinc-900 border-r border-zinc-800 flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
+      <button class="nav-item" data-view="home">🏠 Home</button>
+      <button class="nav-item" data-view="trade">↔ Trade</button>
+      <button class="nav-item" data-view="futures">📈 Futures</button>
+      <button class="nav-item" data-view="earn">🌱 Earn</button>
+      <button class="nav-item" data-view="predict">📊 Predict</button>
+      <button class="nav-item" data-view="profile">👤 Profile</button>
+      <div class="py-1 px-2 text-xs text-zinc-600 font-medium mt-2">Discover</div>
+      <button class="nav-item" data-view="explore">🔭 Explore</button>
+      <button class="nav-item" data-view="verify">🪪 Verify</button>
+      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
+      <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="main-scroll" class="flex-1 overflow-y-auto pb-16 md:pb-0">
+
+      <!-- Feed -->
+      <section id="app-feed" class="view max-w-2xl mx-auto py-4 px-4 space-y-4"></section>
+
+      <!-- Profile -->
+      <section id="section-profile" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Swap -->
+      <section id="section-swap" class="view hidden max-w-md mx-auto py-4 px-4"></section>
+
+      <!-- Stake -->
+      <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Liquidity -->
+      <section id="section-liquidity" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- ICO -->
+      <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Earn (composite: stake / liquidity / ico) -->
+      <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Opinion / Prediction Markets -->
+      <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Futures -->
+      <section id="section-futures" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
+      <!-- NFTs -->
+      <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Explore -->
+      <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Verify -->
+      <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
+
+      <!-- KYC -->
+      <section id="section-kyc" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
+
+      <!-- Admin -->
+      <section id="section-admin" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
+    </main>
   </div>
 
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token') || '';
-    const headers = token ? { 'x-usernode-token': token } : {};
+  <!-- Mobile Bottom Nav (six tabs) -->
+  <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex z-30">
+    <button data-tab="home" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
+    <button data-tab="trade" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
+    <button data-tab="futures" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
+    <button data-tab="earn" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
+    <button data-tab="predict" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
+    <button data-tab="profile" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+  </nav>
+</div><!-- /#app -->
 
-    async function loadLeaderboard() {
-      const res = await fetch('/api/leaderboard', { headers });
-      if (!res.ok) return;
-      const { leaderboard } = await res.json();
-      const el = document.getElementById('leaderboard');
-      if (!leaderboard.length) {
-        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">No presses yet</p>';
-        return;
-      }
-      el.innerHTML = leaderboard.map((r, i) =>
-        '<div class="flex justify-between px-3 py-1 rounded ' + (i === 0 ? 'bg-violet-600/20 text-violet-300' : 'text-zinc-400') + '">' +
-        '<span>' + (i + 1) + '. ' + r.username + '</span>' +
-        '<span class="font-mono">' + r.presses + '</span></div>'
-      ).join('');
-      const total = leaderboard.reduce((s, r) => s + parseInt(r.presses), 0);
-      document.getElementById('count').textContent = total + ' total presses';
+<style>
+.nav-item {
+  width: 100%; text-align: left; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+  font-size: 0.875rem; color: #a1a1aa; transition: color 0.15s, background 0.15s;
+}
+.nav-item:hover { background: #27272a; color: #fff; }
+.nav-item.active { background: #3f3f46; color: #fff; }
+.card { background: #18181b; border: 1px solid #27272a; border-radius: 0.75rem; padding: 1rem; }
+.inp { background: #27272a; border: 1px solid #3f3f46; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: #fff; width: 100%; outline: none; }
+.inp:focus { border-color: #7c3aed; }
+.btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.btn-v { background: #7c3aed; color: #fff; }
+.btn-v:hover { background: #6d28d9; }
+.btn-z { background: #3f3f46; color: #fff; }
+.btn-z:hover { background: #52525b; }
+.btn-r { background: #b91c1c; color: #fff; }
+.btn-r:hover { background: #991b1b; }
+.btn-g { background: #059669; color: #fff; }
+.btn-g:hover { background: #047857; }
+.tag-basic { background: rgba(59,130,246,0.15); color: #93c5fd; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-social { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-premium { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-verified { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+select.inp option { background: #18181b; }
+</style>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+const S = {
+  token: new URLSearchParams(location.search).get('token') || '',
+  user: null,
+  balances: {},
+  kyc: null,
+  view: 'home',
+  prices: {},
+  marketId: null,
+  profileUser: null,
+  futuresMode: 'paper',
+  futuresMarket: null,
+};
+
+// ── Token refresh via bridge postMessage ───────────────────────────────────────
+window.addEventListener('message', (e) => {
+  if (e.data && typeof e.data === 'object') {
+    const t = e.data.token || e.data.jwt;
+    if (t && typeof t === 'string' && t.length > 20) {
+      S.token = t;
+      init();
     }
+  }
+});
 
-    document.getElementById('press-btn').addEventListener('click', async () => {
-      try {
-        const res = await fetch('/api/press', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
-        });
-        if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
-      } catch {}
+// ── API ────────────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const h = { 'Content-Type': 'application/json' };
+  if (S.token) h['x-usernode-token'] = S.token;
+  const opts = { method, headers: h };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const U = 1_000_000;
+function fmtAmt(sym, v) {
+  const n = Number(v) / U;
+  if (sym === 'ETH') return n.toFixed(6);
+  if (sym === 'BTC') return n.toFixed(8);
+  return n.toFixed(2);
+}
+function fmtUSD(v) { return (Number(v) / U).toFixed(2); }
+function getBal(sym) { return fmtAmt(sym, S.balances[sym] || 0); }
+function shortAddr(a) { return a ? a.slice(0,6)+'…'+a.slice(-4) : ''; }
+function tsAgo(d) {
+  const s = (Date.now() - new Date(d)) / 1000;
+  if (s < 60) return Math.floor(s)+'s';
+  if (s < 3600) return Math.floor(s/60)+'m';
+  if (s < 86400) return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+function tierLabel(lvl) {
+  return { basic: 'Basic', social: 'Social ✓', premium: 'Premium ★' }[lvl] || (lvl || 'Basic');
+}
+function kycTag(lvl) {
+  if (!lvl) return '';
+  return `<span class="tag-${lvl}">${tierLabel(lvl)}</span>`;
+}
+function fundingCountdown(ts) {
+  const ms = new Date(ts) - Date.now();
+  if (ms <= 0) return 'due';
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+  if (m >= 60) return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  return m + 'm ' + s + 's';
+}
+function err(msg) { return `<div class="text-red-400 text-sm py-2">${msg}</div>`; }
+function spin() { return `<div class="flex justify-center py-8"><div class="spinner"></div></div>`; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+// Six primary tabs (home/trade/futures/earn/predict/profile) plus explore,
+// verify and nfts. Legacy aliases (feed/swap/markets/stake/…) still resolve so
+// internal deep-links keep working.
+const VIEW_SECTION = {
+  home: 'app-feed', feed: 'app-feed',
+  trade: 'section-swap', swap: 'section-swap',
+  futures: 'section-futures',
+  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
+  predict: 'section-markets', markets: 'section-markets',
+  profile: 'section-profile',
+  explore: 'section-explore',
+  verify: 'section-verify', kyc: 'section-verify',
+  nfts: 'section-nfts',
+  admin: 'section-admin',
+};
+// Which bottom tab is highlighted for a given view.
+const VIEW_TAB = {
+  home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
+  earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
+  predict: 'predict', markets: 'predict', profile: 'profile',
+};
+
+function navigate(view, opts) {
+  if (opts) Object.assign(S, opts);
+  S.view = view;
+  document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
+  const sec = document.getElementById(VIEW_SECTION[view]);
+  if (sec) sec.classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+  const tab = VIEW_TAB[view];
+  document.querySelectorAll('.bottom-tab').forEach(b => {
+    b.classList.toggle('text-violet-400', b.dataset.tab === tab);
+    b.classList.toggle('text-zinc-400', b.dataset.tab !== tab);
+  });
+  hideMobileSidebar();
+  loadView(view);
+  document.getElementById('main-scroll').scrollTo(0, 0);
+}
+
+async function loadView(view) {
+  const sec = document.getElementById(VIEW_SECTION[view]);
+  if (!sec) return;
+  sec.innerHTML = spin();
+  try {
+    switch (view) {
+      case 'home': case 'feed': await renderFeed(sec); break;
+      case 'profile': await renderProfile(sec); break;
+      case 'trade': case 'swap': await renderSwap(sec); break;
+      case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
+      case 'predict': case 'markets': await renderMarkets(sec); break;
+      case 'futures': await renderFutures(sec); break;
+      case 'nfts': await renderNFTs(sec); break;
+      case 'explore': await renderExplore(sec); break;
+      case 'verify': case 'kyc': await renderVerify(sec); break;
+      case 'admin': await renderAdmin(sec); break;
+    }
+  } catch (e) { sec.innerHTML = err(e.message); }
+}
+
+function toggleMobileSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('mob-overlay');
+  const open = !sb.classList.contains('-translate-x-full');
+  sb.classList.toggle('-translate-x-full', open);
+  ov.classList.toggle('hidden', open);
+}
+function hideMobileSidebar() {
+  document.getElementById('sidebar').classList.add('-translate-x-full');
+  document.getElementById('mob-overlay').classList.add('hidden');
+}
+
+// ── Sidebar nav setup ─────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+  btn.addEventListener('click', () => navigate(btn.dataset.view));
+});
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+async function init() {
+  // Skip the network round-trip when there's no token to present — this avoids
+  // a guaranteed 401 that shows up as a console error in headless test runners.
+  if (!S.token) {
+    document.getElementById('wallet-gate').classList.remove('hidden');
+    return;
+  }
+  try {
+    const data = await api('GET', '/api/me');
+    S.user = data.user;
+    S.kyc = data.kyc;
+    if (data.balances) {
+      S.balances = {};
+      data.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
+    }
+    if (!S.user.usernode_pubkey) {
+      showWalletGate();
+      return;
+    }
+    showApp();
+  } catch (e) {
+    document.getElementById('wallet-gate').classList.remove('hidden');
+    document.getElementById('wallet-status').textContent = 'Authentication required.';
+  }
+}
+
+function showWalletGate() {
+  document.getElementById('wallet-gate').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('wallet-gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  updateHeader();
+  if (S.user.is_admin) {
+    const adminLink = document.getElementById('admin-nav');
+    adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
+    adminLink.classList.remove('hidden');
+  }
+  navigate(S.view);
+}
+
+function updateHeader() {
+  const walletEl = document.getElementById('hdr-wallet');
+  const bloomEl = document.getElementById('hdr-bloom');
+  const usdcEl = document.getElementById('hdr-usdc');
+  if (S.user) {
+    walletEl.textContent = shortAddr(S.user.usernode_pubkey);
+    bloomEl.textContent = getBal('BLOOM');
+    usdcEl.textContent = getBal('USDC');
+  }
+}
+
+async function refreshBalances() {
+  try {
+    const d = await api('GET', '/api/balances');
+    S.balances = {};
+    d.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
+    updateHeader();
+  } catch {}
+}
+
+async function connectWallet() {
+  const btn = document.getElementById('connect-wallet-btn');
+  const status = document.getElementById('wallet-status');
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+  status.textContent = '';
+  try {
+    if (window.usernode && window.usernode.requestWalletLink) {
+      await window.usernode.requestWalletLink();
+    } else {
+      status.textContent = 'Bridge not available — open inside Usernode.';
+    }
+  } catch (e) {
+    status.textContent = e.message || 'Failed to connect wallet.';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Connect Wallet';
+}
+document.getElementById('connect-wallet-btn').addEventListener('click', connectWallet);
+
+// ── Feed ──────────────────────────────────────────────────────────────────────
+async function renderFeed(sec) {
+  let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+
+  async function loadPosts() {
+    const params = new URLSearchParams({ tab: feedState.tab, limit: 20 });
+    if (feedState.cursor) params.set('cursor', feedState.cursor);
+    const d = await api('GET', '/api/feed?' + params);
+    feedState.posts = feedState.cursor ? [...feedState.posts, ...d.posts] : d.posts;
+    feedState.cursor = d.nextCursor;
+    render();
+  }
+
+  function postCard(p) {
+    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
+    return `<div class="card space-y-2" data-post-id="${p.id}">
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold shrink-0">${esc(p.username[0].toUpperCase())}</div>
+          <div class="min-w-0">
+            <button class="text-sm font-semibold hover:text-violet-300 truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
+            <span class="text-zinc-600 text-xs ml-2">${tsAgo(p.created_at)}</span>
+          </div>
+        </div>
+      </div>
+      <p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>
+      <div class="flex items-center gap-4">
+        <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
+        <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function threadView(post, replies) {
+    return `<div class="space-y-3">
+      <button class="text-sm text-zinc-400 hover:text-white flex items-center gap-1" onclick="backToFeed()">← Back to Feed</button>
+      ${postCard(post)}
+      <div class="ml-4 border-l border-zinc-800 pl-4 space-y-3">
+        ${replies.map(r => postCard(r)).join('')}
+        <div class="card">
+          <textarea id="reply-box" class="inp" rows="2" placeholder="Write a reply…" maxlength="280"></textarea>
+          <div class="flex justify-end mt-2">
+            <button class="btn btn-v" onclick="submitReply(${post.id})">Reply</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function render() {
+    if (feedState.thread) return;
+    sec.innerHTML = `
+      <div class="card space-y-2">
+        <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
+        <div class="flex justify-between items-center">
+          <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
+          <button class="btn btn-v" onclick="submitPost()">Post</button>
+        </div>
+      </div>
+      <div class="flex gap-2 border-b border-zinc-800 pb-2">
+        <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='global'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('global')">Global</button>
+        <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='following'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('following')">Following</button>
+      </div>
+      <div id="feed-list" class="space-y-3">
+        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-zinc-600 text-sm text-center py-4">No posts yet</p>'}
+      </div>
+      ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
+    `;
+    const box = document.getElementById('compose-box');
+    if (box) box.addEventListener('input', () => {
+      document.getElementById('compose-count').textContent = box.value.length + '/280';
     });
+    window._feedFns = { loadPosts, postCard, threadView, feedState };
+  }
 
-    loadLeaderboard();
-  </script>
+  window.switchTab = (tab) => { feedState.tab = tab; feedState.cursor = null; loadPosts(); };
+  window.loadMore = () => loadPosts();
+
+  window.submitPost = async () => {
+    const box = document.getElementById('compose-box');
+    const content = box?.value.trim();
+    if (!content) return;
+    try {
+      await api('POST', '/api/posts', { content });
+      box.value = '';
+      feedState.cursor = null;
+      await loadPosts();
+    } catch (e) { alert(e.message); }
+  };
+
+  window.likePost = async (id) => {
+    try {
+      await api('POST', `/api/posts/${id}/like`);
+      feedState.cursor = null;
+      await loadPosts();
+    } catch (e) { alert(e.message); }
+  };
+
+  window.openThread = async (id) => {
+    sec.innerHTML = spin();
+    try {
+      const { post, replies } = await api('GET', `/api/posts/${id}`);
+      feedState.thread = { post, replies };
+      sec.innerHTML = threadView(post, replies);
+    } catch (e) { sec.innerHTML = err(e.message); }
+  };
+
+  window.backToFeed = () => { feedState.thread = null; render(); };
+
+  window.submitReply = async (parentId) => {
+    const content = document.getElementById('reply-box')?.value.trim();
+    if (!content) return;
+    try {
+      await api('POST', '/api/posts', { content, parent_id: parentId });
+      await window.openThread(parentId);
+    } catch (e) { alert(e.message); }
+  };
+
+  window.toggleFollow = async (username) => {
+    try {
+      await api('POST', '/api/follow', { username });
+      await loadPosts();
+    } catch (e) { alert(e.message); }
+  };
+
+  await loadPosts();
+}
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+async function renderProfile(sec) {
+  const username = S.profileUser || S.user?.username;
+  if (!username) { sec.innerHTML = err('No profile selected'); return; }
+
+  const { user, counts, kyc, isFollowing } = await api('GET', `/api/profile/${encodeURIComponent(username)}`);
+  const isMe = S.user && user.user_id === S.user.user_id;
+
+  let activeTab = 'posts';
+  let editMode = false;
+
+  async function renderNFTTab() {
+    const { nfts } = await api('GET', `/api/nfts?owner=${encodeURIComponent(username)}`);
+    return nfts.length
+      ? `<div class="grid grid-cols-2 gap-3">${nfts.map(n => `
+          <div class="card space-y-2">
+            <img src="${esc(n.image_url)}" class="w-full aspect-square object-cover rounded-lg bg-zinc-800" onerror="this.style.display='none'">
+            <p class="text-sm font-medium">${esc(n.name)}</p>
+            <p class="text-xs text-zinc-500 font-mono">${esc(n.token_id)}</p>
+          </div>`).join('')}</div>`
+      : '<p class="text-zinc-600 text-sm">No NFTs yet</p>';
+  }
+
+  async function renderPostTab(parent = null) {
+    const filter = parent !== null ? `parent_id IS${parent === 'IS NULL' ? ' NULL' : ' NOT NULL'}` : null;
+    const d = await api('GET', `/api/feed?tab=global&limit=50`);
+    const userPosts = d.posts.filter(p => p.username === username && (parent === null ? p.parent_id === null : p.parent_id !== null));
+    return userPosts.length
+      ? userPosts.map(p => `<div class="card space-y-1">
+          <span class="text-xs text-zinc-600">${tsAgo(p.created_at)}</span>
+          <p class="text-sm text-zinc-300">${esc(p.content)}</p>
+          <div class="flex gap-3 text-xs text-zinc-500"><span>♥ ${p.like_count}</span><span>💬 ${p.reply_count}</span></div>
+        </div>`).join('')
+      : '<p class="text-zinc-600 text-sm">No posts yet</p>';
+  }
+
+  async function fullRender() {
+    let tabContent = spin();
+    if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
+    else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
+    else if (activeTab === 'nfts') tabContent = await renderNFTTab().catch(() => '');
+
+    sec.innerHTML = `
+      <div class="space-y-4">
+        <div class="card">
+          ${editMode ? `
+            <div class="space-y-3">
+              <input id="edit-name" class="inp" value="${esc(user.display_name||'')}" placeholder="Display name">
+              <textarea id="edit-bio" class="inp" rows="3" placeholder="Bio">${esc(user.bio||'')}</textarea>
+              <div class="flex gap-2">
+                <button class="btn btn-v" onclick="saveProfile()">Save</button>
+                <button class="btn btn-z" onclick="editMode=false;fullRender()">Cancel</button>
+              </div>
+            </div>` : `
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <div class="w-14 h-14 rounded-full bg-violet-700 flex items-center justify-center text-xl font-bold">${esc(username[0].toUpperCase())}</div>
+                <div>
+                  <div class="font-bold text-lg">${esc(user.display_name || username)}</div>
+                  <div class="text-zinc-500 text-sm">@${esc(username)}</div>
+                  ${user.usernode_pubkey ? `<div class="text-zinc-600 text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
+                  ${kyc?.level ? kycTag(kyc.level) : ''}
+                </div>
+              </div>
+              <div class="flex gap-2">
+                ${isMe ? `<button class="btn btn-v" onclick="navigate('verify')">Verify</button><button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
+                  `<button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
+              </div>
+            </div>
+            ${user.bio ? `<p class="text-sm text-zinc-400 mt-2">${esc(user.bio)}</p>` : ''}
+            <div class="flex gap-4 mt-3 text-sm">
+              <span><strong>${counts.followers}</strong> <span class="text-zinc-500">followers</span></span>
+              <span><strong>${counts.following}</strong> <span class="text-zinc-500">following</span></span>
+              <span><strong>${counts.post_count}</strong> <span class="text-zinc-500">posts</span></span>
+            </div>`}
+        </div>
+        ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
+        <div class="flex gap-2 border-b border-zinc-800 pb-2">
+          ${['posts','replies','nfts'].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+        </div>
+        <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
+      </div>`;
+  }
+
+  window.switchProfileTab = (t) => { activeTab = t; fullRender(); };
+  window.saveProfile = async () => {
+    const display_name = document.getElementById('edit-name')?.value;
+    const bio = document.getElementById('edit-bio')?.value;
+    try {
+      await api('PATCH', '/api/me', { display_name, bio });
+      editMode = false;
+      await renderProfile(sec);
+    } catch (e) { alert(e.message); }
+  };
+  window.doFollow = async (uname, following) => {
+    try {
+      await api('POST', following ? '/api/unfollow' : '/api/follow', { username: uname });
+      await renderProfile(sec);
+    } catch (e) { alert(e.message); }
+  };
+
+  await fullRender();
+}
+
+// ── Swap ──────────────────────────────────────────────────────────────────────
+async function renderSwap(sec) {
+  const tokens = ['USDC','BLOOM','ETH','BTC'];
+  let from = 'USDC', to = 'BLOOM', fromAmt = '';
+
+  async function preview() {
+    if (!fromAmt || isNaN(fromAmt) || !S.prices[from] || !S.prices[to]) return '—';
+    const rate = S.prices[from] / S.prices[to];
+    const toAmt = parseFloat(fromAmt) * rate * 0.997;
+    return toAmt.toFixed(to==='ETH'?6:to==='BTC'?8:2) + ' ' + to;
+  }
+
+  async function render() {
+    const prev = await preview();
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Swap Tokens</h2>
+      <div class="card space-y-4">
+        <div>
+          <label class="text-xs text-zinc-500 mb-1 block">From</label>
+          <div class="flex gap-2">
+            <select id="swap-from" class="inp w-28" onchange="swapFromChange(this.value)">${tokens.map(t=>`<option ${t===from?'selected':''}>${t}</option>`).join('')}</select>
+            <input id="swap-amt" type="number" class="inp flex-1" placeholder="0.00" value="${fromAmt}" oninput="swapAmtChange(this.value)" min="0">
+          </div>
+          <div class="text-xs text-zinc-500 mt-1">Balance: ${getBal(from)} ${from}</div>
+        </div>
+        <div class="flex justify-center">
+          <button class="text-zinc-400 hover:text-white text-lg" onclick="swapFlip()">⇅</button>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500 mb-1 block">To</label>
+          <div class="flex gap-2">
+            <select id="swap-to" class="inp w-28" onchange="swapToChange(this.value)">${tokens.map(t=>`<option ${t===to?'selected':''}>${t}</option>`).join('')}</select>
+            <div class="inp flex-1 flex items-center text-violet-300">${prev}</div>
+          </div>
+          <div class="text-xs text-zinc-500 mt-1">Balance: ${getBal(to)} ${to}</div>
+        </div>
+        ${S.prices[from] && S.prices[to] ? `<p class="text-xs text-zinc-500">Rate: 1 ${from} ≈ ${(S.prices[from]/S.prices[to]).toFixed(6)} ${to} (0.3% fee)</p>` : ''}
+        <button class="btn btn-v w-full" onclick="execSwap()">Swap</button>
+        <p id="swap-msg" class="text-sm text-center"></p>
+      </div>`;
+  }
+
+  try {
+    const d = await api('GET', '/api/prices');
+    d.prices.forEach(p => { S.prices[p.symbol] = parseFloat(p.price_usd); });
+  } catch {}
+
+  window.swapFromChange = (v) => { from = v; if (from === to) to = tokens.find(t=>t!==from); render(); };
+  window.swapToChange = (v) => { to = v; if (to === from) from = tokens.find(t=>t!==to); render(); };
+  window.swapAmtChange = (v) => { fromAmt = v; render(); };
+  window.swapFlip = () => { [from, to] = [to, from]; render(); };
+  window.execSwap = async () => {
+    const msg = document.getElementById('swap-msg');
+    try {
+      const d = await api('POST', '/api/defi/swap', { from_token: from, to_token: to, from_amount: fromAmt });
+      msg.className = 'text-sm text-center text-emerald-400';
+      msg.textContent = `✓ Received ${d.to_amount.toFixed(6)} ${d.to_token}`;
+      await refreshBalances();
+      fromAmt = '';
+      render();
+    } catch (e) {
+      if (msg) { msg.className = 'text-sm text-center text-red-400'; msg.textContent = e.message; }
+    }
+  };
+  await render();
+}
+
+// ── Stake ─────────────────────────────────────────────────────────────────────
+async function renderStake(sec) {
+  async function load() {
+    await refreshBalances();
+    const { stakes } = await api('GET', '/api/defi/stakes');
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">BLOOM Staking</h2>
+      <div class="card space-y-3 mb-4">
+        <p class="text-sm text-zinc-400">Stake BLOOM to earn <span class="text-violet-300 font-semibold">12% APY</span></p>
+        <div class="flex gap-2">
+          <input id="stake-amt" type="number" class="inp flex-1" placeholder="Amount (BLOOM)" min="0">
+          <button class="btn btn-v shrink-0" onclick="doStake()">Stake</button>
+        </div>
+        <div class="text-xs text-zinc-500">Balance: ${getBal('BLOOM')} BLOOM</div>
+        <p id="stake-msg" class="text-sm"></p>
+      </div>
+      <h3 class="font-semibold mb-2">Active Stakes</h3>
+      ${stakes.length ? `<div class="space-y-3">${stakes.map(s => `
+        <div class="card flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">${fmtAmt('BLOOM', s.amount)} BLOOM</div>
+            <div class="text-xs text-zinc-500">Staked ${tsAgo(s.staked_at)} ago · Reward: <span class="text-emerald-400">${fmtAmt('BLOOM', s.accrued_reward)} BLOOM</span></div>
+          </div>
+          <button class="btn btn-z shrink-0" onclick="doUnstake(${s.id})">Unstake</button>
+        </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No active stakes</p>'}`;
+  }
+
+  window.doStake = async () => {
+    const amt = document.getElementById('stake-amt')?.value;
+    const msg = document.getElementById('stake-msg');
+    try {
+      await api('POST', '/api/defi/stake', { amount: amt });
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Staked!'; }
+      await load();
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.doUnstake = async (id) => {
+    try {
+      const d = await api('DELETE', `/api/defi/stakes/${id}`);
+      alert(`Unstaked! Received ${d.returned.toFixed(2)} BLOOM (reward: ${d.reward.toFixed(4)} BLOOM)`);
+      await load();
+    } catch (e) { alert(e.message); }
+  };
+  await load();
+}
+
+// ── Liquidity ────────────────────────────────────────────────────────────────
+async function renderLiquidity(sec) {
+  const pools = { BLOOM_USDC: ['BLOOM','USDC'], ETH_USDC: ['ETH','USDC'] };
+  let selPool = 'BLOOM_USDC';
+
+  async function load() {
+    await refreshBalances();
+    const { positions } = await api('GET', '/api/defi/liquidity');
+    const [tA, tB] = pools[selPool];
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Liquidity Pools</h2>
+      <div class="card space-y-3 mb-4">
+        <div class="flex gap-2">
+          ${Object.keys(pools).map(p=>`<button class="btn ${p===selPool?'btn-v':'btn-z'}" onclick="selPool='${p}';load()">${p.replace('_','/')}</button>`).join('')}
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-zinc-500">${tA} Amount</label>
+            <input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0">
+            <div class="text-xs text-zinc-500 mt-0.5">Bal: ${getBal(tA)}</div>
+          </div>
+          <div>
+            <label class="text-xs text-zinc-500">${tB} Amount</label>
+            <input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0">
+            <div class="text-xs text-zinc-500 mt-0.5">Bal: ${getBal(tB)}</div>
+          </div>
+        </div>
+        <button class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>
+        <p id="liq-msg" class="text-sm"></p>
+      </div>
+      <h3 class="font-semibold mb-2">My Positions</h3>
+      ${positions.length ? `<div class="space-y-3">${positions.map(p=>{
+        const [a,b] = pools[p.pool_id]||['?','?'];
+        return `<div class="card">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-semibold">${p.pool_id.replace('_','/')}</div>
+              <div class="text-xs text-zinc-500">${fmtAmt(a,p.token_a_amount)} ${a} + ${fmtAmt(b,p.token_b_amount)} ${b}</div>
+              <div class="text-xs text-emerald-400 mt-0.5">Fees: ${fmtAmt('USDC',p.accrued_fees)} USDC</div>
+            </div>
+            <button class="btn btn-z text-xs" onclick="removeLiq(${p.id})">Remove</button>
+          </div>
+        </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No positions</p>'}`;
+  }
+
+  window.addLiquidity = async () => {
+    const a = document.getElementById('liq-a')?.value;
+    const b = document.getElementById('liq-b')?.value;
+    const msg = document.getElementById('liq-msg');
+    try {
+      await api('POST', '/api/defi/liquidity', { pool_id: selPool, token_a_amount: a, token_b_amount: b });
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Liquidity added!'; }
+      await load();
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.removeLiq = async (id) => {
+    try {
+      const d = await api('DELETE', `/api/defi/liquidity/${id}`);
+      alert(`Removed! Fees earned: ${d.fees_earned.toFixed(4)} USDC`);
+      await load();
+    } catch (e) { alert(e.message); }
+  };
+  window.load = load;
+  await load();
+}
+
+// ── ICO ───────────────────────────────────────────────────────────────────────
+async function renderICO(sec) {
+  async function load() {
+    await refreshBalances();
+    const { offerings } = await api('GET', '/api/ico');
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">Token Offerings</h2>
+      ${offerings.length ? `<div class="space-y-4">${offerings.map(o => {
+        const pct = o.hard_cap > 0 ? Math.min(100, Number(o.raised)/Number(o.hard_cap)*100) : 0;
+        const statusCls = { active:'text-emerald-400', sold_out:'text-red-400', ended:'text-zinc-500' }[o.status]||'text-zinc-400';
+        return `<div class="card space-y-3">
+          <div class="flex justify-between items-start">
+            <div>
+              <h3 class="font-bold">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
+            </div>
+            <span class="${statusCls} text-xs font-semibold">${o.status.replace('_',' ').toUpperCase()}</span>
+          </div>
+          <div class="text-sm space-y-0.5">
+            <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+            <div class="flex justify-between"><span class="text-zinc-500">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+          </div>
+          <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
+            <div class="bg-violet-600 h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%"></div>
+          </div>
+          ${o.status === 'active' ? `
+            <div class="flex gap-2">
+              <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
+              <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
+            </div>
+            <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
+            <p id="ico-msg-${o.id}" class="text-sm"></p>` : ''}
+        </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No ICO offerings</p>'}`;
+  }
+
+  window.investICO = async (id) => {
+    const amt = document.getElementById(`ico-amt-${id}`)?.value;
+    const msg = document.getElementById(`ico-msg-${id}`);
+    try {
+      const d = await api('POST', `/api/ico/${id}/invest`, { usdc_amount: amt });
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`Received ${d.tokens_received.toFixed(4)} ${d.symbol}`; }
+      await refreshBalances();
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  await load();
+}
+
+// ── Earn (composite: Stake / Liquidity / ICO) ───────────────────────────────────
+async function renderEarn(sec) {
+  let tab = S.earnTab || 'stake';
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">🌱 Earn</h2>
+    <div class="flex gap-2 mb-4 border-b border-zinc-800 pb-2">
+      ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['ico','🚀 ICO']].map(([k,l])=>
+        `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${tab===k?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="setEarnTab('${k}')">${l}</button>`).join('')}
+    </div>
+    <div id="earn-sub"></div>`;
+  const sub = document.getElementById('earn-sub');
+  sub.innerHTML = spin();
+  try {
+    if (tab === 'stake') await renderStake(sub);
+    else if (tab === 'liquidity') await renderLiquidity(sub);
+    else await renderICO(sub);
+  } catch (e) { sub.innerHTML = err(e.message); }
+  window.setEarnTab = (t) => { S.earnTab = t; renderEarn(sec); };
+}
+
+// ── Explore ─────────────────────────────────────────────────────────────────────
+async function renderExplore(sec) {
+  const [people, markets, ico, nfts] = await Promise.all([
+    api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
+    api('GET', '/api/markets').then(d => d.markets).catch(() => []),
+    api('GET', '/api/ico').then(d => d.offerings).catch(() => []),
+    api('GET', '/api/nfts').then(d => d.nfts).catch(() => []),
+  ]);
+  const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
+  const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
+  const topNfts = nfts.slice(0, 6);
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
+
+    <h3 class="font-semibold mb-2">People to follow</h3>
+    ${people.length ? `<div class="space-y-2 mb-5">${people.map(p => `
+      <div class="card flex items-center justify-between gap-2">
+        <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
+          <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold">${esc((p.username||'?')[0].toUpperCase())}</div>
+          <div class="text-left min-w-0">
+            <div class="text-sm font-medium truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''}</div>
+            <div class="text-xs text-zinc-500">${p.followers} followers</div>
+          </div>
+        </button>
+        <button class="btn btn-v text-xs shrink-0" onclick="exploreFollow('${esc(p.username)}',this)">Follow</button>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No suggestions right now</p>'}
+
+    <h3 class="font-semibold mb-2">Active markets</h3>
+    ${activeMarkets.length ? `<div class="space-y-2 mb-5">${activeMarkets.map(m => {
+      const yesPct = (Number(m.no_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(0);
+      return `<button class="card w-full text-left hover:border-zinc-600" onclick="S.marketId=${m.id};navigate('predict')">
+        <div class="text-sm font-medium">${esc(m.title)}</div>
+        <div class="text-xs text-zinc-500">YES ${yesPct}% · ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC liquidity</div>
+      </button>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No active markets</p>'}
+
+    <h3 class="font-semibold mb-2">Live token sales</h3>
+    ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
+      <button class="card w-full text-left hover:border-zinc-600" onclick="navigate('earn');S.earnTab='ico'">
+        <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-zinc-500">${esc(o.token_symbol)}</span></div>
+        <div class="text-xs text-zinc-500">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
+      </button>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No live sales</p>'}
+
+    <h3 class="font-semibold mb-2">Top NFTs</h3>
+    ${topNfts.length ? `<div class="grid grid-cols-3 gap-3">${topNfts.map(n => `
+      <div class="card space-y-1 overflow-hidden">
+        <div class="aspect-square overflow-hidden rounded-lg bg-zinc-800"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
+        <p class="text-xs font-medium truncate">${esc(n.name)}</p>
+        <p class="text-xs text-zinc-600 truncate">@${esc(n.owner_username)}</p>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No NFTs yet</p>'}
+  `;
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+}
+
+
+// ── Opinion Markets ───────────────────────────────────────────────────────────
+async function renderMarkets(sec) {
+  if (S.marketId) { await renderMarketDetail(sec); return; }
+
+  const { markets } = await api('GET', '/api/markets');
+  const statusCls = { open:'text-emerald-400', closed:'text-zinc-500', resolved:'text-blue-400' };
+
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Opinion Markets</h2>
+    ${markets.length ? `<div class="space-y-3">${markets.map(m => {
+      const yesPct = (Number(m.no_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
+      const noPct = (100 - parseFloat(yesPct)).toFixed(1);
+      return `<div class="card space-y-2 cursor-pointer hover:border-zinc-600 transition-colors" onclick="openMarket(${m.id})">
+        <div class="flex justify-between items-start gap-2">
+          <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
+          <span class="${statusCls[m.status]||'text-zinc-400'} text-xs shrink-0">${m.status}</span>
+        </div>
+        <div class="flex gap-2 text-xs">
+          <div class="flex-1 bg-emerald-900/40 border border-emerald-800/50 rounded px-2 py-1">YES <span class="font-bold text-emerald-300">${yesPct}%</span></div>
+          <div class="flex-1 bg-red-900/40 border border-red-800/50 rounded px-2 py-1">NO <span class="font-bold text-red-300">${noPct}%</span></div>
+        </div>
+        <div class="flex justify-between text-xs text-zinc-500">
+          <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
+          ${m.closes_at ? `<span>Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : ''}
+        </div>
+        ${m.resolved_outcome ? `<div class="text-xs text-blue-300">✓ Resolved: ${m.resolved_outcome}</div>` : ''}
+      </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No markets</p>'}`;
+
+  window.openMarket = (id) => { S.marketId = id; renderMarkets(sec); };
+}
+
+async function renderMarketDetail(sec) {
+  const { market, positions } = await api('GET', `/api/markets/${S.marketId}`);
+  const myAdminOrCreator = S.user && (S.user.is_admin || market.created_by_user_id === S.user.user_id);
+  const yesPct = (Number(market.no_pool)/(Number(market.yes_pool)+Number(market.no_pool))*100).toFixed(1);
+  const canClaim = positions.some(p => !p.claimed && p.outcome === market.resolved_outcome);
+
+  sec.innerHTML = `
+    <button class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1" onclick="S.marketId=null;navigate('markets')">← Markets</button>
+    <div class="card space-y-3 mb-4">
+      <div class="flex justify-between items-start gap-2">
+        <h2 class="font-bold text-lg leading-snug">${esc(market.title)}</h2>
+        <span class="text-xs ${market.status==='open'?'text-emerald-400':market.status==='resolved'?'text-blue-400':'text-zinc-500'}">${market.status}</span>
+      </div>
+      ${market.description ? `<p class="text-sm text-zinc-400">${esc(market.description)}</p>` : ''}
+      ${market.resolution_criteria ? `<p class="text-xs text-zinc-500 italic">${esc(market.resolution_criteria)}</p>` : ''}
+      <div class="space-y-1">
+        <div class="flex justify-between text-xs text-zinc-400"><span>YES ${yesPct}%</span><span>NO ${(100-parseFloat(yesPct)).toFixed(1)}%</span></div>
+        <div class="bg-zinc-800 rounded-full h-3 overflow-hidden flex">
+          <div class="bg-emerald-600 h-full transition-all" style="width:${yesPct}%"></div>
+          <div class="bg-red-700 h-full flex-1"></div>
+        </div>
+      </div>
+      <div class="text-xs text-zinc-500">Total liquidity: ${fmtUSD(Number(market.yes_pool)+Number(market.no_pool))} USDC</div>
+    </div>
+
+    ${market.status === 'open' ? `
+    <div class="card space-y-3 mb-4">
+      <h3 class="font-semibold">Trade</h3>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-zinc-500">USDC Amount</label>
+          <input id="trade-amt" type="number" class="inp mt-1" placeholder="0.00" min="0">
+        </div>
+        <div class="flex flex-col justify-end gap-2">
+          <button class="btn btn-g w-full" onclick="tradeMarket('YES')">Buy YES</button>
+          <button class="btn btn-r w-full" onclick="tradeMarket('NO')">Buy NO</button>
+        </div>
+      </div>
+      <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
+      <p id="trade-msg" class="text-sm"></p>
+    </div>` : ''}
+
+    ${market.status === 'resolved' && canClaim ? `
+    <div class="card mb-4">
+      <p class="text-sm text-emerald-400 mb-2">You have winning positions to claim!</p>
+      <button class="btn btn-g" onclick="claimWinnings(${market.id})">Claim Winnings</button>
+      <p id="claim-msg" class="text-sm mt-2"></p>
+    </div>` : ''}
+
+    ${myAdminOrCreator && market.status === 'open' ? `
+    <div class="card mb-4 space-y-2">
+      <h3 class="text-sm font-semibold">Resolve Market</h3>
+      <div class="flex gap-2">
+        <button class="btn btn-g" onclick="resolveMarket(${market.id},'YES')">Resolve YES</button>
+        <button class="btn btn-r" onclick="resolveMarket(${market.id},'NO')">Resolve NO</button>
+      </div>
+    </div>` : ''}
+
+    ${positions.length ? `
+    <div class="card">
+      <h3 class="font-semibold mb-2">My Positions</h3>
+      <div class="space-y-2">${positions.map(p => `
+        <div class="flex justify-between items-center text-sm">
+          <span class="${p.outcome==='YES'?'text-emerald-400':'text-red-400'} font-medium">${p.outcome}</span>
+          <span class="text-zinc-400">${Number(p.shares).toFixed(4)} shares</span>
+          <span class="text-zinc-500">${fmtUSD(p.cost_basis)} USDC paid</span>
+          ${p.claimed ? `<span class="text-zinc-600 text-xs">Claimed</span>` : ''}
+        </div>`).join('')}</div>
+    </div>` : ''}`;
+
+  window.tradeMarket = async (outcome) => {
+    const amt = document.getElementById('trade-amt')?.value;
+    const msg = document.getElementById('trade-msg');
+    try {
+      await api('POST', `/api/markets/${S.marketId}/trade`, { outcome, usdc_amount: amt });
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`✓ Bought ${outcome} shares`; }
+      await refreshBalances();
+      await renderMarketDetail(sec);
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.claimWinnings = async (id) => {
+    const msg = document.getElementById('claim-msg');
+    try {
+      const d = await api('POST', `/api/markets/${id}/claim`);
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`✓ Claimed ${d.payout.toFixed(2)} USDC`; }
+      await refreshBalances();
+      await renderMarketDetail(sec);
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.resolveMarket = async (id, outcome) => {
+    if (!confirm(`Resolve as ${outcome}?`)) return;
+    try {
+      await api('POST', `/api/markets/${id}/resolve`, { outcome });
+      await renderMarketDetail(sec);
+    } catch (e) { alert(e.message); }
+  };
+}
+
+// ── Futures ───────────────────────────────────────────────────────────────────
+async function renderFutures(sec) {
+  const { markets } = await api('GET', '/api/futures/markets');
+  const { positions } = await api('GET', '/api/futures/positions');
+  const paperBal = await api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0);
+  await refreshBalances();
+
+  if (!S.futuresMarket && markets.length) S.futuresMarket = markets[0];
+  const mkt = S.futuresMarket;
+  const futTier = (S.kyc && S.kyc.status === 'approved') ? S.kyc.level : 'basic';
+
+  let side = 'long', leverage = 5, qty = '';
+  function marginPreview() {
+    if (!qty || !mkt) return '—';
+    const mp = parseFloat(mkt.mark_price);
+    const margin = (parseFloat(qty) * mp * 1e6 / leverage);
+    const liqDist = mp * (0.9 / leverage);
+    const liqP = side === 'long' ? mp - liqDist : mp + liqDist;
+    return { margin: (margin/1e6).toFixed(2), liq: liqP.toFixed(2) };
+  }
+
+  const preview = marginPreview();
+  const openPositions = positions.filter(p => p.status === 'open');
+  const closedPositions = positions.filter(p => p.status !== 'open').slice(0, 5);
+
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">Futures Trading</h2>
+    <div class="flex gap-2 mb-4">
+      <button class="btn ${S.futuresMode==='paper'?'btn-v':'btn-z'}" onclick="S.futuresMode='paper';navigate('futures')">📄 Paper Trading</button>
+      <button class="btn ${S.futuresMode==='live'?'btn-v':'btn-z'}" onclick="S.futuresMode='live';navigate('futures')">⚡ Live Trading</button>
+    </div>
+    ${S.futuresMode==='paper'
+      ? `<div class="card mb-4 flex gap-4 items-center"><span class="text-zinc-400 text-sm">Paper Balance:</span><span class="text-violet-300 font-bold">${fmtUSD(paperBal)} USDC</span></div>`
+      : `<div class="card mb-4 flex gap-4 items-center"><span class="text-amber-400 text-sm font-medium">⚠ LIVE MODE — real balance</span><span class="text-emerald-400 font-bold">${getBal('USDC')} USDC</span></div>`}
+    ${S.futuresMode==='live' && futTier==='basic'
+      ? `<div class="card mb-4 border-amber-700/50"><p class="text-sm text-amber-300">🔒 Live trading needs <b>Social</b> verification. <button class="underline" onclick="navigate('verify')">Verify to unlock →</button></p></div>`
+      : S.futuresMode==='live' && futTier==='social'
+      ? `<div class="card mb-4 border-amber-700/50"><p class="text-xs text-zinc-400">Social tier: up to 5× leverage. <button class="underline text-violet-300" onclick="navigate('verify')">Go Premium for 20× →</button></p></div>` : ''}
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="card space-y-3">
+        <h3 class="font-semibold">Place Order</h3>
+        <div>
+          <label class="text-xs text-zinc-500">Market</label>
+          <div class="flex gap-1 mt-1">${markets.map(m=>`<button class="btn text-xs ${S.futuresMarket?.id===m.id?'btn-v':'btn-z'}" onclick="S.futuresMarket=${JSON.stringify(m).replace(/"/g,'&quot;')};navigate('futures')">${m.symbol}</button>`).join('')}</div>
+        </div>
+        ${mkt ? `<div class="text-xs text-zinc-400">Mark: <span class="text-white font-mono">$${parseFloat(mkt.mark_price).toFixed(2)}</span></div>` : ''}
+        <div>
+          <div class="flex gap-2">
+            <button id="side-long" class="btn flex-1 ${side==='long'?'btn-g':'btn-z'}" onclick="side='long';updateFutures()">Long ▲</button>
+            <button id="side-short" class="btn flex-1 ${side==='short'?'btn-r':'btn-z'}" onclick="side='short';updateFutures()">Short ▼</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500">Leverage: <span id="lev-label">${leverage}×</span></label>
+          <input id="lev-slider" type="range" min="1" max="20" value="${leverage}" class="w-full mt-1" oninput="leverage=parseInt(this.value);document.getElementById('lev-label').textContent=leverage+'×';updateFutures()">
+          <div class="flex justify-between text-xs text-zinc-600"><span>1×</span><span>20×</span></div>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500">Quantity</label>
+          <input id="fut-qty" type="number" class="inp mt-1" placeholder="0.000" min="0" oninput="qty=this.value;updateFutures()">
+        </div>
+        <div id="fut-preview" class="text-xs text-zinc-500 space-y-0.5">
+          ${typeof preview === 'object' ? `<div>Margin: ${preview.margin} USDC</div><div>Liq. Price: $${preview.liq}</div>` : ''}
+        </div>
+        <button class="btn btn-v w-full" onclick="placeFutures()">Place Order</button>
+        <p id="fut-msg" class="text-sm"></p>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-3">Markets · Funding</h3>
+        <div class="space-y-2">${markets.map(m => {
+          const rate = (parseFloat(m.funding_rate||0)*100);
+          const next = m.next_funding_at ? fundingCountdown(m.next_funding_at) : '—';
+          return `<div class="flex justify-between items-center text-sm py-1 border-b border-zinc-800 last:border-0">
+            <span class="font-medium">${m.symbol}</span>
+            <span class="font-mono">$${parseFloat(m.mark_price).toFixed(2)}</span>
+            <span class="text-xs ${rate>=0?'text-emerald-400':'text-red-400'}" title="funding rate">${rate>=0?'+':''}${rate.toFixed(4)}%</span>
+            <span class="text-xs text-zinc-500" title="next funding">⏱ ${next}</span>
+          </div>`;}).join('')}</div>
+        <p class="text-xs text-zinc-600 mt-2">Longs pay shorts when funding is positive.</p>
+      </div>
+    </div>
+    <div class="card mb-4">
+      <h3 class="font-semibold mb-3">Open Positions</h3>
+      ${openPositions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="text-zinc-500 text-xs">${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+        <tbody>${openPositions.map(p => {
+          const pnl = parseFloat(p.unrealized_pnl||0)/1e6;
+          const fund = parseFloat(p.funding_paid||0)/1e6;
+          return `<tr class="border-t border-zinc-800">
+            <td class="py-1.5 pr-3 font-medium">${p.symbol}</td>
+            <td class="pr-3 text-xs">${p.mode==='paper'?'📄':'⚡'}</td>
+            <td class="pr-3 ${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</td>
+            <td class="pr-3">${p.leverage}×</td>
+            <td class="pr-3 font-mono">${parseFloat(p.quantity).toFixed(4)}</td>
+            <td class="pr-3 font-mono">$${parseFloat(p.entry_price).toFixed(2)}</td>
+            <td class="pr-3 font-mono">$${parseFloat(p.mark_price||0).toFixed(2)}</td>
+            <td class="pr-3 ${fund>=0?'text-emerald-400':'text-red-400'}" title="funding paid/received">${fund>=0?'+':''}${fund.toFixed(2)}</td>
+            <td class="pr-3 ${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)}</td>
+            <td><button class="btn btn-r text-xs px-2 py-1" onclick="closeFutures(${p.id})">Close</button></td>
+          </tr>`;}).join('')}</tbody>
+      </table></div>` : '<p class="text-zinc-600 text-sm">No open positions</p>'}
+    </div>
+    ${closedPositions.length ? `<div class="card">
+      <h3 class="font-semibold mb-3">Recent History</h3>
+      <div class="space-y-1">${closedPositions.map(p => {
+        const pnl = parseFloat(p.realized_pnl||0)/1e6;
+        return `<div class="flex justify-between text-sm py-1 border-b border-zinc-800 last:border-0">
+          <span>${p.symbol} <span class="${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</span> ${p.leverage}×</span>
+          <span class="text-xs text-zinc-500">${p.status}</span>
+          <span class="${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)} USDC</span>
+        </div>`;}).join('')}</div>
+    </div>` : ''}`;
+
+  window.updateFutures = () => {};
+  window.placeFutures = async () => {
+    const msg = document.getElementById('fut-msg');
+    const qtyEl = document.getElementById('fut-qty');
+    const levEl = document.getElementById('lev-slider');
+    if (!S.futuresMarket) return;
+    try {
+      await api('POST', '/api/futures/positions', {
+        market_id: S.futuresMarket.id,
+        side, leverage: parseInt(levEl?.value||5),
+        quantity: parseFloat(qtyEl?.value||0),
+        mode: S.futuresMode,
+        idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now()
+      });
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Order placed'; }
+      await refreshBalances();
+      navigate('futures');
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.closeFutures = async (id) => {
+    try {
+      const d = await api('DELETE', `/api/futures/positions/${id}`);
+      alert(`Position closed. PnL: ${d.pnl>=0?'+':''}${d.pnl.toFixed(2)} USDC`);
+      navigate('futures');
+    } catch (e) { alert(e.message); }
+  };
+}
+
+// ── NFTs ──────────────────────────────────────────────────────────────────────
+async function renderNFTs(sec) {
+  let nftTab = 'mine';
+
+  async function load() {
+    await refreshBalances();
+    const mine = await api('GET', `/api/nfts?owner=${encodeURIComponent(S.user.username)}`);
+    const all = nftTab === 'all' ? await api('GET', '/api/nfts') : { nfts: [] };
+    const list = nftTab === 'mine' ? mine.nfts : all.nfts;
+
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">NFT Collection</h2>
+      <div class="card space-y-3 mb-4">
+        <h3 class="font-semibold">Mint NFT <span class="text-zinc-500 text-sm font-normal">(costs 10 BLOOM)</span></h3>
+        <input id="nft-name" class="inp" placeholder="Name">
+        <input id="nft-desc" class="inp" placeholder="Description (optional)">
+        <input id="nft-img" class="inp" placeholder="Image URL">
+        <button class="btn btn-v" onclick="mintNFT()">Mint for 10 BLOOM</button>
+        <div class="text-xs text-zinc-500">Balance: ${getBal('BLOOM')} BLOOM</div>
+        <p id="nft-msg" class="text-sm"></p>
+      </div>
+      <div class="flex gap-2 mb-3">
+        <button class="btn ${nftTab==='mine'?'btn-v':'btn-z'}" onclick="nftTab='mine';load()">My Collection</button>
+        <button class="btn ${nftTab==='all'?'btn-v':'btn-z'}" onclick="nftTab='all';load()">Browse All</button>
+      </div>
+      ${list.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${list.map(n => `
+        <div class="card space-y-2 overflow-hidden">
+          <div class="aspect-square overflow-hidden rounded-lg bg-zinc-800">
+            <img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'">
+          </div>
+          <p class="text-sm font-medium truncate">${esc(n.name)}</p>
+          <p class="text-xs text-zinc-500 font-mono truncate">${esc(n.token_id)}</p>
+          ${nftTab==='all' ? `<p class="text-xs text-zinc-600">@${esc(n.owner_username)}</p>` : ''}
+        </div>`).join('')}</div>` : `<p class="text-zinc-600 text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`}`;
+
+    window.mintNFT = async () => {
+      const name = document.getElementById('nft-name')?.value;
+      const desc = document.getElementById('nft-desc')?.value;
+      const img = document.getElementById('nft-img')?.value;
+      const msg = document.getElementById('nft-msg');
+      try {
+        const d = await api('POST', '/api/nfts/mint', { name, description: desc, image_url: img });
+        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`✓ Minted ${d.token_id}`; }
+        await refreshBalances();
+        nftTab = 'mine';
+        await load();
+      } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+    };
+  }
+  window.load = load;
+  await load();
+}
+
+// ── Verify (three-tier self-service) ────────────────────────────────────────────
+const PROVIDER_LABEL = { x: 'X', instagram: 'Instagram', tiktok: 'TikTok', coinbase: 'Coinbase' };
+
+async function renderVerify(sec) {
+  const [{ kyc }, providers] = await Promise.all([
+    api('GET', '/api/kyc').catch(() => ({ kyc: null })),
+    api('GET', '/api/verify/providers').catch(() => ({ social_providers: [], social_enabled: false, premium_enabled: false, staging: false })),
+  ]);
+  S.kyc = kyc;
+  const level = (kyc && kyc.status === 'approved') ? kyc.level : 'basic';
+  const isSocial = level === 'social' || level === 'premium';
+  const isPremium = level === 'premium';
+
+  function tierCard(name, badge, active, unlocks, action) {
+    return `<div class="card space-y-2 ${active ? 'border-violet-600' : ''}">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">${badge} ${name}</h3>
+        ${active ? '<span class="tag-social">Active</span>' : '<span class="text-xs text-zinc-500">Locked</span>'}
+      </div>
+      <ul class="text-xs text-zinc-400 list-disc pl-4 space-y-0.5">${unlocks.map(u => `<li>${u}</li>`).join('')}</ul>
+      ${action || ''}
+    </div>`;
+  }
+
+  const socialAction = isSocial
+    ? `<p class="text-xs text-emerald-400">✓ Verified via ${esc(kyc?.provider || 'social')}</p>`
+    : providers.social_enabled && providers.social_providers.length
+      ? `<div class="flex flex-wrap gap-2">${providers.social_providers.map(p =>
+          `<button class="btn btn-v text-xs" onclick="connectSocial('${p}')">Connect ${PROVIDER_LABEL[p] || p}</button>`).join('')}</div>
+         <p id="social-msg" class="text-sm"></p>`
+      : `<p class="text-xs text-amber-400">No social providers are configured right now — try Premium instead.</p>`;
+
+  const premiumAction = isPremium
+    ? `<p class="text-xs text-emerald-400">✓ Premium verified via zkPassport</p>`
+    : providers.premium_enabled
+      ? `<button class="btn btn-v text-xs" onclick="connectZk()">Verify with zkPassport</button><p id="zk-msg" class="text-sm"></p>`
+      : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
+
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
+    <p class="text-sm text-zinc-500 mb-4">Your tier: <span class="font-semibold text-zinc-200">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
+    <div class="space-y-3">
+      ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
+        '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
+      ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
+      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 20× leverage', 'Higher trade-size limits', 'Premium profile badge'], premiumAction)}
+    </div>`;
+
+  window.connectSocial = async (provider) => {
+    const msg = document.getElementById('social-msg');
+    try {
+      const start = await api('POST', '/api/verify/social/start', { provider });
+      if (start.simulated) {
+        // Staging / simulated path: complete immediately with the signed state.
+        await api('POST', '/api/verify/social/complete', { provider, code: 'staging-code', state: start.state });
+        if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = '✓ Connected'; }
+        await renderVerify(sec);
+      } else if (start.oauth_url) {
+        // Production: hand off to the provider's OAuth screen.
+        window.location.href = start.oauth_url;
+      }
+    } catch (e) {
+      if (msg) {
+        msg.className = 'text-red-400 text-sm';
+        msg.textContent = e.message === 'social_account_in_use'
+          ? 'That account already verifies another wallet.' : e.message;
+      }
+    }
+  };
+
+  window.connectZk = async () => {
+    const msg = document.getElementById('zk-msg');
+    try {
+      // In a real build the zkPassport client SDK produces this proof; staging
+      // auto-approves any payload.
+      await api('POST', '/api/verify/zkpassport', { proof: { simulated: true } });
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = '✓ Premium verified'; }
+      await renderVerify(sec);
+    } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
+  };
+
+  // OAuth return handler: if a provider redirected back with ?code&state, finish.
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('code') && qp.get('state') && qp.get('provider')) {
+    try {
+      await api('POST', '/api/verify/social/complete', { provider: qp.get('provider'), code: qp.get('code'), state: qp.get('state') });
+      await renderVerify(sec);
+    } catch {}
+  }
+}
+
+// ── Admin (in-SPA panel for #section-admin) ──────────────────────────────────
+async function renderAdmin(sec) {
+  let adminTab = 'stats';
+
+  async function loadStats() {
+    const { stats } = await api('GET', '/api/admin/stats');
+    return `<div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+      ${[['Total Users', stats.total_users],['Posts Today', stats.posts_today],
+         ['Swap Volume', fmtUSD(stats.swap_volume)+' USDC'],['Open Futures', stats.open_futures],
+         ['Market Liquidity', fmtUSD(stats.market_liquidity)+' USDC']].map(([label,val]) => `
+        <div class="card text-center">
+          <div class="text-2xl font-bold text-violet-300">${val}</div>
+          <div class="text-xs text-zinc-500 mt-1">${label}</div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  async function loadUsers(search = '') {
+    const { users } = await api('GET', `/api/admin/users?search=${encodeURIComponent(search)}`);
+    return `<div class="mb-3"><input id="user-search" class="inp" placeholder="Search users…" value="${esc(search)}" oninput="adminSearch(this.value)"></div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${users.map(u => `<tr class="border-t border-zinc-800">
+        <td class="py-1.5 pr-3 font-medium">@${esc(u.username)}</td>
+        <td class="pr-3 font-mono text-xs">${shortAddr(u.usernode_pubkey)}</td>
+        <td class="pr-3">${kycTag(u.kyc_level||'')}</td>
+        <td class="pr-3">${u.is_admin?'✓':''}</td>
+        <td class="pr-3">${u.is_banned?'🚫':''}</td>
+        <td class="flex gap-1 py-1">
+          ${!u.is_banned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="banUser(${u.user_id})">Ban</button>` : ''}
+          <button class="btn btn-z text-xs px-2 py-0.5" onclick="toggleAdmin(${u.user_id})">${u.is_admin?'Revoke':'Grant'} Admin</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadKYCQueue() {
+    const { verifications } = await api('GET', '/api/admin/kyc?status=pending');
+    return verifications.length ? `<div class="space-y-3">${verifications.map(k => `
+      <div class="card flex items-center justify-between gap-3">
+        <div>
+          <div class="font-medium">@${esc(k.username)} → ${k.level}</div>
+          <div class="text-xs text-zinc-500">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-g text-xs" onclick="approveKYC(${k.id})">Approve</button>
+          <button class="btn btn-r text-xs" onclick="rejectKYC(${k.id})">Reject</button>
+        </div>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No pending KYC requests</p>';
+  }
+
+  async function fullRender() {
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">⚙️ Admin Dashboard</h2>
+      <div class="flex flex-wrap gap-2 mb-4 border-b border-zinc-800 pb-3">
+        ${['stats','users','kyc'].map(t=>`<button class="btn ${adminTab===t?'btn-v':'btn-z'} text-xs" onclick="switchAdminTab('${t}')">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`).join('')}
+      </div>
+      <div id="admin-content">${spin()}</div>`;
+
+    const content = document.getElementById('admin-content');
+    try {
+      if (adminTab === 'stats') content.innerHTML = await loadStats();
+      else if (adminTab === 'users') content.innerHTML = await loadUsers();
+      else if (adminTab === 'kyc') content.innerHTML = await loadKYCQueue();
+    } catch (e) { content.innerHTML = err(e.message); }
+  }
+
+  window.switchAdminTab = (t) => { adminTab = t; fullRender(); };
+  window.adminSearch = async (q) => {
+    const content = document.getElementById('admin-content');
+    if (content) content.innerHTML = await loadUsers(q).catch(e => err(e.message));
+  };
+  window.banUser = async (id) => {
+    if (!confirm('Ban this user?')) return;
+    try { await api('POST', `/api/admin/users/${id}/ban`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.toggleAdmin = async (id) => {
+    try { await api('POST', `/api/admin/users/${id}/admin`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.approveKYC = async (id) => {
+    try { await api('POST', `/api/admin/kyc/${id}/approve`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.rejectKYC = async (id) => {
+    const reason = prompt('Rejection reason:');
+    if (!reason) return;
+    try { await api('POST', `/api/admin/kyc/${id}/reject`, { reason }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  await fullRender();
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+
 </body>
 </html>
