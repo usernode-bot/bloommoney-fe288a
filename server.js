@@ -243,6 +243,8 @@ setInterval(async () => {
           funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
+    await pool.query(`INSERT INTO futures_price_snapshots(market_id, mark_price) SELECT id, mark_price FROM futures_markets`);
+    await pool.query(`DELETE FROM futures_price_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM futures_price_snapshots) r WHERE rn > 200)`);
     await runLiquidations();
     await runFunding();
   } catch (e) { console.error('drift err:', e.message); }
@@ -976,6 +978,19 @@ app.get('/api/markets/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/markets', requireWallet, async (req, res) => {
+  try {
+    const { title, description, resolution_criteria, closes_at } = req.body;
+    if (!title || typeof title !== 'string' || title.trim().length < 5 || title.length > 200)
+      return res.status(400).json({ error: 'Title must be 5–200 characters' });
+    const { rows: [market] } = await pool.query(`
+      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5) RETURNING *
+    `, [title.trim(), (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+    res.status(201).json({ market });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -1016,6 +1031,14 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
       [req.user.id, -usdcUnits, `Buy ${outcome}`]
     );
     await client.query('COMMIT');
+    try {
+      const { rows: [ms] } = await pool.query('SELECT yes_pool, no_pool FROM opinion_markets WHERE id=$1', [req.params.id]);
+      if (ms) {
+        const yesPct = Number(ms.yes_pool) / (Number(ms.yes_pool) + Number(ms.no_pool)) * 100;
+        await pool.query('INSERT INTO opinion_market_snapshots(market_id, yes_pct) VALUES($1,$2)', [req.params.id, yesPct.toFixed(3)]);
+        await pool.query(`DELETE FROM opinion_market_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM opinion_market_snapshots) r WHERE rn > 200)`);
+      }
+    } catch {}
     res.json({ ok: true, shares });
   } catch (e) {
     await client.query('ROLLBACK');
@@ -1070,8 +1093,25 @@ app.post('/api/markets/:id/resolve', async (req, res) => {
       "UPDATE opinion_markets SET status='resolved', resolved_outcome=$1, resolved_at=NOW() WHERE id=$2",
       [outcome, req.params.id]
     );
+    try {
+      const { rows: [ms] } = await pool.query('SELECT yes_pool, no_pool FROM opinion_markets WHERE id=$1', [req.params.id]);
+      if (ms) {
+        const yesPct = Number(ms.yes_pool) / (Number(ms.yes_pool) + Number(ms.no_pool)) * 100;
+        await pool.query('INSERT INTO opinion_market_snapshots(market_id, yes_pct) VALUES($1,$2)', [req.params.id, yesPct.toFixed(3)]);
+      }
+    } catch {}
     if (user?.is_admin) await logAdmin(req.user.id, 'resolve_market', { target_market_id: parseInt(req.params.id), reason: outcome });
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/markets/:id/history', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT yes_pct, created_at FROM opinion_market_snapshots WHERE market_id=$1 ORDER BY created_at DESC LIMIT 100',
+      [req.params.id]
+    );
+    res.json({ history: rows.reverse() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1081,6 +1121,16 @@ app.get('/api/futures/markets', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM futures_markets ORDER BY id');
     res.json({ markets: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/futures/markets/:id/history', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT mark_price, created_at FROM futures_price_snapshots WHERE market_id=$1 ORDER BY created_at DESC LIMIT 100',
+      [req.params.id]
+    );
+    res.json({ history: rows.reverse() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2019,6 +2069,20 @@ async function start() {
       nullifier TEXT NOT NULL UNIQUE,
       zk_verified_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS opinion_market_snapshots (
+      id SERIAL PRIMARY KEY,
+      market_id INTEGER NOT NULL,
+      yes_pct NUMERIC(8,3) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS opinion_market_snapshots_market_idx ON opinion_market_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS futures_price_snapshots (
+      id SERIAL PRIMARY KEY,
+      market_id INTEGER NOT NULL,
+      mark_price NUMERIC(20,6) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -2271,6 +2335,36 @@ async function start() {
         ) v(user_id,type,token_symbol,amount,description)
         WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo funding ETH-PERP')
       `).catch(() => {});
+    }
+
+    // Seed opinion market snapshots
+    {
+      const { rows: [cnt] } = await pool.query('SELECT COUNT(*)::int AS n FROM opinion_market_snapshots WHERE market_id IN (9001,9002,9003)');
+      if (cnt.n === 0) {
+        const opinionSeeds = [
+          ...[ 62.5, 61.2, 63.1, 62.4, 64.2, 63.7, 61.9, 63.5, 62.1, 64.0, 63.2, 62.7, 61.5, 63.8, 64.5, 62.9, 63.4, 61.8, 62.6, 63.1 ].map((v,i) => `(9001,${v},NOW()-INTERVAL '${(20-i)*5} minutes')`),
+          ...[ 50.0, 51.2, 49.8, 50.5, 48.9, 50.3, 51.1, 49.5, 50.8, 49.2, 50.6, 51.3, 49.7, 50.1, 48.8, 50.9, 51.5, 49.4, 50.2, 50.7 ].map((v,i) => `(9002,${v},NOW()-INTERVAL '${(20-i)*5} minutes')`),
+          ...Array.from({length:10},(_,i)=>`(9003,88.9,NOW()-INTERVAL '${(10-i)*5} minutes')`),
+        ];
+        await pool.query(`INSERT INTO opinion_market_snapshots(market_id,yes_pct,created_at) VALUES ${opinionSeeds.join(',')}`);
+      }
+    }
+    // Seed futures price snapshots
+    {
+      const { rows: [cnt] } = await pool.query(`SELECT COUNT(*)::int AS n FROM futures_price_snapshots WHERE market_id IN (SELECT id FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','BLOOM-PERP'))`);
+      if (cnt.n === 0) {
+        const fmkts = (await pool.query(`SELECT id, symbol FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','BLOOM-PERP')`)).rows;
+        const seedRows = [];
+        for (const fm of fmkts) {
+          let base = fm.symbol==='ETH-PERP'?2490:fm.symbol==='BTC-PERP'?66800:0.499;
+          for (let i=0;i<30;i++) {
+            const t = 870-i*30;
+            base = base * (i%2===0 ? 1.001 : 0.999);
+            seedRows.push(`(${fm.id},${base.toFixed(6)},NOW()-INTERVAL '${t} seconds')`);
+          }
+        }
+        if (seedRows.length) await pool.query(`INSERT INTO futures_price_snapshots(market_id,mark_price,created_at) VALUES ${seedRows.join(',')}`);
+      }
     }
   }
 

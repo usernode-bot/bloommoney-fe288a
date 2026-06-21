@@ -138,6 +138,8 @@
     { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" },
     { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" },
     { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
-    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" }
+    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" },
+    { "name": "Opinion market history API returns JSON", "path": "/api/markets/9001/history", "expectSelector": "body" },
+    { "name": "Futures history API returns JSON", "path": "/api/futures/markets/1/history", "expectSelector": "body" }
   ]
 }
