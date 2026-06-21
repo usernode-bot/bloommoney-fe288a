@@ -126,6 +126,13 @@
       "required": false,
       "private": true,
       "staging_default": ""
+    },
+    {
+      "key": "COINGECKO_API_KEY",
+      "description": "CoinGecko API key for live crypto prices (optional; free demo tier works without it)",
+      "required": false,
+      "private": true,
+      "staging_default": ""
     }
   ],
   "tests": [
@@ -140,6 +147,13 @@
     { "name": "Admin NFTs page renders", "path": "/admin/nfts?demo=1", "expectSelector": "#admin-nfts" },
     { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" },
     { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
-    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" }
+    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" },
+    { "name": "Trade tab section in DOM", "path": "/?demo=1", "expectSelector": "#section-swap" },
+    { "name": "Opinion market history API returns JSON", "path": "/api/markets/9001/history", "expectSelector": "body" },
+    { "name": "Daily opinion market history API returns JSON", "path": "/api/markets/9010/history", "expectSelector": "body" },
+    { "name": "Futures history API returns JSON", "path": "/api/futures/markets/1/history", "expectSelector": "body" },
+    { "name": "Activity API returns JSON", "path": "/api/activity", "expectSelector": "body" },
+    { "name": "Public portfolio API returns JSON", "path": "/explorer-api/portfolio/staging-alice", "expectSelector": "body" },
+    { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" }
   ]
 }
