@@ -156,6 +156,8 @@
     { "name": "Public portfolio API returns JSON", "path": "/explorer-api/portfolio/staging-alice", "expectSelector": "body" },
     { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" },
-    { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" }
+    { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" },
+    { "name": "Ticker prices API returns JSON", "path": "/api/ticker-prices?symbols=BTC,ETH", "expectSelector": "body" },
+    { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" }
   ]
 }

@@ -640,6 +640,34 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Live ticker prices for the post composer "AI Trade Helper" badge. Resolves
+// only known tickers via COINGECKO_TICKER_MAP; unrecognized symbols are
+// silently dropped so the badge degrades gracefully. Reuses the cached
+// getCoinGeckoPrices() proxy. In staging there's no CoinGecko key, so return
+// deterministic fixed demo prices instead of empty results.
+const STAGING_TICKER_PRICES = {
+  BTC: 64000, ETH: 3200, SOL: 150, DOGE: 0.12,
+  ADA: 0.45, LINK: 14, DOT: 6, AVAX: 28,
+};
+app.get('/api/ticker-prices', async (req, res) => {
+  try {
+    const raw = String(req.query.symbols || '');
+    const requested = [];
+    for (const part of raw.split(',')) {
+      const sym = part.trim().toUpperCase();
+      if (sym && !requested.includes(sym)) requested.push(sym);
+      if (requested.length >= 5) break;
+    }
+    const recognized = requested.filter(s => s in COINGECKO_TICKER_MAP);
+    const source = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices();
+    const prices = {};
+    for (const sym of recognized) {
+      if (source[sym] != null) prices[sym] = source[sym];
+    }
+    res.json({ prices, recognized });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/price-history', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').toUpperCase();
