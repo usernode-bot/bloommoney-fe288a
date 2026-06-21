@@ -616,11 +616,79 @@ async function renderProfile(sec) {
       : '<p class="text-zinc-600 text-sm">No posts yet</p>';
   }
 
+  async function renderPortfolioTab() {
+    const [holdingsData, pricesData] = await Promise.all([
+      api('GET', '/api/holdings'),
+      api('GET', '/api/prices'),
+    ]);
+    const holdings = holdingsData.holdings;
+    const priceMap = {};
+    (pricesData.prices || []).forEach(p => { priceMap[p.symbol.toUpperCase()] = parseFloat(p.price_usd); });
+
+    let totalKnownValue = 0;
+    let unknownCount = 0;
+    const rows = holdings.map(h => {
+      const qty = parseFloat(h.quantity);
+      const costBasis = qty * parseFloat(h.purchase_price);
+      const price = h.ticker ? priceMap[h.ticker.toUpperCase()] : null;
+      let currentValue = null, pnl = null, pnlPct = null;
+      if (price != null) {
+        currentValue = qty * price;
+        pnl = currentValue - costBasis;
+        pnlPct = costBasis > 0 ? (pnl / costBasis * 100) : 0;
+        totalKnownValue += currentValue;
+      } else {
+        unknownCount++;
+      }
+      const pnlCls = (pnl != null && pnl >= 0) ? 'text-emerald-400' : 'text-red-400';
+      const purchasePrice = parseFloat(h.purchase_price);
+      return `
+        <div class="card space-y-2" data-holding-id="${h.id}">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="font-semibold text-sm">${esc(h.asset_name)}${h.ticker ? ` <span class="text-zinc-500 font-mono text-xs">${esc(h.ticker)}</span>` : ''}</div>
+              <div class="text-xs text-zinc-500 capitalize">${esc(h.asset_type)}</div>
+            </div>
+            <div class="flex gap-1 shrink-0">
+              <button class="btn btn-z text-xs px-2 py-1" onclick="editHolding(${h.id})">Edit</button>
+              <button class="btn btn-r text-xs px-2 py-1" onclick="removeHolding(${h.id})">Remove</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div><div class="text-zinc-500">Quantity</div><div class="font-mono">${qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(qty < 1 ? 6 : 4)}</div></div>
+            <div><div class="text-zinc-500">Cost/unit</div><div class="font-mono">$${purchasePrice.toFixed(purchasePrice < 1 ? 4 : 2)}</div></div>
+            <div><div class="text-zinc-500">Cost basis</div><div class="font-mono">$${costBasis.toFixed(2)}</div></div>
+            <div>
+              <div class="text-zinc-500">Current value</div>
+              ${currentValue != null
+                ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
+                : `<div class="text-zinc-600">—</div>`}
+            </div>
+          </div>
+        </div>`;
+    });
+
+    return `
+      <div class="card flex items-center justify-between gap-4 bg-zinc-900/50">
+        <div>
+          <div class="text-xs text-zinc-500">Estimated portfolio value</div>
+          <div class="text-xl font-bold text-violet-300">$${totalKnownValue.toFixed(2)}</div>
+          ${unknownCount > 0 ? `<div class="text-xs text-zinc-600">${unknownCount} holding${unknownCount > 1 ? 's' : ''} without live price excluded</div>` : ''}
+        </div>
+        <button class="btn btn-v shrink-0" onclick="showAddHolding()">+ Add Holding</button>
+      </div>
+      <div id="holding-form-container"></div>
+      ${holdings.length
+        ? `<div class="space-y-3">${rows.join('')}</div>`
+        : `<div class="card text-center py-6 text-zinc-500 text-sm">No holdings yet — add your first one.</div>`}`;
+  }
+
   async function fullRender() {
     let tabContent = spin();
     if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
     else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
     else if (activeTab === 'nfts') tabContent = await renderNFTTab().catch(() => '');
+    else if (activeTab === 'portfolio') tabContent = await renderPortfolioTab().catch(e => err(e.message));
 
     sec.innerHTML = `
       <div class="space-y-4">
@@ -658,7 +726,7 @@ async function renderProfile(sec) {
         </div>
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
-          ${['posts','replies','nfts'].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+          ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
@@ -678,6 +746,87 @@ async function renderProfile(sec) {
     try {
       await api('POST', following ? '/api/unfollow' : '/api/follow', { username: uname });
       await renderProfile(sec);
+    } catch (e) { alert(e.message); }
+  };
+
+  window.showAddHolding = (h) => {
+    const container = document.getElementById('holding-form-container');
+    if (!container) return;
+    const editing = !!h;
+    container.innerHTML = `
+      <div class="card space-y-3 border-violet-700/50">
+        <h3 class="font-semibold text-sm">${editing ? 'Edit Holding' : 'Add Holding'}</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-zinc-500">Asset name *</label>
+            <input id="h-name" class="inp mt-1" placeholder="e.g. Apple Inc." value="${editing ? esc(h.asset_name) : ''}">
+          </div>
+          <div>
+            <label class="text-xs text-zinc-500">Ticker (optional)</label>
+            <input id="h-ticker" class="inp mt-1" placeholder="e.g. AAPL, ETH" value="${editing && h.ticker ? esc(h.ticker) : ''}">
+          </div>
+          <div>
+            <label class="text-xs text-zinc-500">Asset type *</label>
+            <select id="h-type" class="inp mt-1">
+              ${['crypto','stock','etf','other'].map(t => `<option value="${t}"${editing && h.asset_type === t ? ' selected' : ''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-zinc-500">Quantity *</label>
+            <input id="h-qty" type="number" class="inp mt-1" placeholder="0.00" min="0" step="any" value="${editing ? h.quantity : ''}">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-xs text-zinc-500">Purchase price (USD per unit) *</label>
+            <input id="h-price" type="number" class="inp mt-1" placeholder="0.00" min="0" step="any" value="${editing ? h.purchase_price : ''}">
+          </div>
+        </div>
+        <div class="flex gap-2 justify-end">
+          <button class="btn btn-z" onclick="cancelHoldingForm()">Cancel</button>
+          <button class="btn btn-v" onclick="saveHolding(${editing ? h.id : 'null'})">${editing ? 'Save changes' : 'Add holding'}</button>
+        </div>
+        <p id="h-msg" class="text-sm"></p>
+      </div>`;
+  };
+
+  window.cancelHoldingForm = () => {
+    const c = document.getElementById('holding-form-container');
+    if (c) c.innerHTML = '';
+  };
+
+  window.saveHolding = async (id) => {
+    const asset_name = document.getElementById('h-name')?.value?.trim();
+    const ticker = document.getElementById('h-ticker')?.value?.trim();
+    const asset_type = document.getElementById('h-type')?.value;
+    const quantity = document.getElementById('h-qty')?.value;
+    const purchase_price = document.getElementById('h-price')?.value;
+    const msg = document.getElementById('h-msg');
+    try {
+      if (id) {
+        await api('PATCH', `/api/holdings/${id}`, { asset_name, ticker: ticker || null, asset_type, quantity, purchase_price });
+      } else {
+        await api('POST', '/api/holdings', { asset_name, ticker: ticker || null, asset_type, quantity, purchase_price });
+      }
+      activeTab = 'portfolio';
+      await fullRender();
+    } catch (e) {
+      if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+    }
+  };
+
+  window.editHolding = async (id) => {
+    try {
+      const { holdings } = await api('GET', '/api/holdings');
+      const h = holdings.find(x => x.id === id);
+      if (h) showAddHolding(h);
+    } catch (e) { alert(e.message); }
+  };
+
+  window.removeHolding = async (id) => {
+    if (!confirm('Remove this holding?')) return;
+    try {
+      await api('DELETE', `/api/holdings/${id}`);
+      activeTab = 'portfolio';
+      await fullRender();
     } catch (e) { alert(e.message); }
   };
 
