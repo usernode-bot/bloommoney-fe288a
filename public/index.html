@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <script>
   // usernode-dev-console@1
   (function () {
@@ -64,21 +64,60 @@
   })();
   </script>
   <title>BloomMoney</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    @keyframes press-pop {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(1.1); }
+      100% { transform: scale(0.95); }
+    }
+    .is-pressing {
+      animation: press-pop 0.3s ease-out forwards;
+    }
+  </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col items-center justify-center gap-8 p-4">
-  <h1 class="text-2xl font-bold">BloomMoney</h1>
+<body class="bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,#1c1028,#09090b)] text-zinc-100 min-h-screen flex flex-col items-center justify-center py-12 p-4">
 
-  <button id="press-btn" class="w-32 h-32 rounded-full bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white text-xl font-bold shadow-lg shadow-violet-600/30">
-    Press!
-  </button>
+  <div class="w-full max-w-sm flex flex-col items-center gap-6">
 
-  <div id="count" class="text-lg text-zinc-400">0 total presses</div>
+    <!-- Header -->
+    <div class="text-center">
+      <h1 class="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-400 to-purple-500 bg-clip-text text-transparent">BloomMoney</h1>
+      <p class="mt-1 text-sm text-zinc-500">Every tap counts.</p>
+    </div>
 
-  <div class="w-full max-w-sm">
-    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Leaderboard</h2>
-    <div id="leaderboard" class="space-y-1"></div>
+    <!-- Press button -->
+    <button id="press-btn" class="w-32 h-32 rounded-full bg-gradient-to-br from-violet-500 to-violet-700 hover:from-violet-400 hover:to-violet-600 active:scale-95 transition-all text-white ring-4 ring-violet-500/20 hover:ring-violet-400/40 shadow-lg shadow-violet-700/30">
+      <span class="text-sm font-bold tracking-[0.2em] uppercase">Press</span>
+    </button>
+
+    <!-- Total press stat -->
+    <div class="text-center">
+      <div id="count-number" class="text-4xl font-bold font-mono tabular-nums text-violet-300">0</div>
+      <div class="text-xs uppercase tracking-widest text-zinc-500 mt-1">total presses</div>
+    </div>
+
+    <!-- Leaderboard card -->
+    <div class="w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3">Leaderboard</h2>
+      <div id="leaderboard"></div>
+    </div>
+
   </div>
 
   <script>
@@ -86,32 +125,52 @@
     const token = params.get('token') || '';
     const headers = token ? { 'x-usernode-token': token } : {};
 
+    const rankColors = { 1: 'text-amber-400', 2: 'text-zinc-400', 3: 'text-zinc-500' };
+
     async function loadLeaderboard() {
       const res = await fetch('/api/leaderboard', { headers });
       if (!res.ok) return;
       const { leaderboard } = await res.json();
       const el = document.getElementById('leaderboard');
       if (!leaderboard.length) {
-        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">No presses yet</p>';
+        el.innerHTML = '<p class="text-center text-zinc-500 text-sm italic py-2">No presses yet — be first!</p>';
+        document.getElementById('count-number').textContent = '0';
         return;
       }
-      el.innerHTML = leaderboard.map((r, i) =>
-        '<div class="flex justify-between px-3 py-1 rounded ' + (i === 0 ? 'bg-violet-600/20 text-violet-300' : 'text-zinc-400') + '">' +
-        '<span>' + (i + 1) + '. ' + r.username + '</span>' +
-        '<span class="font-mono">' + r.presses + '</span></div>'
-      ).join('');
+      el.innerHTML = leaderboard.map((r, i) => {
+        const rank = i + 1;
+        const rc = rankColors[rank] || 'text-zinc-600';
+        const nc = rank <= 3 ? 'text-zinc-200' : 'text-zinc-400';
+        const rowBg = rank === 1 ? 'bg-violet-600/10' : '';
+        return `<div class="flex items-center justify-between py-2 border-b border-zinc-800/60 last:border-b-0 ${rowBg} px-1 rounded-sm">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-mono w-4 text-right ${rc}">${rank}</span>
+            <span class="text-sm ${nc}">${r.username}</span>
+          </div>
+          <span class="font-mono tabular-nums text-sm ${nc}">${Number(r.presses).toLocaleString()}</span>
+        </div>`;
+      }).join('');
       const total = leaderboard.reduce((s, r) => s + parseInt(r.presses), 0);
-      document.getElementById('count').textContent = total + ' total presses';
+      document.getElementById('count-number').textContent = total.toLocaleString();
     }
 
-    document.getElementById('press-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('press-btn');
+
+    btn.addEventListener('click', async () => {
+      btn.classList.remove('is-pressing');
+      void btn.offsetWidth;
+      btn.classList.add('is-pressing');
+      setTimeout(() => btn.classList.remove('is-pressing'), 300);
+
       try {
         const res = await fetch('/api/press', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...headers },
         });
         if (res.ok) loadLeaderboard();
-        else if (res.status === 401) document.getElementById('count').textContent = 'Sign in to press!';
+        else if (res.status === 401) {
+          document.getElementById('count-number').textContent = 'Sign in';
+        }
       } catch {}
     });
 
