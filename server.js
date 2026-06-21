@@ -1271,6 +1271,26 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── Activity History ──────────────────────────────────────────────────────────
+
+app.get('/api/activity', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
+    const params = [req.user.id, limit + 1];
+    const cursorClause = cursor ? `AND id < $${params.push(cursor)}` : '';
+    const { rows } = await pool.query(
+      `SELECT id, type, token_symbol, amount::text AS amount, description, created_at
+       FROM transactions WHERE user_id=$1 ${cursorClause} ORDER BY id DESC LIMIT $2`,
+      params
+    );
+    const hasMore = rows.length > limit;
+    const activities = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? activities[activities.length - 1].id : null;
+    res.json({ activities, nextCursor });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── NFT ───────────────────────────────────────────────────────────────────────
 
 app.get('/api/nfts', async (req, res) => {
@@ -2381,6 +2401,30 @@ async function start() {
         ) v(user_id,type,token_symbol,amount,description)
         WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo funding ETH-PERP')
       `).catch(() => {});
+
+    // Seed activity transactions for the Activity tab (covers all types)
+    {
+      const { rows: [exist] } = await pool.query(
+        `SELECT 1 FROM transactions WHERE description='Staging demo swap — Swap USDC to BLOOM' LIMIT 1`
+      );
+      if (!exist) {
+        await pool.query(`
+          INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
+            (900201, 9001, 'swap',         'USDC', -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
+            (900202, 9001, 'swap',         'USDC',  -75000000, 'Staging demo swap — Swap USDC to ETH'),
+            (900203, 9001, 'swap',         'BLOOM', -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
+            (900204, 9001, 'swap',         'USDC', -200000000, 'Staging demo swap — Swap USDC to BTC'),
+            (900205, 9001, 'swap',         'ETH',     -500000, 'Staging demo swap — Swap ETH to USDC'),
+            (900206, 9004, 'futures_open', 'USDC', -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
+            (900207, 9004, 'futures_pnl',  'USDC',  72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
+            (900208, 9004, 'futures_open', 'USDC', -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
+            (900209, 9003, 'market_trade', 'USDC',  -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
+            (900210, 9003, 'market_trade', 'USDC',  -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
+            (900211, 9003, 'ico_invest',   'USDC', -100000000, 'Staging demo ICO — Invested in SDC ICO')
+          ON CONFLICT(id) DO NOTHING
+        `);
+      }
+    }
     }
 
     // Seed opinion market snapshots
