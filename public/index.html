@@ -138,8 +138,16 @@
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
+      <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
+      <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-violet-600/10 border border-violet-500/20 flex items-center gap-2">
+        <span class="text-base leading-none">✨</span>
+        <div class="min-w-0">
+          <div class="text-[0.65rem] uppercase tracking-wide text-zinc-500 leading-tight">Points available</div>
+          <div class="text-sm font-bold text-violet-300 leading-tight"><span id="points-value">0</span></div>
+        </div>
+      </div>
       <!-- Mobile-only: logout -->
-      <div class="md:hidden mt-auto pt-2 border-t border-zinc-800">
+      <div class="md:hidden pt-2 border-t border-zinc-800">
         <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; showWalletGate();">🚪 Log out</button>
       </div>
     </nav>
@@ -236,6 +244,24 @@
 .tag-zk-verified { background: rgba(20,184,166,0.15); color: #5eead4; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Post-to-Earn points animations */
+.points-pulse { animation: pointsPulse 0.7s ease-out; }
+@keyframes pointsPulse {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(167,139,250,0.5); }
+  35%  { transform: scale(1.06); box-shadow: 0 0 16px 4px rgba(167,139,250,0.45); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(167,139,250,0); }
+}
+.points-float {
+  position: absolute; right: 0.75rem; top: 0.25rem;
+  font-size: 0.85rem; font-weight: 700; color: #c4b5fd;
+  pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  animation: pointsFloat 0.9s ease-out forwards;
+}
+@keyframes pointsFloat {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.8); }
+  20%  { opacity: 1; transform: translateY(0) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-22px) scale(1); }
+}
 select.inp option { background: #18181b; }
 </style>
 
@@ -255,6 +281,7 @@ const S = {
   futuresMode: 'paper',
   futuresMarket: null,
   social_accounts: [],
+  points: 0,
 };
 
 // ── Token refresh via bridge postMessage ───────────────────────────────────────
@@ -407,6 +434,7 @@ async function init() {
   try {
     const data = await api('GET', '/api/me');
     S.user = data.user;
+    S.points = Number(data.user?.points) || 0;
     S.kyc = data.kyc;
     S.social_accounts = data.social_accounts || [];
     if (data.balances) {
@@ -456,6 +484,48 @@ function updateHeader() {
     document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
     drawerUser.classList.remove('hidden');
   }
+  updatePoints();
+}
+
+// Writes the current points total into the "Points available" badge (no animation).
+function updatePoints() {
+  const el = document.getElementById('points-value');
+  if (el) el.textContent = String(S.points || 0);
+}
+
+// Animates the badge from its old total up to `newTotal`, floating a "+gained"
+// chip and pulsing the badge. Drives off the server-confirmed total.
+function animatePointsGain(newTotal, gained) {
+  const valEl = document.getElementById('points-value');
+  const badge = document.getElementById('points-available');
+  const from = Number(S.points) || 0;
+  S.points = newTotal;
+  if (!valEl || !badge) { updatePoints(); return; }
+
+  // Floating "+N" chip
+  const float = document.createElement('div');
+  float.className = 'points-float';
+  float.textContent = '+' + gained;
+  badge.appendChild(float);
+  float.addEventListener('animationend', () => float.remove());
+
+  // Glow/pulse on the badge
+  badge.classList.remove('points-pulse');
+  void badge.offsetWidth; // restart animation
+  badge.classList.add('points-pulse');
+  badge.addEventListener('animationend', () => badge.classList.remove('points-pulse'), { once: true });
+
+  // Count-up tween from old -> new
+  const start = performance.now();
+  const dur = 600;
+  function tick(now) {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    valEl.textContent = String(Math.round(from + (newTotal - from) * eased));
+    if (t < 1) requestAnimationFrame(tick);
+    else valEl.textContent = String(newTotal);
+  }
+  requestAnimationFrame(tick);
 }
 
 async function refreshBalances() {
@@ -572,10 +642,14 @@ async function renderFeed(sec) {
     const content = box?.value.trim();
     if (!content) return;
     try {
-      await api('POST', '/api/posts', { content });
+      const res = await api('POST', '/api/posts', { content });
       box.value = '';
       feedState.cursor = null;
       await loadPosts();
+      // Post-to-Earn: animate the confirmed points credit (server-driven).
+      if (res && res.awarded > 0 && res.points != null) {
+        animatePointsGain(Number(res.points), Number(res.awarded));
+      }
     } catch (e) { alert(e.message); }
   };
 
