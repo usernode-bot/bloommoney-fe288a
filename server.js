@@ -11,7 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // Paths that stay open without authentication. Add a path here (and add it
 // with `app.get`/`app.post` below) if you deliberately want it public.
 // Everything else requires a valid platform-issued JWT.
-const PUBLIC_API_PATHS = new Set(['/health']);
+const PUBLIC_API_PATHS = new Set(['/health', '/api/prices']);
 
 app.use(express.json());
 
@@ -62,6 +62,35 @@ app.get('/api/leaderboard', async (_req, res) => {
     res.json({ leaderboard: rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Crypto prices — proxied from CoinGecko with a 60-second server-side cache
+const priceCache = { data: null, fetchedAt: 0 };
+
+app.get('/api/prices', async (_req, res) => {
+  const now = Date.now();
+  if (priceCache.data && (now - priceCache.fetchedAt) < 60000) {
+    return res.json({ coins: priceCache.data, cachedAt: new Date(priceCache.fetchedAt).toISOString() });
+  }
+  try {
+    const r = await fetch(
+      'https://api.coingecko.com/api/v3/coins/markets' +
+      '?vs_currency=usd' +
+      '&ids=bitcoin,ethereum,solana,binancecoin,ripple,dogecoin' +
+      '&sparkline=true' +
+      '&price_change_percentage=24h'
+    );
+    if (!r.ok) throw new Error('upstream ' + r.status);
+    const coins = await r.json();
+    priceCache.data = coins;
+    priceCache.fetchedAt = now;
+    return res.json({ coins, cachedAt: new Date(now).toISOString() });
+  } catch (err) {
+    if (priceCache.data) {
+      return res.json({ coins: priceCache.data, cachedAt: new Date(priceCache.fetchedAt).toISOString(), stale: true });
+    }
+    return res.status(503).json({ error: 'unavailable' });
   }
 });
 

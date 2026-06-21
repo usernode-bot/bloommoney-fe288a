@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <script>
   // usernode-dev-console@1
   (function () {
@@ -81,6 +81,18 @@
     <div id="leaderboard" class="space-y-1"></div>
   </div>
 
+  <div class="w-full max-w-sm">
+    <h2 class="text-sm font-medium text-zinc-500 mb-2 text-center">Crypto Prices</h2>
+    <div id="prices-list" class="space-y-1">
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+      <div class="animate-pulse h-10 rounded bg-zinc-800"></div>
+    </div>
+  </div>
+
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
@@ -116,6 +128,100 @@
     });
 
     loadLeaderboard();
+
+    function formatPrice(price) {
+      if (price == null) return 'N/A';
+      if (price >= 1) {
+        return '$' + price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      return '$' + price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    }
+
+    function formatChange(pct) {
+      if (pct == null) return { text: 'N/A', cls: 'text-zinc-500' };
+      const sign = pct >= 0 ? '+' : '';
+      return { text: sign + pct.toFixed(2) + '%', cls: pct >= 0 ? 'text-green-400' : 'text-red-400' };
+    }
+
+    function buildSparkline(sparklineData, isUp) {
+      if (!sparklineData || !sparklineData.length) return '';
+      const raw = sparklineData;
+      const count = 40;
+      const step = (raw.length - 1) / (count - 1);
+      const points = Array.from({ length: count }, (_, i) => raw[Math.round(i * step)] || 0);
+      const min = Math.min.apply(null, points);
+      const max = Math.max.apply(null, points);
+      const range = max - min || 1;
+      const pts = points.map(function(p, i) {
+        var x = (i / (count - 1)) * 80;
+        var y = 32 - ((p - min) / range) * 32;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      const color = isUp ? '#4ade80' : '#f87171';
+      return '<svg width="80" height="32" viewBox="0 0 80 32" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+        '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>' +
+        '</svg>';
+    }
+
+    function renderPrices(coins, stale) {
+      const el = document.getElementById('prices-list');
+      if (!coins || !coins.length) {
+        el.innerHTML = '<p class="text-center text-zinc-600 text-sm">Price data unavailable</p>';
+        return;
+      }
+      const rows = coins.map(function(coin) {
+        const change = formatChange(coin.price_change_percentage_24h);
+        const isUp = (coin.price_change_percentage_24h || 0) >= 0;
+        const sparkline = buildSparkline(
+          coin.sparkline_in_7d && coin.sparkline_in_7d.price,
+          isUp
+        );
+        return '<div class="price-row flex items-center gap-3 px-2 py-1.5 rounded hover:bg-zinc-900 transition-colors">' +
+          '<img src="' + coin.image + '" width="24" height="24" alt="" onerror="this.style.visibility=\'hidden\'" class="rounded-full flex-shrink-0"/>' +
+          '<div class="flex-1 min-w-0">' +
+            '<span class="text-sm text-zinc-100">' + coin.name + '</span> ' +
+            '<span class="text-xs text-zinc-500 uppercase">' + coin.symbol + '</span>' +
+          '</div>' +
+          '<div class="flex items-center gap-2 flex-shrink-0">' +
+            '<span class="text-sm font-mono text-zinc-100">' + formatPrice(coin.current_price) + '</span>' +
+            '<span class="text-xs font-mono ' + change.cls + ' w-14 text-right">' + change.text + '</span>' +
+            '<div class="flex-shrink-0">' + sparkline + '</div>' +
+          '</div>' +
+          '</div>';
+      }).join('');
+      el.innerHTML = rows + (stale ? '<p class="text-center text-zinc-600 text-xs mt-1">prices may be stale</p>' : '');
+    }
+
+    function schedulePriceRefresh() {
+      setTimeout(loadPrices, 60000);
+    }
+
+    async function loadPrices() {
+      try {
+        const res = await fetch('/api/prices', { headers });
+        if (!res.ok) {
+          schedulePriceRefresh();
+          return;
+        }
+        const data = await res.json();
+        if (data.error) {
+          const el = document.getElementById('prices-list');
+          if (!el.querySelector('.price-row')) {
+            el.innerHTML = '<p class="text-center text-zinc-600 text-sm">Price data unavailable</p>';
+          }
+        } else {
+          renderPrices(data.coins, data.stale);
+        }
+      } catch (e) {
+        const el = document.getElementById('prices-list');
+        if (!el.querySelector('.price-row')) {
+          el.innerHTML = '<p class="text-center text-zinc-600 text-sm">Price data unavailable</p>';
+        }
+      }
+      schedulePriceRefresh();
+    }
+
+    loadPrices();
   </script>
 </body>
 </html>
