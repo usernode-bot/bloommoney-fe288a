@@ -914,9 +914,14 @@ async function renderSwap(sec) {
     return toAmt.toFixed(to==='ETH'?6:to==='BTC'?8:2) + ' ' + to;
   }
 
+  // Two containers: swap card re-renders on input; markets list renders once.
+  sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-2"></div>`;
+
   async function render() {
     const prev = await preview();
-    sec.innerHTML = `
+    const wrap = document.getElementById('swap-card-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = `
       <h2 class="text-xl font-bold mb-4">Swap Tokens</h2>
       <div class="card space-y-4">
         <div>
@@ -967,6 +972,86 @@ async function renderSwap(sec) {
     }
   };
   await render();
+
+  // ── Markets list ──────────────────────────────────────────────────────────
+  const mwrap = document.getElementById('swap-markets-wrap');
+  if (!mwrap) return;
+
+  const TOKEN_META = {
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400'    },
+    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400'  },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400' },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400'},
+  };
+  const MARKET_ORDER = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+
+  // Fetch all four price histories in parallel
+  let histories = {};
+  try {
+    const results = await Promise.all(
+      MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))
+    );
+    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (results[i] && results[i].history) || []; });
+  } catch {}
+
+  function buildSparkline(hist, color) {
+    if (!hist || hist.length < 2) {
+      return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+    const prices = hist.map(h => parseFloat(h.price_usd));
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = Math.max(max - min, 0.000001);
+    const xStep = 60 / (prices.length - 1);
+    const pts = prices.map((p, i) =>
+      `${(i * xStep).toFixed(1)},${(22 - ((p - min) / range) * 20).toFixed(1)}`
+    ).join(' ');
+    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  function computeChange(hist) {
+    if (!hist || hist.length < 2) return null;
+    const first = parseFloat(hist[0].price_usd);
+    const last  = parseFloat(hist[hist.length - 1].price_usd);
+    return ((last - first) / first) * 100;
+  }
+
+  function fmtMarketPrice(sym) {
+    const p = S.prices[sym];
+    if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (p >= 1)    return '$' + p.toFixed(2);
+    return '$' + p.toFixed(4);
+  }
+
+  const rows = MARKET_ORDER.map(sym => {
+    const meta = TOKEN_META[sym];
+    const hist = histories[sym];
+    const change = computeChange(hist);
+    const changeStr = change === null ? '—' :
+      (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
+    const changeClass = change === null ? 'text-zinc-500' :
+      change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-zinc-500';
+    const sparkline = buildSparkline(hist, meta.color);
+    return `
+      <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-zinc-800/60 transition-colors py-3"
+           onclick="swapFromChange('${sym}'); document.getElementById('main-scroll').scrollTo(0,0)">
+        <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold">${sym}</div>
+          <div class="text-xs text-zinc-500 truncate">${meta.name}</div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
+          <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
+        </div>
+        <div class="shrink-0">${sparkline}</div>
+      </div>`;
+  }).join('');
+
+  mwrap.innerHTML = `
+    <h3 class="font-semibold mb-2 mt-6 text-zinc-300">Markets</h3>
+    <div class="space-y-2">${rows}</div>`;
 }
 
 // ── Stake ─────────────────────────────────────────────────────────────────────

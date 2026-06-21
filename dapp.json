@@ -138,6 +138,7 @@
     { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" },
     { "name": "Profile section in DOM", "path": "/?demo=1", "expectSelector": "#section-profile" },
     { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
-    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" }
+    { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" },
+    { "name": "Trade tab section in DOM", "path": "/?demo=1", "expectSelector": "#section-swap" }
   ]
 }

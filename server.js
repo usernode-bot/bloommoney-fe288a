@@ -508,6 +508,21 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/price-history', async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').toUpperCase();
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+    const hours = Math.min(parseInt(req.query.hours) || 24, 168);
+    const { rows } = await pool.query(
+      `SELECT recorded_at, price_usd::float FROM price_history
+       WHERE symbol=$1 AND recorded_at >= NOW() - ($2 * interval '1 hour')
+       ORDER BY recorded_at ASC`,
+      [symbol, hours]
+    );
+    res.json({ history: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Investment Holdings ────────────────────────────────────────────────────────
 
 app.get('/api/holdings', async (req, res) => {
@@ -1843,6 +1858,13 @@ async function start() {
       price_usd NUMERIC(20,6) NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS price_history (
+      id SERIAL PRIMARY KEY,
+      symbol VARCHAR(20) NOT NULL,
+      price_usd NUMERIC(20,6) NOT NULL,
+      recorded_at TIMESTAMPTZ NOT NULL,
+      UNIQUE(symbol, recorded_at)
+    );
     CREATE TABLE IF NOT EXISTS defi_swaps (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -2092,6 +2114,30 @@ async function start() {
       ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1)
     ON CONFLICT(symbol) DO NOTHING
   `);
+
+  // Seed price history — 24 hourly data points per token using deterministic wave formulas.
+  // Uses DATE_TRUNC so timestamps are hour-granular; ON CONFLICT skips existing rows within
+  // the same boot hour, keeping the seed idempotent.
+  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '26 hours'`);
+  const historyTokenDefs = [
+    { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)     * 0.018)).toFixed(6) },
+    { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)     * 0.020)).toFixed(6) },
+    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1) * 0.030)).toFixed(6) },
+    { symbol: 'USDC',  fn: ()  => '1.000000' },
+  ];
+  for (const t of historyTokenDefs) {
+    const vals = [], params = [];
+    for (let i = 0; i < 24; i++) {
+      const hoursAgo = 24 - i; // i=0 → oldest (24h ago), i=23 → newest (1h ago)
+      const idx = i * 3;
+      vals.push(`($${idx+1}, $${idx+2}, DATE_TRUNC('hour', NOW()) - $${idx+3} * interval '1 hour')`);
+      params.push(t.symbol, t.fn(i), hoursAgo);
+    }
+    await pool.query(
+      `INSERT INTO price_history(symbol, price_usd, recorded_at) VALUES ${vals.join(',')} ON CONFLICT(symbol, recorded_at) DO NOTHING`,
+      params
+    );
+  }
 
   // Seed futures markets
   await pool.query(`
