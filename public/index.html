@@ -850,47 +850,196 @@ async function renderProfile(sec) {
 // ── Swap ──────────────────────────────────────────────────────────────────────
 async function renderSwap(sec) {
   const tokens = ['USDC','BLOOM','ETH','BTC'];
-  let from = 'USDC', to = 'BLOOM', fromAmt = '';
+  const swapState = { from: 'BTC', to: 'ETH', fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
 
-  async function preview() {
-    if (!fromAmt || isNaN(fromAmt) || !S.prices[from] || !S.prices[to]) return '—';
-    const rate = S.prices[from] / S.prices[to];
-    const toAmt = parseFloat(fromAmt) * rate * 0.997;
-    return toAmt.toFixed(to==='ETH'?6:to==='BTC'?8:2) + ' ' + to;
+  // Inject flip animation keyframes once
+  if (!document.getElementById('swap-anim-style')) {
+    const st = document.createElement('style');
+    st.id = 'swap-anim-style';
+    st.textContent = `
+      @keyframes swapCardUp{0%{transform:translateY(0);opacity:1}50%{opacity:.3}100%{transform:translateY(-32px);opacity:1}}
+      @keyframes swapCardDown{0%{transform:translateY(0);opacity:1}50%{opacity:.3}100%{transform:translateY(32px);opacity:1}}
+      .swap-flip-up{animation:swapCardUp 150ms ease forwards}
+      .swap-flip-down{animation:swapCardDown 150ms ease forwards}
+      #swap-amt-inp::placeholder{color:#3a3a45}
+      #swap-amt-inp::-webkit-inner-spin-button,#swap-amt-inp::-webkit-outer-spin-button{-webkit-appearance:none}
+    `;
+    document.head.appendChild(st);
   }
 
-  // Two containers: swap card re-renders on input; markets list renders once.
-  sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-2"></div>`;
+  // Two containers: phone frame re-renders; markets list renders once.
+  sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-4"></div>`;
 
-  async function render() {
-    const prev = await preview();
+  const TOKEN_COLORS = {
+    BTC:   { bg: 'rgba(251,191,36,0.15)',  text: '#fbbf24', symbol: '₿' },
+    ETH:   { bg: 'rgba(56,189,248,0.15)',  text: '#38bdf8', symbol: 'Ξ' },
+    USDC:  { bg: 'rgba(52,211,153,0.15)',  text: '#34d399', symbol: '$' },
+    BLOOM: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', symbol: '✿' },
+  };
+
+  function tokenBadge(sym) {
+    const tc = TOKEN_COLORS[sym] || { bg: 'rgba(100,100,120,0.3)', text: '#a1a1aa', symbol: sym[0] };
+    return `<div style="width:38px;height:38px;border-radius:50%;background:${tc.bg};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:${tc.text};flex-shrink:0;">${tc.symbol}</div>`;
+  }
+
+  function calcToAmt() {
+    if (!swapState.fromAmt || isNaN(swapState.fromAmt) || !S.prices[swapState.from] || !S.prices[swapState.to]) return '';
+    const rate = S.prices[swapState.from] / S.prices[swapState.to];
+    return (parseFloat(swapState.fromAmt) * rate * 0.997).toFixed(swapState.to === 'ETH' ? 6 : swapState.to === 'BTC' ? 8 : 2);
+  }
+
+  function render() {
     const wrap = document.getElementById('swap-card-wrap');
     if (!wrap) return;
+    const toAmt = calcToAmt();
+    const fromBal = getBal(swapState.from);
+    const toBal = getBal(swapState.to);
+    const expectedOut = toAmt ? toAmt + ' ' + swapState.to : '—';
+
+    const svgGear = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14M12 2v2m0 16v2M2 12h2m16 0h2"/></svg>`;
+    const svgChevron = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#52525b" stroke-width="2.5" style="pointer-events:none;margin-left:-10px;flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>`;
+    const svgSwapArrows = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>`;
+    const svgInfo = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#52525b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+
+    const breakdownRows = [
+      { label: 'Slippage tolerance', value: swapState.slippage + '%', info: true },
+      { label: 'Price impact',       value: '0.01%',                  info: true },
+      { label: 'Network fee',        value: '$0.04',                  info: false },
+      { label: 'Exchange fee',       value: 'Free',                   info: false },
+      { label: 'Expected output',    value: expectedOut,              info: false },
+    ];
+
+    const navItems = [
+      { icon: `<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>`, label: 'Home' },
+      { icon: `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`, label: 'Chart' },
+      { icon: `<path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/>`, label: 'Swap', active: true },
+      { icon: `<rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 3l-4 4-4-4"/>`, label: 'Wallet' },
+      { icon: `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`, label: 'User' },
+    ];
+
     wrap.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Swap Tokens</h2>
-      <div class="card space-y-4">
-        <div>
-          <label class="text-xs text-zinc-500 mb-1 block">From</label>
-          <div class="flex gap-2">
-            <select id="swap-from" class="inp w-28" onchange="swapFromChange(this.value)">${tokens.map(t=>`<option ${t===from?'selected':''}>${t}</option>`).join('')}</select>
-            <input id="swap-amt" type="number" class="inp flex-1" placeholder="0.00" value="${fromAmt}" oninput="swapAmtChange(this.value)" min="0">
+      <div class="swap-token-card" style="width:min(375px,100%);background:#0d0d11;border-radius:40px;border:1px solid #2a2a35;overflow:hidden;display:flex;flex-direction:column;margin:0 auto;box-shadow:0 0 60px rgba(0,0,0,0.8);">
+
+        <!-- Status bar spacer -->
+        <div style="height:40px;flex-shrink:0;"></div>
+
+        <!-- Scrollable body -->
+        <div style="flex:1;overflow-y:auto;padding:0 22px;display:flex;flex-direction:column;">
+
+          <!-- Header -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;">
+            <span style="font-size:19px;font-weight:700;color:#fff;letter-spacing:-0.01em;">Swap Token</span>
+            <div style="position:relative;">
+              <button onclick="swapToggleSlippage()" style="display:flex;align-items:center;gap:5px;padding:6px 11px;background:#1a1a22;border-radius:9999px;border:none;cursor:pointer;">
+                ${svgGear}
+                <span style="font-size:12px;color:#a1a1aa;font-weight:500;">${swapState.slippage}%</span>
+              </button>
+              ${swapState.showSlippagePopover ? `
+                <div style="position:absolute;right:0;top:calc(100% + 6px);background:#1a1a22;border:1px solid #2e2e3a;border-radius:14px;padding:14px;z-index:20;width:176px;box-shadow:0 8px 24px rgba(0,0,0,0.6);">
+                  <div style="font-size:11px;color:#71717a;font-weight:500;margin-bottom:9px;">Slippage tolerance</div>
+                  <div style="display:flex;gap:7px;align-items:center;">
+                    <input id="slippage-inp" type="number" min="0.1" max="50" step="0.1" value="${swapState.slippage}"
+                      style="background:#0d0d11;border:1px solid #3a3a45;border-radius:8px;padding:6px 8px;color:#fff;font-size:13px;width:76px;outline:none;">
+                    <button onclick="swapSetSlippage()" style="flex:1;background:linear-gradient(90deg,#7fe5d9,#b59efa);color:#0d0d11;font-weight:700;font-size:12px;padding:7px 0;border-radius:8px;border:none;cursor:pointer;">Set</button>
+                  </div>
+                </div>` : ''}
+            </div>
           </div>
-          <div class="text-xs text-zinc-500 mt-1">Balance: ${getBal(from)} ${from}</div>
-        </div>
-        <div class="flex justify-center">
-          <button class="text-zinc-400 hover:text-white text-lg" onclick="swapFlip()">⇅</button>
-        </div>
-        <div>
-          <label class="text-xs text-zinc-500 mb-1 block">To</label>
-          <div class="flex gap-2">
-            <select id="swap-to" class="inp w-28" onchange="swapToChange(this.value)">${tokens.map(t=>`<option ${t===to?'selected':''}>${t}</option>`).join('')}</select>
-            <div class="inp flex-1 flex items-center text-violet-300">${prev}</div>
+
+          <!-- From label + quick-select -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+            <span style="font-size:12px;color:#71717a;font-weight:500;">From</span>
+            <div style="display:flex;gap:5px;">
+              ${['25%','50%','75%','Max'].map(p => `<button onclick="swapQuickSelect('${p}')" style="font-size:11px;color:#52525b;padding:2px 7px;background:#1c1c24;border-radius:9999px;border:none;cursor:pointer;transition:color .15s;" onmouseover="this.style.color='#a1a1aa'" onmouseout="this.style.color='#52525b'">${p}</button>`).join('')}
+            </div>
           </div>
-          <div class="text-xs text-zinc-500 mt-1">Balance: ${getBal(to)} ${to}</div>
+
+          <!-- From card -->
+          <div id="swap-from-card" style="background:#16161c;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:0;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              ${tokenBadge(swapState.from)}
+              <div style="display:flex;align-items:center;gap:2px;cursor:pointer;">
+                <select id="swap-from-sel" onchange="swapFromChange(this.value)"
+                  style="background:transparent;border:none;color:#fff;font-weight:600;font-size:15px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;padding-right:2px;min-width:48px;">
+                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.from?'selected':''} style="background:#16161c;">${t}</option>`).join('')}
+                </select>
+                ${svgChevron}
+              </div>
+            </div>
+            <div style="text-align:right;flex:1;margin-left:8px;">
+              <input id="swap-amt-inp" type="number" value="${swapState.fromAmt}" placeholder="0.00" min="0"
+                oninput="swapAmtChange(this.value)"
+                style="background:transparent;border:none;color:#fff;font-size:22px;font-weight:700;text-align:right;width:100%;outline:none;display:block;">
+              <div style="font-size:11px;color:#52525b;margin-top:3px;">Balance: ${fromBal}</div>
+            </div>
+          </div>
+
+          <!-- Floating switch button -->
+          <div style="display:flex;justify-content:center;position:relative;z-index:2;margin:-1px 0;">
+            <button id="swap-flip-btn" onclick="swapFlipTokens()"
+              style="width:38px;height:38px;border-radius:50%;background:#22222a;border:3px solid #0d0d11;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s,background .15s;"
+              onmouseover="this.style.background='#2e2e3a'" onmouseout="this.style.background='#22222a'">
+              ${svgSwapArrows}
+            </button>
+          </div>
+
+          <!-- To card -->
+          <div id="swap-to-card" style="background:#16161c;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              ${tokenBadge(swapState.to)}
+              <div style="display:flex;align-items:center;gap:2px;cursor:pointer;">
+                <select id="swap-to-sel" onchange="swapToChange(this.value)"
+                  style="background:transparent;border:none;color:#fff;font-weight:600;font-size:15px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;padding-right:2px;min-width:48px;">
+                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.to?'selected':''} style="background:#16161c;">${t}</option>`).join('')}
+                </select>
+                ${svgChevron}
+              </div>
+            </div>
+            <div style="text-align:right;flex:1;margin-left:8px;">
+              <div style="color:${toAmt?'#fff':'#3a3a45'};font-size:22px;font-weight:700;">${toAmt || '0.00'}</div>
+              <div style="font-size:11px;color:#52525b;margin-top:3px;">Balance: ${toBal}</div>
+            </div>
+          </div>
+
+          <!-- Transaction breakdown -->
+          <div style="background:#16161c;border-radius:18px;padding:14px 16px;margin-bottom:14px;display:flex;flex-direction:column;gap:11px;">
+            ${breakdownRows.map(row => `
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <span style="font-size:12px;color:#71717a;">${row.label}</span>
+                  ${row.info ? svgInfo : ''}
+                </div>
+                <span style="font-size:12px;color:#d4d4d8;font-weight:500;">${row.value}</span>
+              </div>`).join('')}
+          </div>
+
+          <!-- Feedback message -->
+          <div id="swap-msg" style="font-size:12px;text-align:center;min-height:16px;margin-bottom:6px;"></div>
+
+          <!-- CTA -->
+          <button onclick="execSwap()"
+            style="width:100%;padding:15px;border-radius:16px;border:none;background:linear-gradient(90deg,#7fe5d9,#b59efa);color:#0d0d11;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.01em;margin-bottom:18px;transition:opacity .15s;"
+            onmouseover="this.style.opacity='.88'" onmouseout="this.style.opacity='1'">
+            Create swap →
+          </button>
+
+        </div><!-- end scrollable body -->
+
+        <!-- In-frame bottom nav -->
+        <div style="height:68px;flex-shrink:0;border-top:1px solid #1e1e28;display:flex;align-items:center;justify-content:space-around;padding:0 6px;background:#0d0d11;">
+          ${navItems.map(item => `
+            <div style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:44px;">
+              ${item.active
+                ? `<div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#7fe5d9,#b59efa);display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px rgba(127,229,217,.35);">
+                     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0d0d11" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${item.icon}</svg>
+                   </div>`
+                : `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
+                     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#3f3f46" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${item.icon}</svg>
+                   </div>`}
+              <span style="font-size:9px;color:${item.active ? '#7fe5d9' : '#3f3f46'};font-weight:${item.active ? '600' : '400'};">${item.label}</span>
+            </div>`).join('')}
         </div>
-        ${S.prices[from] && S.prices[to] ? `<p class="text-xs text-zinc-500">Rate: 1 ${from} ≈ ${(S.prices[from]/S.prices[to]).toFixed(6)} ${to} (0.3% fee)</p>` : ''}
-        <button class="btn btn-v w-full" onclick="execSwap()">Swap</button>
-        <p id="swap-msg" class="text-sm text-center"></p>
+
       </div>`;
   }
 
@@ -899,24 +1048,69 @@ async function renderSwap(sec) {
     d.prices.forEach(p => { S.prices[p.symbol] = parseFloat(p.price_usd); });
   } catch {}
 
-  window.swapFromChange = (v) => { from = v; if (from === to) to = tokens.find(t=>t!==from); render(); };
-  window.swapToChange = (v) => { to = v; if (to === from) from = tokens.find(t=>t!==to); render(); };
-  window.swapAmtChange = (v) => { fromAmt = v; render(); };
-  window.swapFlip = () => { [from, to] = [to, from]; render(); };
+  window.swapFromChange = (v) => {
+    swapState.from = v;
+    if (swapState.from === swapState.to) swapState.to = tokens.find(t => t !== swapState.from);
+    render();
+  };
+  window.swapToChange = (v) => {
+    swapState.to = v;
+    if (swapState.to === swapState.from) swapState.from = tokens.find(t => t !== swapState.to);
+    render();
+  };
+  window.swapAmtChange = (v) => { swapState.fromAmt = v; render(); };
+
+  window.swapQuickSelect = (pct) => {
+    const balNum = parseFloat(S.balances[swapState.from] || 0) / 1_000_000;
+    swapState.fromAmt = pct === 'Max'
+      ? String(balNum)
+      : String(parseFloat((balNum * parseInt(pct) / 100).toFixed(8)));
+    render();
+  };
+
+  window.swapToggleSlippage = () => {
+    swapState.showSlippagePopover = !swapState.showSlippagePopover;
+    render();
+  };
+  window.swapSetSlippage = () => {
+    const inp = document.getElementById('slippage-inp');
+    if (inp) { const v = parseFloat(inp.value); if (v > 0 && v <= 50) swapState.slippage = v; }
+    swapState.showSlippagePopover = false;
+    render();
+  };
+
+  window.swapFlipTokens = () => {
+    if (swapState.flipping) return;
+    swapState.flipping = true;
+    const fromCard = document.getElementById('swap-from-card');
+    const toCard   = document.getElementById('swap-to-card');
+    if (fromCard) fromCard.classList.add('swap-flip-down');
+    if (toCard)   toCard.classList.add('swap-flip-up');
+    setTimeout(() => {
+      const prevToAmt = calcToAmt();
+      [swapState.from, swapState.to] = [swapState.to, swapState.from];
+      if (prevToAmt) swapState.fromAmt = prevToAmt;
+      swapState.flipping = false;
+      render();
+    }, 150);
+  };
+
   window.execSwap = async () => {
     const msg = document.getElementById('swap-msg');
+    if (!msg) return;
     try {
-      const d = await api('POST', '/api/defi/swap', { from_token: from, to_token: to, from_amount: fromAmt });
-      msg.className = 'text-sm text-center text-emerald-400';
+      const d = await api('POST', '/api/defi/swap', { from_token: swapState.from, to_token: swapState.to, from_amount: swapState.fromAmt });
+      msg.style.color = '#34d399';
       msg.textContent = `✓ Received ${d.to_amount.toFixed(6)} ${d.to_token}`;
       await refreshBalances();
-      fromAmt = '';
-      render();
+      swapState.fromAmt = '';
+      setTimeout(() => { msg.textContent = ''; render(); }, 2000);
     } catch (e) {
-      if (msg) { msg.className = 'text-sm text-center text-red-400'; msg.textContent = e.message; }
+      if (msg) { msg.style.color = '#f87171'; msg.textContent = e.message; }
     }
   };
-  await render();
+
+  render();
 
   // ── Markets list ──────────────────────────────────────────────────────────
   const mwrap = document.getElementById('swap-markets-wrap');
