@@ -34,7 +34,8 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org",
-    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
+    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
     "connect-src 'self' https://social-vibecoding.usernodelabs.org",
     "img-src 'self' data: https:",
     "frame-ancestors 'self' https://social-vibecoding.usernodelabs.org",
