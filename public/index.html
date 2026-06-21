@@ -165,6 +165,12 @@
       <!-- Verify -->
       <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
 
+      <!-- KYC -->
+      <section id="section-kyc" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
+
+      <!-- Admin -->
+      <section id="section-admin" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
     </main>
   </div>
 
@@ -201,6 +207,8 @@
 .tag-basic { background: rgba(59,130,246,0.15); color: #93c5fd; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-social { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-premium { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-verified { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 select.inp option { background: #18181b; }
@@ -294,6 +302,7 @@ const VIEW_SECTION = {
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
+  admin: 'section-admin',
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
@@ -336,6 +345,7 @@ async function loadView(view) {
       case 'nfts': await renderNFTs(sec); break;
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
+      case 'admin': await renderAdmin(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
 }
@@ -976,6 +986,7 @@ async function renderExplore(sec) {
   };
 }
 
+
 // ── Opinion Markets ───────────────────────────────────────────────────────────
 async function renderMarkets(sec) {
   if (S.marketId) { await renderMarketDetail(sec); return; }
@@ -1388,6 +1399,96 @@ async function renderVerify(sec) {
       await renderVerify(sec);
     } catch {}
   }
+}
+
+// ── Admin (in-SPA panel for #section-admin) ──────────────────────────────────
+async function renderAdmin(sec) {
+  let adminTab = 'stats';
+
+  async function loadStats() {
+    const { stats } = await api('GET', '/api/admin/stats');
+    return `<div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+      ${[['Total Users', stats.total_users],['Posts Today', stats.posts_today],
+         ['Swap Volume', fmtUSD(stats.swap_volume)+' USDC'],['Open Futures', stats.open_futures],
+         ['Market Liquidity', fmtUSD(stats.market_liquidity)+' USDC']].map(([label,val]) => `
+        <div class="card text-center">
+          <div class="text-2xl font-bold text-violet-300">${val}</div>
+          <div class="text-xs text-zinc-500 mt-1">${label}</div>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  async function loadUsers(search = '') {
+    const { users } = await api('GET', `/api/admin/users?search=${encodeURIComponent(search)}`);
+    return `<div class="mb-3"><input id="user-search" class="inp" placeholder="Search users…" value="${esc(search)}" oninput="adminSearch(this.value)"></div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-zinc-500 text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${users.map(u => `<tr class="border-t border-zinc-800">
+        <td class="py-1.5 pr-3 font-medium">@${esc(u.username)}</td>
+        <td class="pr-3 font-mono text-xs">${shortAddr(u.usernode_pubkey)}</td>
+        <td class="pr-3">${kycTag(u.kyc_level||'')}</td>
+        <td class="pr-3">${u.is_admin?'✓':''}</td>
+        <td class="pr-3">${u.is_banned?'🚫':''}</td>
+        <td class="flex gap-1 py-1">
+          ${!u.is_banned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="banUser(${u.user_id})">Ban</button>` : ''}
+          <button class="btn btn-z text-xs px-2 py-0.5" onclick="toggleAdmin(${u.user_id})">${u.is_admin?'Revoke':'Grant'} Admin</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  async function loadKYCQueue() {
+    const { verifications } = await api('GET', '/api/admin/kyc?status=pending');
+    return verifications.length ? `<div class="space-y-3">${verifications.map(k => `
+      <div class="card flex items-center justify-between gap-3">
+        <div>
+          <div class="font-medium">@${esc(k.username)} → ${k.level}</div>
+          <div class="text-xs text-zinc-500">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-g text-xs" onclick="approveKYC(${k.id})">Approve</button>
+          <button class="btn btn-r text-xs" onclick="rejectKYC(${k.id})">Reject</button>
+        </div>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No pending KYC requests</p>';
+  }
+
+  async function fullRender() {
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">⚙️ Admin Dashboard</h2>
+      <div class="flex flex-wrap gap-2 mb-4 border-b border-zinc-800 pb-3">
+        ${['stats','users','kyc'].map(t=>`<button class="btn ${adminTab===t?'btn-v':'btn-z'} text-xs" onclick="switchAdminTab('${t}')">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`).join('')}
+      </div>
+      <div id="admin-content">${spin()}</div>`;
+
+    const content = document.getElementById('admin-content');
+    try {
+      if (adminTab === 'stats') content.innerHTML = await loadStats();
+      else if (adminTab === 'users') content.innerHTML = await loadUsers();
+      else if (adminTab === 'kyc') content.innerHTML = await loadKYCQueue();
+    } catch (e) { content.innerHTML = err(e.message); }
+  }
+
+  window.switchAdminTab = (t) => { adminTab = t; fullRender(); };
+  window.adminSearch = async (q) => {
+    const content = document.getElementById('admin-content');
+    if (content) content.innerHTML = await loadUsers(q).catch(e => err(e.message));
+  };
+  window.banUser = async (id) => {
+    if (!confirm('Ban this user?')) return;
+    try { await api('POST', `/api/admin/users/${id}/ban`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.toggleAdmin = async (id) => {
+    try { await api('POST', `/api/admin/users/${id}/admin`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.approveKYC = async (id) => {
+    try { await api('POST', `/api/admin/kyc/${id}/approve`); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.rejectKYC = async (id) => {
+    const reason = prompt('Rejection reason:');
+    if (!reason) return;
+    try { await api('POST', `/api/admin/kyc/${id}/reject`, { reason }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  await fullRender();
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────

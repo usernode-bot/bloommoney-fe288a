@@ -92,6 +92,7 @@
     { "name": "Futures terminal in DOM", "path": "/?demo=1", "expectSelector": "#section-futures" },
     { "name": "Verify screen in DOM", "path": "/?demo=1", "expectSelector": "#section-verify" },
     { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
+    { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" },
     { "name": "Admin console renders", "path": "/admin?demo=1", "expectSelector": "#admin-stats" }
   ]
 }

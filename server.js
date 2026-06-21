@@ -123,7 +123,6 @@ function validStr(v, max) {
 const HTTP_URL_RE = /^https?:\/\//i;
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function upsertUser(u) {
@@ -221,7 +220,6 @@ async function userTier(userId) {
   const { rows } = await pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [userId]);
   return effectiveTier(rows[0]);
 }
-
 // ── Background price drift + liquidation ─────────────────────────────────────
 
 setInterval(async () => {
@@ -331,7 +329,6 @@ async function runFunding() {
     );
   }
 }
-
 // ── /api/me ───────────────────────────────────────────────────────────────────
 
 app.get('/api/me', async (req, res) => {
@@ -519,7 +516,6 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     const tier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, tier)))
       return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
-
     const { rows: prices } = await client.query('SELECT symbol, price_usd::float FROM market_prices');
     const priceMap = {};
     prices.forEach(p => priceMap[p.symbol] = p.price_usd);
@@ -1147,6 +1143,19 @@ app.post('/api/verify/zkpassport', requireWallet, async (req, res) => {
         provider='zkpassport', attestation_ref=$2, verified_at=NOW(), rejection_reason=NULL
     `, [req.user.id, out.ref]);
     res.json({ ok: true, level: 'premium' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/kyc/submit', requireWallet, async (req, res) => {
+  try {
+    const { level, document_type, biometric_consent } = req.body;
+    if (!['verified', 'elite'].includes(level)) return res.status(400).json({ error: 'Invalid level' });
+    await pool.query(`
+      INSERT INTO kyc_verifications(user_id,level,status,document_type,biometric_consent)
+      VALUES($1,$2,'pending',$3,$4)
+      ON CONFLICT(user_id) DO UPDATE SET level=$2, status='pending', document_type=$3, biometric_consent=$4, submitted_at=NOW(), rejection_reason=NULL
+    `, [req.user.id, level, document_type || null, biometric_consent || false]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
