@@ -310,6 +310,26 @@ function fmtAmt(sym, v) {
   return n.toFixed(2);
 }
 function fmtUSD(v) { return (Number(v) / U).toFixed(2); }
+// AI Trade Helper: client-side mirror of server COINGECKO_TICKER_MAP keys.
+const KNOWN_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+const TICKER_RE = /\$([A-Za-z]{2,6})\b/g;
+function detectTickers(text) {
+  const seen = [];
+  let m;
+  TICKER_RE.lastIndex = 0;
+  while ((m = TICKER_RE.exec(text || '')) !== null) {
+    const sym = m[1].toUpperCase();
+    if (KNOWN_TICKERS.has(sym) && !seen.includes(sym)) seen.push(sym);
+    if (seen.length >= 3) break;
+  }
+  return seen;
+}
+function fmtTickerPrice(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return '';
+  if (n >= 1) return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '$' + n.toFixed(4);
+}
 function getBal(sym) { return fmtAmt(sym, S.balances[sym] || 0); }
 function shortAddr(a) { return a ? a.slice(0,6)+'…'+a.slice(-4) : ''; }
 function tsAgo(d) {
@@ -511,6 +531,67 @@ document.getElementById('connect-wallet-btn').addEventListener('click', connectW
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
   let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+  // AI Trade Helper composer badge state (lives across re-renders).
+  const tickerCache = {};        // TICKER -> price (number) or 'err'
+  let tickerDebounce = null;     // pending debounce timer
+  let lastTickerKey = '';        // last looked-up recognized-ticker set
+
+  function renderTickerBadge(symbols) {
+    const el = document.getElementById('compose-ticker-badge');
+    if (!el) return;
+    if (!symbols.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'flex';
+    el.innerHTML = symbols.map(sym => {
+      const v = tickerCache[sym];
+      let body;
+      if (v === undefined) body = '<span class="text-zinc-500">…</span>';
+      else if (v === 'err') body = '<span class="text-zinc-500">price unavailable</span>';
+      else body = `<span class="text-emerald-400 font-semibold">${fmtTickerPrice(v)}</span>`;
+      return `<span class="inline-flex items-center gap-1 text-xs bg-zinc-800/70 border border-zinc-700 rounded-full px-2 py-0.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        <span class="text-zinc-300 font-medium">$${sym}</span>
+        <span class="text-zinc-600">·</span>${body}</span>`;
+    }).join('');
+  }
+
+  async function refreshTickers(symbols) {
+    const need = symbols.filter(s => tickerCache[s] === undefined);
+    renderTickerBadge(symbols);
+    if (!need.length) return;
+    try {
+      const d = await api('GET', '/api/ticker-prices?symbols=' + encodeURIComponent(need.join(',')));
+      for (const s of need) {
+        const p = d.prices && d.prices[s];
+        tickerCache[s] = (p != null) ? p : 'err';
+      }
+    } catch {
+      for (const s of need) if (tickerCache[s] === undefined) tickerCache[s] = 'err';
+    }
+    // Re-render against the current composer text (user may have kept typing).
+    const box = document.getElementById('compose-box');
+    renderTickerBadge(detectTickers(box ? box.value : ''));
+  }
+
+  function onComposeInput() {
+    const box = document.getElementById('compose-box');
+    if (!box) return;
+    const cnt = document.getElementById('compose-count');
+    if (cnt) cnt.textContent = box.value.length + '/280';
+    const symbols = detectTickers(box.value);
+    const key = symbols.join(',');
+    renderTickerBadge(symbols);
+    if (key === lastTickerKey) return;
+    lastTickerKey = key;
+    if (tickerDebounce) clearTimeout(tickerDebounce);
+    if (!symbols.length) return;
+    tickerDebounce = setTimeout(() => refreshTickers(symbols), 500);
+  }
+
+  function resetComposerTicker() {
+    if (tickerDebounce) { clearTimeout(tickerDebounce); tickerDebounce = null; }
+    lastTickerKey = '';
+    renderTickerBadge([]);
+  }
 
   async function loadPosts() {
     const params = new URLSearchParams({ tab: feedState.tab, limit: 20 });
@@ -576,6 +657,7 @@ async function renderFeed(sec) {
     sec.innerHTML = `
       <div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
+        <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-3">
             <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
@@ -597,9 +679,11 @@ async function renderFeed(sec) {
       ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
     `;
     const box = document.getElementById('compose-box');
-    if (box) box.addEventListener('input', () => {
-      document.getElementById('compose-count').textContent = box.value.length + '/280';
-    });
+    if (box) {
+      box.addEventListener('input', onComposeInput);
+      // Restore any previously-detected ticker badge after a background re-render.
+      renderTickerBadge(detectTickers(box.value));
+    }
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
@@ -614,6 +698,7 @@ async function renderFeed(sec) {
     try {
       await api('POST', '/api/posts', { content, locked });
       box.value = '';
+      resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();
     } catch (e) { alert(e.message); }
