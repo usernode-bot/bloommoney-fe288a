@@ -232,6 +232,7 @@ const S = {
   view: 'home',
   prices: {},
   marketId: null,
+  tradeToken: null,
   profileUser: null,
   futuresMode: 'paper',
   futuresMarket: null,
@@ -847,8 +848,12 @@ async function renderProfile(sec) {
   await fullRender();
 }
 
+// ── Token detail ──────────────────────────────────────────────────────────────
+window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('trade'); };
+
 // ── Swap ──────────────────────────────────────────────────────────────────────
 async function renderSwap(sec) {
+  if (S.tradeToken) { await renderTokenDetail(sec); return; }
   const tokens = ['USDC','BLOOM','ETH','BTC'];
   const swapState = { from: 'BTC', to: 'ETH', fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
 
@@ -1086,10 +1091,10 @@ async function renderSwap(sec) {
   if (!mwrap) return;
 
   const TOKEN_META = {
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400'    },
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400'  },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400'},
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'     },
+    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'  },
   };
   const MARKET_ORDER = ['ETH', 'BTC', 'BLOOM', 'USDC'];
 
@@ -1143,7 +1148,7 @@ async function renderSwap(sec) {
     const sparkline = buildSparkline(hist, meta.color);
     return `
       <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-zinc-800/60 transition-colors py-3"
-           onclick="swapFromChange('${sym}'); document.getElementById('main-scroll').scrollTo(0,0)">
+           onclick="openTokenDetail('${sym}')">
         <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
         <div class="flex-1 min-w-0">
           <div class="text-sm font-semibold">${sym}</div>
@@ -1160,6 +1165,108 @@ async function renderSwap(sec) {
   mwrap.innerHTML = `
     <h3 class="font-semibold mb-2 mt-6 text-zinc-300">Markets</h3>
     <div class="space-y-2">${rows}</div>`;
+}
+
+// ── Token Detail ──────────────────────────────────────────────────────────────
+async function renderTokenDetail(sec) {
+  const sym = S.tradeToken;
+  const TOKEN_META_DETAIL = {
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'                         },
+    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',  desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400',  btnCls: 'bg-violet-600 hover:bg-violet-500', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'           },
+  };
+
+  const meta = TOKEN_META_DETAIL[sym];
+  if (!meta) { S.tradeToken = null; navigate('trade'); return; }
+
+  let chartHours = 24;
+
+  function computeChangePct(hist) {
+    if (!hist || hist.length < 2) return null;
+    const first = parseFloat(hist[0].price_usd);
+    const last  = parseFloat(hist[hist.length - 1].price_usd);
+    return ((last - first) / first) * 100;
+  }
+
+  async function renderChart() {
+    const chartWrap = document.getElementById('token-detail-chart');
+    if (!chartWrap) return;
+    chartWrap.innerHTML = `<div class="text-zinc-600 text-sm text-center py-6">${spin()}</div>`;
+    let hist = [];
+    try {
+      const res = await api('GET', `/api/price-history?symbol=${sym}&hours=${chartHours}`);
+      hist = (res && res.history) || [];
+    } catch {}
+    const pts = hist.map(h => ({ x: new Date(h.recorded_at).getTime(), y: parseFloat(h.price_usd) }));
+    chartWrap.innerHTML = svgLineChart(pts, { color: meta.color, width: 480, height: 140 });
+  }
+
+  function fmtDetailPrice(sym) {
+    const p = S.prices[sym];
+    if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (p >= 1)    return '$' + p.toFixed(2);
+    return '$' + p.toFixed(4);
+  }
+
+  async function load() {
+    await refreshBalances();
+    let hist24 = [];
+    try {
+      const res = await api('GET', `/api/price-history?symbol=${sym}&hours=24`);
+      hist24 = (res && res.history) || [];
+    } catch {}
+
+    const change = computeChangePct(hist24);
+    const changeStr = change === null ? '—' : (change >= 0 ? `+${change.toFixed(2)}%` : `${change.toFixed(2)}%`);
+    const changeCls = change === null ? 'text-zinc-500' : change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-zinc-500';
+
+    sec.innerHTML = `
+      <button class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('trade')">← Markets</button>
+      <div class="card space-y-4 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-sm font-bold shrink-0">${sym}</div>
+          <div>
+            <div class="font-bold text-lg leading-tight">${esc(meta.name)}</div>
+            <div class="text-sm text-zinc-500">${sym}</div>
+          </div>
+          <div class="ml-auto text-right">
+            <div class="text-2xl font-bold">${fmtDetailPrice(sym)}</div>
+            <div class="text-sm font-medium ${changeCls}">${changeStr} <span class="text-zinc-600 font-normal">24h</span></div>
+          </div>
+        </div>
+        <p class="text-sm text-zinc-400">${esc(meta.desc)}</p>
+        <div>
+          <div class="flex gap-2 mb-3">
+            <button id="btn-24h" class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(24)">24H</button>
+            <button id="btn-7d"  class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(168)">7D</button>
+          </div>
+          <div id="token-detail-chart"></div>
+        </div>
+      </div>
+      <button class="w-full py-3 rounded-xl font-semibold text-white transition-colors ${meta.btnCls}" onclick="window._swapFromDetail('${sym}')">Swap ${esc(sym)} →</button>`;
+
+    await renderChart();
+  }
+
+  window._setTokenChartHours = async (h) => {
+    chartHours = h;
+    const b24 = document.getElementById('btn-24h');
+    const b7d  = document.getElementById('btn-7d');
+    if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`;
+    if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`;
+    await renderChart();
+  };
+
+  window._swapFromDetail = (s) => {
+    S.tradeToken = null;
+    navigate('trade');
+    // After navigation re-renders the swap form, select the token
+    setTimeout(() => { if (window.swapFromChange) window.swapFromChange(s); }, 50);
+  };
+
+  await load();
 }
 
 // ── Stake ─────────────────────────────────────────────────────────────────────

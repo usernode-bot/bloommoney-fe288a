@@ -153,6 +153,7 @@
     { "name": "Activity API returns JSON", "path": "/api/activity", "expectSelector": "body" },
     { "name": "Public portfolio API returns JSON", "path": "/explorer-api/portfolio/staging-alice", "expectSelector": "body" },
     { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" },
-    { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" }
+    { "name": "Swap token card renders", "path": "/?demo=1", "expectSelector": ".swap-token-card" },
+    { "name": "Token detail renders", "path": "/?demo=1", "expectSelector": ".token-market-row" }
   ]
 }
