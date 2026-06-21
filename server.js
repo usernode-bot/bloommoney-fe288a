@@ -93,7 +93,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify)/;
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|holdings)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -496,6 +496,74 @@ app.get('/api/prices', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM market_prices');
     res.json({ prices: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Investment Holdings ────────────────────────────────────────────────────────
+
+app.get('/api/holdings', async (req, res) => {
+  try {
+    const { rows: holdings } = await pool.query(
+      'SELECT * FROM investment_holdings WHERE user_id=$1 ORDER BY added_at DESC',
+      [req.user.id]
+    );
+    const { rows: prices } = await pool.query('SELECT symbol, price_usd::float FROM market_prices');
+    const priceMap = {};
+    prices.forEach(p => { priceMap[p.symbol.toUpperCase()] = p.price_usd; });
+    res.json({ holdings, prices: priceMap });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/holdings', async (req, res) => {
+  try {
+    const { asset_name, ticker, asset_type, quantity, purchase_price } = req.body;
+    if (!validStr(asset_name, 150)) return res.status(400).json({ error: 'Invalid asset name' });
+    if (ticker != null && String(ticker).length > 20) return res.status(400).json({ error: 'Ticker too long' });
+    if (!['crypto', 'stock', 'etf', 'other'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset type' });
+    const qty = parseFloat(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+    const price = parseFloat(purchase_price);
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
+    const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
+    const { rows: [holding] } = await pool.query(
+      'INSERT INTO investment_holdings(user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.id, asset_name, tickerUpper, asset_type, qty, price]
+    );
+    res.json({ holding });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/holdings/:id', async (req, res) => {
+  try {
+    const { rows: [existing] } = await pool.query(
+      'SELECT id FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const { asset_name, ticker, asset_type, quantity, purchase_price } = req.body;
+    if (!validStr(asset_name, 150)) return res.status(400).json({ error: 'Invalid asset name' });
+    if (ticker != null && String(ticker).length > 20) return res.status(400).json({ error: 'Ticker too long' });
+    if (!['crypto', 'stock', 'etf', 'other'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset type' });
+    const qty = parseFloat(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+    const price = parseFloat(purchase_price);
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Invalid purchase price' });
+    const tickerUpper = ticker ? String(ticker).toUpperCase().trim() : null;
+    const { rows: [holding] } = await pool.query(
+      'UPDATE investment_holdings SET asset_name=$1,ticker=$2,asset_type=$3,quantity=$4,purchase_price=$5,updated_at=NOW() WHERE id=$6 AND user_id=$7 RETURNING *',
+      [asset_name, tickerUpper, asset_type, qty, price, req.params.id, req.user.id]
+    );
+    res.json({ holding });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/holdings/:id', async (req, res) => {
+  try {
+    const { rows: [existing] } = await pool.query(
+      'SELECT id FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    await pool.query('DELETE FROM investment_holdings WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1794,6 +1862,18 @@ async function start() {
       description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS investment_holdings (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_name VARCHAR(150) NOT NULL,
+      ticker VARCHAR(20),
+      asset_type VARCHAR(20) NOT NULL,
+      quantity NUMERIC(24,8) NOT NULL,
+      purchase_price NUMERIC(20,6) NOT NULL,
+      added_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS investment_holdings_user_idx ON investment_holdings (user_id);
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -1856,6 +1936,7 @@ async function start() {
     COMMENT ON TABLE kyc_verifications IS 'staging:private';
     COMMENT ON TABLE admin_actions IS 'staging:private';
     COMMENT ON TABLE transactions IS 'staging:private';
+    COMMENT ON TABLE investment_holdings IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -1974,6 +2055,21 @@ async function start() {
         (9002,9002,'staging-bob','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A'),
         (9003,9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B'),
         (9004,9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed investment holdings
+    await pool.query(`
+      INSERT INTO investment_holdings(id,user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES
+        (900101,9001,'Staging demo holding — Ethereum','ETH','crypto',2.0,2200.0),
+        (900102,9001,'Staging demo holding — BloomMoney Token','BLOOM','crypto',10.0,0.40),
+        (900103,9002,'Staging demo holding — Bitcoin','BTC','crypto',0.05,60000.0),
+        (900104,9002,'Staging demo holding — Apple Inc.','AAPL','stock',5.0,185.0),
+        (900105,9003,'Staging demo holding — BloomMoney Token','BLOOM','crypto',100.0,0.35),
+        (900106,9003,'Staging demo holding — Ethereum','ETH','crypto',1.0,2100.0),
+        (900107,9004,'Staging demo holding — Bitcoin','BTC','crypto',0.1,65000.0),
+        (900108,9005,'Staging demo holding — BloomMoney Token','BLOOM','crypto',500.0,0.30),
+        (900109,9005,'Staging demo holding — Ethereum','ETH','crypto',2.0,2300.0)
       ON CONFLICT(id) DO NOTHING
     `);
 
