@@ -784,7 +784,7 @@ async function renderProfile(sec) {
                 </div>
               </div>
               <div class="flex gap-2">
-                ${isMe ? `<button class="btn btn-v" onclick="navigate('verify')">Verify</button><button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
+                ${isMe ? `<button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
                   `<button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
               </div>
             </div>
@@ -795,30 +795,6 @@ async function renderProfile(sec) {
               <span><strong>${counts.post_count}</strong> <span class="text-zinc-500">posts</span></span>
             </div>`}
         </div>
-        ${isMe ? `
-        <div id="linked-accounts-section" class="card space-y-3">
-          <div class="flex items-center justify-between">
-            <h3 class="font-semibold text-sm">Verified Accounts</h3>
-            ${S.kyc?.level === 'premium' ? '<span class="tag-zk-verified">⊛ zkPassport Verified</span>' : `<button class="btn btn-z text-xs" onclick="navigate('verify')">Get Premium</button>`}
-          </div>
-          <div class="space-y-2">
-            ${[['twitter','X / Twitter','#1d9bf0'],['google','Google','#ea4335'],['discord','Discord','#5865f2'],['github','GitHub','#8b949e']].map(([p,label,color]) => {
-              const linked = S.social_accounts.find(a => a.provider === p);
-              return linked
-                ? `<div class="flex items-center justify-between gap-2">
-                     <div class="flex items-center gap-2 min-w-0">
-                       <span class="text-xs font-semibold shrink-0" style="color:${color}">${label}</span>
-                       <span class="text-xs text-zinc-400 truncate">${esc(linked.handle || '')}</span>
-                     </div>
-                     <button class="btn btn-r text-xs px-2 py-1 shrink-0" onclick="unlinkAccount('${p}')">Unlink</button>
-                   </div>`
-                : `<div class="flex items-center justify-between gap-2">
-                     <span class="text-xs text-zinc-500" style="color:${color}">${label}</span>
-                     <button class="btn btn-z text-xs px-2 py-1 shrink-0" onclick="linkAccount('${p}')">Link</button>
-                   </div>`;
-            }).join('')}
-          </div>
-        </div>` : ''}
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
           ${[...['posts','replies','nfts'], ...(isMe ? ['portfolio','activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
