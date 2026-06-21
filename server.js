@@ -1,7 +1,9 @@
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const verify = require('./lib/verify');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,11 +13,36 @@ const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
 
+// Funding interval: hourly in prod, accelerated (~2 min) in staging so seeded
+// history and the next-funding countdown are observable during a preview.
+const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
+
+// Per-day caps applied to Basic-tier users (security layer, Phase 4).
+const BASIC_DAILY_TRADE_COUNT = 25;
+
 const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  // CSP compatible with the Tailwind CDN + the hosted Usernode bridge origin.
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org",
+    "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
+    "connect-src 'self' https://social-vibecoding.usernodelabs.org",
+    "img-src 'self' data: https:",
+    "frame-ancestors 'self' https://social-vibecoding.usernodelabs.org",
+  ].join('; '));
+  next();
+});
+
+// ── Auth gate ───────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const token = req.query.token || req.headers['x-usernode-token'];
   if (token && JWT_SECRET) {
@@ -29,8 +56,73 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/health', (_, res) => res.json({ status: 'ok' }));
+// ── Ban enforcement (Phase 4) ─────────────────────────────────────────────────
+// A banned user is blocked from every state-changing request and every /api/*
+// call. Reads of the static shell still pass so they see the "banned" UI.
+const banCache = new Map(); // user_id -> { banned, ts }
+async function isBanned(userId) {
+  const c = banCache.get(userId);
+  if (c && Date.now() - c.ts < 15000) return c.banned;
+  try {
+    const { rows } = await pool.query('SELECT is_banned FROM users WHERE user_id=$1', [userId]);
+    const banned = !!rows[0]?.is_banned;
+    banCache.set(userId, { banned, ts: Date.now() });
+    return banned;
+  } catch { return false; }
+}
+app.use(async (req, res, next) => {
+  if (!req.user) return next();
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) return next();
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+  if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
+  if (await isBanned(req.user.id)) return res.status(403).json({ error: 'banned' });
+  next();
+});
 
+// ── Rate limiting (Phase 4) ────────────────────────────────────────────────────
+// In-memory token buckets keyed per-user (falling back to IP). Financial and
+// verification mutations get a tighter bucket than ordinary reads/writes.
+const buckets = new Map();
+function rateLimit(key, capacity, refillPerSec) {
+  const now = Date.now();
+  let b = buckets.get(key);
+  if (!b) { b = { tokens: capacity, ts: now }; buckets.set(key, b); }
+  b.tokens = Math.min(capacity, b.tokens + (now - b.ts) / 1000 * refillPerSec);
+  b.ts = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify)/;
+app.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
+  const id = req.user ? `u:${req.user.id}` : `ip:${req.ip}`;
+  const sensitive = SENSITIVE_RE.test(req.path);
+  const ok = sensitive
+    ? rateLimit(`${id}:fin`, 10, 0.5)   // 10 burst, refill 1 / 2s
+    : rateLimit(`${id}:gen`, 40, 5);    // 40 burst, refill 5 / s
+  if (!ok) return res.status(429).json({ error: 'rate_limited' });
+  next();
+});
+// Periodically evict idle buckets so the map doesn't grow unbounded.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, b] of buckets) if (now - b.ts > 300000) buckets.delete(k);
+}, 300000).unref?.();
+
+// ── Input validation helpers (Phase 4) ─────────────────────────────────────────
+function parseAmount(v, { max = 1e15 } = {}) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n) || n <= 0 || n > max) return null;
+  return n;
+}
+function validStr(v, max) {
+  return typeof v === 'string' && v.length > 0 && v.length <= max;
+}
+const HTTP_URL_RE = /^https?:\/\//i;
+
+app.get('/health', (_, res) => res.json({ status: 'ok' }));
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function upsertUser(u) {
@@ -75,6 +167,59 @@ async function requireAdmin(req, res, next) {
 const toUnits = v => Math.round(parseFloat(v) * UNITS);
 const fromUnits = v => Number(v) / UNITS;
 
+// HTML escaping + address shortening for the server-rendered admin pages.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function shortAddr(a) { return a ? a.slice(0, 6) + '…' + a.slice(-4) : ''; }
+
+// Audit log for admin mutations (Phase 4).
+async function logAdmin(adminUserId, actionType, opts = {}) {
+  try {
+    await pool.query(
+      `INSERT INTO admin_actions(admin_user_id,action_type,target_user_id,target_post_id,target_market_id,reason)
+       VALUES($1,$2,$3,$4,$5,$6)`,
+      [adminUserId, actionType, opts.target_user_id || null, opts.target_post_id || null,
+       opts.target_market_id || null, opts.reason || null]
+    );
+  } catch (e) { console.error('audit err:', e.message); }
+}
+
+// Verification tier vocabulary + gating. Single source of truth (Phase 1).
+const TIER_RANK = { basic: 0, social: 1, premium: 2 };
+function effectiveTier(kyc) {
+  if (kyc && kyc.status === 'approved' && TIER_RANK[kyc.level] != null) return kyc.level;
+  return 'basic';
+}
+function tierAllows(level, action) {
+  const r = TIER_RANK[level] ?? 0;
+  if (action === 'live_futures') return r >= TIER_RANK.social;
+  if (action === 'high_leverage') return r >= TIER_RANK.premium;
+  return true;
+}
+function maxLeverageFor(level) {
+  if (TIER_RANK[level] >= TIER_RANK.premium) return 20;
+  if (TIER_RANK[level] >= TIER_RANK.social) return 5;
+  return 1;
+}
+
+// Per-day Basic-tier trade cap (Phase 4). Returns true when allowed.
+async function withinBasicDailyCap(userId, tier) {
+  if (tier !== 'basic') return true;
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM transactions
+     WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
+       AND type IN ('swap','futures_open','market_trade','ico_invest')`,
+    [userId]
+  );
+  return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
+}
+async function userTier(userId) {
+  const { rows } = await pool.query('SELECT level, status FROM kyc_verifications WHERE user_id=$1', [userId]);
+  return effectiveTier(rows[0]);
+}
 // ── Background price drift + liquidation ─────────────────────────────────────
 
 setInterval(async () => {
@@ -89,31 +234,101 @@ setInterval(async () => {
       UPDATE futures_markets
       SET mark_price = GREATEST(0.001, mark_price * (1 + (random() * 0.004 - 0.002))),
           index_price = GREATEST(0.001, index_price * (1 + (random() * 0.004 - 0.002))),
+          funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
-    const { rows } = await pool.query(`
-      SELECT fp.id, fp.side, fp.liquidation_price::float, fp.margin, fp.user_id, fp.mode,
-             fm.mark_price::float
-      FROM futures_positions fp
-      JOIN futures_markets fm ON fp.market_id = fm.id
-      WHERE fp.status = 'open'
-    `);
-    for (const p of rows) {
-      const liq = (p.side === 'long' && p.mark_price <= p.liquidation_price) ||
-                  (p.side === 'short' && p.mark_price >= p.liquidation_price);
-      if (!liq) continue;
-      await pool.query(
-        "UPDATE futures_positions SET status='liquidated', realized_pnl=$1, closed_at=NOW() WHERE id=$2",
-        [-p.margin, p.id]
-      );
-      await pool.query(
-        "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_pnl','USDC',$2,'Position liquidated')",
-        [p.user_id, -p.margin]
-      );
-    }
+    await runLiquidations();
+    await runFunding();
   } catch (e) { console.error('drift err:', e.message); }
 }, 30000);
 
+// Force-close any open position whose mark price has crossed its liquidation
+// price. Each position is updated under FOR UPDATE so a concurrent manual close
+// can't double-settle it (Phase 3 hardening).
+async function runLiquidations() {
+  const { rows } = await pool.query(`
+    SELECT fp.id FROM futures_positions fp
+    JOIN futures_markets fm ON fp.market_id = fm.id
+    WHERE fp.status='open'
+      AND ((fp.side='long' AND fm.mark_price <= fp.liquidation_price)
+        OR (fp.side='short' AND fm.mark_price >= fp.liquidation_price))
+  `);
+  for (const { id } of rows) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: [p] } = await client.query(
+        "SELECT * FROM futures_positions WHERE id=$1 AND status='open' FOR UPDATE", [id]
+      );
+      if (!p) { await client.query('ROLLBACK'); continue; }
+      await client.query(
+        "UPDATE futures_positions SET status='liquidated', realized_pnl=$1, closed_at=NOW() WHERE id=$2",
+        [-Number(p.margin), p.id]
+      );
+      await client.query(
+        "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_pnl','USDC',$2,'Position liquidated')",
+        [p.user_id, -Number(p.margin)]
+      );
+      await client.query('UPDATE futures_markets SET open_interest=GREATEST(0,open_interest-$1) WHERE id=$2', [Number(p.margin), p.market_id]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK'); console.error('liq err:', e.message); }
+    finally { client.release(); }
+  }
+}
+
+// Funding settlement (Phase 3). Markets whose next_funding_at has elapsed pay
+// funding to every open position: longs pay shorts when the rate is positive.
+async function runFunding() {
+  const { rows: due } = await pool.query(
+    'SELECT * FROM futures_markets WHERE next_funding_at IS NULL OR next_funding_at <= NOW()'
+  );
+  for (const m of due) {
+    const { rows: positions } = await pool.query(
+      "SELECT id FROM futures_positions WHERE market_id=$1 AND status='open'", [m.id]
+    );
+    for (const { id } of positions) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows: [p] } = await client.query(
+          "SELECT * FROM futures_positions WHERE id=$1 AND status='open' FOR UPDATE", [id]
+        );
+        if (!p) { await client.query('ROLLBACK'); continue; }
+        const rate = Number(m.funding_rate);
+        const notional = Number(p.quantity) * Number(m.mark_price); // token units of USD
+        // longs pay when rate>0; shorts receive (and vice-versa)
+        const sign = p.side === 'long' ? -1 : 1;
+        const amount = Math.round(sign * notional * rate * UNITS);
+        if (amount !== 0) {
+          if (p.mode === 'live') {
+            await client.query(
+              "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=GREATEST(0,wallet_balances.balance+$2), updated_at=NOW()",
+              [p.user_id, amount]
+            );
+          } else {
+            await client.query('UPDATE paper_balances SET usdc_balance=GREATEST(0,usdc_balance+$1) WHERE user_id=$2', [amount, p.user_id]);
+          }
+          await client.query(
+            'INSERT INTO funding_payments(position_id,user_id,market_id,amount,rate,mode) VALUES($1,$2,$3,$4,$5,$6)',
+            [p.id, p.user_id, m.id, amount, rate, p.mode]
+          );
+          await client.query(
+            "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'funding','USDC',$2,$3)",
+            [p.user_id, amount, `Funding ${m.symbol} @ ${(rate*100).toFixed(4)}%`]
+          );
+        }
+        await client.query('UPDATE futures_positions SET last_funding_at=NOW() WHERE id=$1', [p.id]);
+        await client.query('COMMIT');
+      } catch (e) { await client.query('ROLLBACK'); console.error('funding err:', e.message); }
+      finally { client.release(); }
+    }
+    await pool.query(
+      `UPDATE futures_markets SET last_funding_at=NOW(),
+        next_funding_at=NOW() + ($1 || ' milliseconds')::interval WHERE id=$2`,
+      [String(FUNDING_INTERVAL_MS), m.id]
+    );
+  }
+}
 // ── /api/me ───────────────────────────────────────────────────────────────────
 
 app.get('/api/me', async (req, res) => {
@@ -132,6 +347,8 @@ app.get('/api/me', async (req, res) => {
 app.patch('/api/me', async (req, res) => {
   try {
     const { display_name, bio } = req.body;
+    if (display_name != null && String(display_name).length > 80) return res.status(400).json({ error: 'Display name too long' });
+    if (bio != null && String(bio).length > 300) return res.status(400).json({ error: 'Bio too long' });
     await pool.query('UPDATE users SET display_name=$1, bio=$2 WHERE user_id=$3',
       [display_name || null, bio || null, req.user.id]);
     res.json({ ok: true });
@@ -292,9 +509,13 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     if (!supported.includes(from_token) || !supported.includes(to_token) || from_token === to_token)
       return res.status(400).json({ error: 'Invalid tokens' });
 
+    if (parseAmount(from_amount) == null) return res.status(400).json({ error: 'Invalid amount' });
     const fromUnitsAmt = toUnits(from_amount);
     if (fromUnitsAmt <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
+    const tier = await userTier(req.user.id);
+    if (!(await withinBasicDailyCap(req.user.id, tier)))
+      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
     const { rows: prices } = await client.query('SELECT symbol, price_usd::float FROM market_prices');
     const priceMap = {};
     prices.forEach(p => priceMap[p.symbol] = p.price_usd);
@@ -321,6 +542,10 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     await client.query(
       'INSERT INTO defi_swaps(user_id,from_token,to_token,from_amount,to_amount,rate) VALUES($1,$2,$3,$4,$5,$6)',
       [req.user.id, from_token, to_token, fromUnitsAmt, toUnitsAmt, rate]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap',$2,$3,$4)",
+      [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`]
     );
     await client.query('COMMIT');
     res.json({ ok: true, to_amount: fromUnits(toUnitsAmt), to_token });
@@ -497,8 +722,12 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { usdc_amount } = req.body;
+    if (parseAmount(usdc_amount) == null) return res.status(400).json({ error: 'Invalid amount' });
     const usdcUnits = toUnits(usdc_amount);
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    const icoTier = await userTier(req.user.id);
+    if (!(await withinBasicDailyCap(req.user.id, icoTier)))
+      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
     await client.query('BEGIN');
     const { rows: [ico] } = await client.query(
       "SELECT * FROM ico_offerings WHERE id=$1 AND status='active' FOR UPDATE", [req.params.id]
@@ -519,6 +748,10 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
     );
     await client.query('UPDATE ico_offerings SET raised=raised+$1, tokens_sold=tokens_sold+$2, status=CASE WHEN raised+$1>=hard_cap THEN \'sold_out\' ELSE status END WHERE id=$3', [actual, tokens, ico.id]);
     await client.query('INSERT INTO ico_investments(user_id,ico_id,tokens_purchased,usdc_paid) VALUES($1,$2,$3,$4)', [req.user.id, ico.id, tokens, actual]);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'ico_invest','USDC',$2,$3)",
+      [req.user.id, -actual, `Invest ${ico.token_symbol} ICO`]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, tokens_received: fromUnits(tokens), symbol: ico.token_symbol });
   } catch (e) {
@@ -552,8 +785,12 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
   try {
     const { outcome, usdc_amount } = req.body;
     if (!['YES', 'NO'].includes(outcome)) return res.status(400).json({ error: 'Invalid outcome' });
+    if (parseAmount(usdc_amount) == null) return res.status(400).json({ error: 'Invalid amount' });
     const usdcUnits = toUnits(usdc_amount);
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    const mtTier = await userTier(req.user.id);
+    if (!(await withinBasicDailyCap(req.user.id, mtTier)))
+      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
     await client.query('BEGIN');
     const { rows: [market] } = await client.query(
       "SELECT * FROM opinion_markets WHERE id=$1 AND status='open' FOR UPDATE", [req.params.id]
@@ -577,6 +814,10 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
     await client.query(
       'INSERT INTO opinion_positions(user_id,market_id,outcome,shares,cost_basis) VALUES($1,$2,$3,$4,$5)',
       [req.user.id, market.id, outcome, shares, usdcUnits]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'market_trade','USDC',$2,$3)",
+      [req.user.id, -usdcUnits, `Buy ${outcome}`]
     );
     await client.query('COMMIT');
     res.json({ ok: true, shares });
@@ -633,6 +874,7 @@ app.post('/api/markets/:id/resolve', async (req, res) => {
       "UPDATE opinion_markets SET status='resolved', resolved_outcome=$1, resolved_at=NOW() WHERE id=$2",
       [outcome, req.params.id]
     );
+    if (user?.is_admin) await logAdmin(req.user.id, 'resolve_market', { target_market_id: parseInt(req.params.id), reason: outcome });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -649,7 +891,8 @@ app.get('/api/futures/markets', async (req, res) => {
 app.get('/api/futures/positions', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT fp.*, fm.symbol, fm.mark_price::float
+      SELECT fp.*, fm.symbol, fm.mark_price::float,
+             COALESCE((SELECT SUM(amount) FROM funding_payments WHERE position_id=fp.id),0)::bigint AS funding_paid
       FROM futures_positions fp
       JOIN futures_markets fm ON fp.market_id = fm.id
       WHERE fp.user_id = $1
@@ -674,20 +917,38 @@ app.get('/api/futures/paper-balance', async (req, res) => {
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, mode } = req.body;
+    const { market_id, side, leverage, quantity, mode, idempotency_key } = req.body;
     const lev = Math.max(1, Math.min(20, parseInt(leverage) || 1));
-    const qty = parseFloat(quantity);
-    if (!qty || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+    const qty = parseAmount(quantity, { max: 1e9 });
+    if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
     if (!['long', 'short'].includes(side)) return res.status(400).json({ error: 'Invalid side' });
     if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'Invalid mode' });
 
+    const tier = await userTier(req.user.id);
     if (mode === 'live') {
-      const { rows: [kyc] } = await pool.query('SELECT level FROM kyc_verifications WHERE user_id=$1', [req.user.id]);
-      if (!kyc || kyc.level === 'basic') return res.status(403).json({ error: 'Live trading requires Verified KYC' });
-      if (lev > 5 && kyc.level !== 'elite') return res.status(403).json({ error: 'Leverage >5x requires Elite KYC' });
+      if (!tierAllows(tier, 'live_futures'))
+        return res.status(403).json({ error: 'verify_required', tier_needed: 'social' });
+      if (lev > 5 && !tierAllows(tier, 'high_leverage'))
+        return res.status(403).json({ error: 'verify_required', tier_needed: 'premium' });
+    }
+    if (!(await withinBasicDailyCap(req.user.id, tier)))
+      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+
+    // Idempotency guard against double-submit (Phase 4).
+    if (idempotency_key) {
+      const { rows: dup } = await pool.query(
+        "SELECT 1 FROM idempotency_keys WHERE user_id=$1 AND key=$2", [req.user.id, idempotency_key]
+      );
+      if (dup.length) return res.status(409).json({ error: 'duplicate_request' });
     }
 
     await client.query('BEGIN');
+    if (idempotency_key) {
+      await client.query(
+        "INSERT INTO idempotency_keys(user_id,key) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [req.user.id, idempotency_key]
+      );
+    }
     const { rows: [market] } = await client.query('SELECT * FROM futures_markets WHERE id=$1 FOR UPDATE', [market_id]);
     if (!market) throw new Error('Market not found');
     const markPrice = parseFloat(market.mark_price);
@@ -711,6 +972,10 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
     `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice]);
     await client.query('UPDATE futures_markets SET open_interest=open_interest+$1 WHERE id=$2', [marginUnits, market_id]);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
+      [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`]
+    );
     await client.query('COMMIT');
     res.json({ position: pos });
   } catch (e) {
@@ -762,7 +1027,11 @@ app.post('/api/nfts/mint', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { name, description, image_url } = req.body;
-    if (!name || !image_url) return res.status(400).json({ error: 'Name and image_url required' });
+    if (!validStr(name, 100)) return res.status(400).json({ error: 'Invalid name' });
+    if (!validStr(image_url, 1000) || !HTTP_URL_RE.test(image_url))
+      return res.status(400).json({ error: 'image_url must be an http(s) URL' });
+    if (description != null && String(description).length > 500)
+      return res.status(400).json({ error: 'Description too long' });
     const MINT_COST = 10 * UNITS;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
@@ -796,6 +1065,84 @@ app.get('/api/kyc', async (req, res) => {
     }
     const { rows: [kyc] } = await pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]);
     res.json({ kyc: kyc || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Which verification providers are reachable in this environment. The Verify
+// screen renders only the social providers that are configured (Phase 1).
+app.get('/api/verify/providers', (req, res) => {
+  const social = IS_STAGING
+    ? verify.SOCIAL_PROVIDERS.slice()
+    : verify.configuredSocialProviders();
+  res.json({
+    staging: IS_STAGING,
+    social_enabled: verify.SOCIAL_VERIFY_ENABLED,
+    social_providers: social,
+    premium_enabled: verify.ZK_VERIFY_ENABLED,
+  });
+});
+
+// Begin a social-OAuth round-trip. Returns the authorization URL + a signed
+// state binding the trip to this wallet + provider.
+app.post('/api/verify/social/start', requireWallet, async (req, res) => {
+  try {
+    const { provider } = req.body;
+    if (!verify.isSocialProvider(provider)) return res.status(400).json({ error: 'invalid_provider' });
+    const out = verify.startSocialOAuth(provider, req.user.id);
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    res.json({ oauth_url: out.oauth_url, state: out.state, simulated: !!out.simulated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Finalize the social-OAuth round-trip and upsert the Social tier. The UNIQUE
+// constraint on anti_sybil_token enforces one social account per wallet — a
+// collision with a different user returns 403 social_account_in_use.
+app.post('/api/verify/social/complete', requireWallet, async (req, res) => {
+  try {
+    const { provider, code, state } = req.body;
+    if (!verify.isSocialProvider(provider)) return res.status(400).json({ error: 'invalid_provider' });
+    const out = await verify.completeSocialOAuth(provider, code, state);
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    if (out.user_id != null && Number(out.user_id) !== Number(req.user.id))
+      return res.status(400).json({ error: 'invalid_state' });
+
+    // Pre-check the token is not already bound to a different wallet.
+    const { rows: clash } = await pool.query(
+      'SELECT user_id FROM kyc_verifications WHERE anti_sybil_token=$1 AND user_id<>$2',
+      [out.anti_sybil_token, req.user.id]
+    );
+    if (clash.length) return res.status(403).json({ error: 'social_account_in_use' });
+
+    try {
+      await pool.query(`
+        INSERT INTO kyc_verifications(user_id,level,status,provider,attestation_ref,anti_sybil_token,verified_at)
+        VALUES($1,'social','approved',$2,$3,$4,NOW())
+        ON CONFLICT(user_id) DO UPDATE SET
+          level=CASE WHEN kyc_verifications.level='premium' THEN 'premium' ELSE 'social' END,
+          status='approved', provider=$2, attestation_ref=$3, anti_sybil_token=$4,
+          verified_at=NOW(), rejection_reason=NULL
+      `, [req.user.id, provider, out.account_ref, out.anti_sybil_token]);
+    } catch (e) {
+      if (e.code === '23505') return res.status(403).json({ error: 'social_account_in_use' });
+      throw e;
+    }
+    res.json({ ok: true, level: 'social', provider });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Premium via zkPassport proof (Phase 1).
+app.post('/api/verify/zkpassport', requireWallet, async (req, res) => {
+  try {
+    const { proof } = req.body;
+    const out = await verify.verifyZkPassportProof(proof, req.user.id);
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    await pool.query(`
+      INSERT INTO kyc_verifications(user_id,level,status,provider,attestation_ref,verified_at)
+      VALUES($1,'premium','approved','zkpassport',$2,NOW())
+      ON CONFLICT(user_id) DO UPDATE SET level='premium', status='approved',
+        provider='zkpassport', attestation_ref=$2, verified_at=NOW(), rejection_reason=NULL
+    `, [req.user.id, out.ref]);
+    res.json({ ok: true, level: 'premium' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -845,6 +1192,17 @@ app.post('/api/admin/users/:id/ban', requireAdmin, async (req, res) => {
   try {
     await pool.query('UPDATE users SET is_banned=true WHERE user_id=$1', [req.params.id]);
     await pool.query('UPDATE posts SET deleted=true WHERE user_id=$1', [req.params.id]);
+    banCache.delete(parseInt(req.params.id));
+    await logAdmin(req.user.id, 'ban_user', { target_user_id: parseInt(req.params.id), reason: req.body.reason });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/unban', requireAdmin, async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET is_banned=false WHERE user_id=$1', [req.params.id]);
+    banCache.delete(parseInt(req.params.id));
+    await logAdmin(req.user.id, 'unban_user', { target_user_id: parseInt(req.params.id) });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -852,6 +1210,21 @@ app.post('/api/admin/users/:id/ban', requireAdmin, async (req, res) => {
 app.post('/api/admin/users/:id/admin', requireAdmin, async (req, res) => {
   try {
     await pool.query('UPDATE users SET is_admin=NOT is_admin WHERE user_id=$1', [req.params.id]);
+    await logAdmin(req.user.id, 'toggle_admin', { target_user_id: parseInt(req.params.id) });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin manual verification override (Phase 1/5) — grant or revoke a tier.
+app.post('/api/admin/verify/:id', requireAdmin, async (req, res) => {
+  try {
+    const { level } = req.body;
+    if (!['basic', 'social', 'premium'].includes(level)) return res.status(400).json({ error: 'invalid_level' });
+    await pool.query(
+      "UPDATE kyc_verifications SET level=$1, status='approved', verified_at=NOW(), reviewed_by_user_id=$2, rejection_reason=NULL WHERE user_id=$3",
+      [level, req.user.id, req.params.id]
+    );
+    await logAdmin(req.user.id, 'verify_override', { target_user_id: parseInt(req.params.id), reason: level });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -890,6 +1263,7 @@ app.post('/api/admin/kyc/:id/reject', requireAdmin, async (req, res) => {
 app.post('/api/admin/posts/:id/delete', requireAdmin, async (req, res) => {
   try {
     await pool.query('UPDATE posts SET deleted=true WHERE id=$1', [req.params.id]);
+    await logAdmin(req.user.id, 'delete_post', { target_post_id: parseInt(req.params.id) });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -897,10 +1271,13 @@ app.post('/api/admin/posts/:id/delete', requireAdmin, async (req, res) => {
 app.post('/api/admin/ico', requireAdmin, async (req, res) => {
   try {
     const { token_name, token_symbol, description, price_per_token, total_supply, hard_cap } = req.body;
+    if (!validStr(token_name, 100) || !validStr(token_symbol, 20)) return res.status(400).json({ error: 'Invalid token name/symbol' });
+    if ([price_per_token, total_supply, hard_cap].some(v => parseAmount(v) == null)) return res.status(400).json({ error: 'Invalid numbers' });
     const { rows: [ico] } = await pool.query(`
       INSERT INTO ico_offerings(token_name,token_symbol,description,price_per_token,total_supply,hard_cap,created_by_user_id)
       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *
-    `, [token_name, token_symbol, description || '', toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]);
+    `, [token_name, token_symbol, (description || '').slice(0, 500), toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]);
+    await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
     res.json({ ico });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -908,6 +1285,7 @@ app.post('/api/admin/ico', requireAdmin, async (req, res) => {
 app.delete('/api/admin/ico/:id', requireAdmin, async (req, res) => {
   try {
     await pool.query("UPDATE ico_offerings SET status='ended' WHERE id=$1", [req.params.id]);
+    await logAdmin(req.user.id, 'end_ico', { reason: String(req.params.id) });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -915,19 +1293,290 @@ app.delete('/api/admin/ico/:id', requireAdmin, async (req, res) => {
 app.post('/api/admin/markets', requireAdmin, async (req, res) => {
   try {
     const { title, description, resolution_criteria, closes_at } = req.body;
+    if (!validStr(title, 200)) return res.status(400).json({ error: 'Invalid title' });
     const { rows: [market] } = await pool.query(`
       INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
       VALUES($1,$2,$3,$4,$5) RETURNING *
-    `, [title, description || '', resolution_criteria || '', closes_at || null, req.user.id]);
+    `, [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+    await logAdmin(req.user.id, 'create_market', { target_market_id: market.id });
     res.json({ market });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Suggested people for the Explore screen (Phase 2): top users by follower
+// count, excluding self and anyone already followed.
+app.get('/api/explore/people', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT u.username, u.display_name, u.usernode_pubkey,
+        (SELECT COUNT(*) FROM follows WHERE following_id=u.user_id)::int AS followers,
+        k.level AS kyc_level
+      FROM users u
+      LEFT JOIN kyc_verifications k ON k.user_id=u.user_id
+      WHERE u.user_id <> $1
+        AND u.user_id NOT IN (SELECT following_id FROM follows WHERE follower_id=$1)
+        AND u.is_banned = false
+      ORDER BY followers DESC, u.created_at DESC
+      LIMIT 10
+    `, [req.user.id]);
+    res.json({ people: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Server-rendered Admin console (Phase 5) ─────────────────────────────────────
+// Standalone HTML pages at /admin pathnames. They pass the GET branch of the
+// auth gate, so each handler re-checks admin explicitly and renders a "not
+// authorized" page otherwise. These paths are NOT in PUBLIC_API_PATHS.
+
+function adminLayout(title, body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)} · BloomMoney Admin</title>
+<style>
+  :root{color-scheme:dark}
+  body{font-family:system-ui,sans-serif;background:#0a0a0b;color:#e4e4e7;margin:0}
+  header{background:#18181b;border-bottom:1px solid #27272a;padding:.75rem 1.25rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+  header a{color:#a78bfa;text-decoration:none;font-size:.9rem}
+  header a:hover{text-decoration:underline}
+  main{max-width:60rem;margin:0 auto;padding:1.5rem 1.25rem}
+  h1{font-size:1.3rem;margin:0 1rem 0 0}
+  h2{font-size:1.05rem;margin:1.5rem 0 .5rem}
+  table{width:100%;border-collapse:collapse;font-size:.85rem}
+  th,td{text-align:left;padding:.4rem .5rem;border-bottom:1px solid #27272a}
+  .cards{display:flex;flex-wrap:wrap;gap:.75rem}
+  .card{background:#18181b;border:1px solid #27272a;border-radius:.6rem;padding:1rem;min-width:9rem}
+  .stat{font-size:1.5rem;font-weight:700;color:#c4b5fd}
+  .muted{color:#71717a;font-size:.8rem}
+  form{display:inline}
+  input,select{background:#27272a;border:1px solid #3f3f46;color:#fff;border-radius:.4rem;padding:.35rem .5rem;font-size:.85rem}
+  button{background:#7c3aed;color:#fff;border:0;border-radius:.4rem;padding:.35rem .7rem;font-size:.8rem;cursor:pointer}
+  button.danger{background:#b91c1c}
+  .grid-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.5rem;align-items:end;max-width:48rem;margin:.5rem 0}
+</style></head><body>
+<header>
+  <h1>🌸 BloomMoney Admin</h1>
+  <a href="/admin">Dashboard</a>
+  <a href="/admin/users">Users</a>
+  <a href="/admin/verifications">Verifications</a>
+  <a href="/admin/markets">Markets</a>
+  <a href="/admin/ico">ICO</a>
+</header>
+<main id="admin-root">${body}</main>
+</body></html>`;
+}
+
+function notAuthorizedPage(res) {
+  return res.status(403).send(adminLayout('Not authorized',
+    `<h2>Not authorized</h2><p class="muted">Open BloomMoney inside Usernode as an admin to access this console.</p>`));
+}
+
+// HTML-page admin guard (renders a page rather than JSON on failure).
+async function requireAdminPage(req, res, next) {
+  // Staging demo bypass for the read-only console pages, so a preview / the
+  // declared /admin test can render without a seeded admin session. Never
+  // applies to POST mutations or in production.
+  if (IS_STAGING && req.method === 'GET' && req.query.demo === '1') return next();
+  if (!req.user) return notAuthorizedPage(res);
+  try {
+    const { rows } = await pool.query('SELECT is_admin FROM users WHERE user_id=$1', [req.user.id]);
+    if (!rows[0]?.is_admin) return notAuthorizedPage(res);
+    next();
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+}
+
+// Forward the token so in-console form posts and links stay authenticated
+// inside the iframe (the gate accepts ?token= on the query string).
+function tok(req) { const t = req.query.token || ''; return t ? `?token=${encodeURIComponent(t)}` : ''; }
+
+app.get('/admin', requireAdminPage, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT
+      (SELECT COUNT(*) FROM users)::int AS total_users,
+      (SELECT COUNT(*) FROM users WHERE is_banned)::int AS banned,
+      (SELECT COUNT(*) FROM posts WHERE deleted=false)::int AS posts,
+      (SELECT COUNT(*) FROM futures_positions WHERE status='open')::int AS open_futures,
+      (SELECT COUNT(*) FROM kyc_verifications WHERE level='social' AND status='approved')::int AS social_verified,
+      (SELECT COUNT(*) FROM kyc_verifications WHERE level='premium' AND status='approved')::int AS premium_verified,
+      (SELECT COUNT(*) FROM opinion_markets WHERE status='open')::int AS open_markets`);
+    const s = rows[0] || {};
+    const cards = [
+      ['Total users', s.total_users], ['Banned', s.banned], ['Posts', s.posts],
+      ['Open futures', s.open_futures], ['Social verified', s.social_verified],
+      ['Premium verified', s.premium_verified], ['Open markets', s.open_markets],
+    ].map(([l, v]) => `<div class="card"><div class="stat">${v}</div><div class="muted">${l}</div></div>`).join('');
+    const { rows: actions } = await pool.query(
+      'SELECT a.*, u.username FROM admin_actions a LEFT JOIN users u ON u.user_id=a.admin_user_id ORDER BY a.id DESC LIMIT 15'
+    );
+    const audit = actions.length ? `<table id="audit-log"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Note</th></tr></thead><tbody>${
+      actions.map(a => `<tr><td class="muted">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td><td>@${esc(a.username||'?')}</td><td>${esc(a.action_type)}</td><td>${esc(String(a.target_user_id||a.target_market_id||a.target_post_id||''))}</td><td>${esc(a.reason||'')}</td></tr>`).join('')
+    }</tbody></table>` : '<p class="muted">No admin actions logged yet.</p>';
+    res.send(adminLayout('Dashboard', `<div id="admin-stats"><h2>Platform stats</h2><div class="cards">${cards}</div></div><h2>Recent admin actions</h2>${audit}`));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.get('/admin/users', requireAdminPage, async (req, res) => {
+  try {
+    const search = (req.query.search || '').slice(0, 80);
+    const { rows } = await pool.query(
+      `SELECT u.*, k.level AS kyc_level FROM users u LEFT JOIN kyc_verifications k ON k.user_id=u.user_id
+       WHERE u.username ILIKE $1 ORDER BY u.created_at DESC LIMIT 100`, [`%${search}%`]
+    );
+    const t = tok(req);
+    const body = `<h2>User management</h2>
+      <form method="get" action="/admin/users">${req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : ''}
+        <input name="search" placeholder="Search username" value="${esc(search)}"><button type="submit">Search</button></form>
+      <table id="users-table"><thead><tr><th>User</th><th>Wallet</th><th>Tier</th><th>Admin</th><th>Banned</th><th>Actions</th></tr></thead><tbody>${
+        rows.map(u => `<tr>
+          <td>@${esc(u.username)}</td>
+          <td class="muted">${esc(shortAddr(u.usernode_pubkey))}</td>
+          <td>${esc(u.kyc_level || 'basic')}</td>
+          <td>${u.is_admin ? '✓' : ''}</td>
+          <td>${u.is_banned ? '🚫' : ''}</td>
+          <td>
+            ${u.is_banned
+              ? `<form method="post" action="/admin/users/${u.user_id}/unban${t}"><button>Unban</button></form>`
+              : `<form method="post" action="/admin/users/${u.user_id}/ban${t}"><button class="danger">Ban</button></form>`}
+            <form method="post" action="/admin/users/${u.user_id}/admin${t}"><button>${u.is_admin ? 'Revoke' : 'Grant'} admin</button></form>
+          </td></tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('Users', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.get('/admin/verifications', requireAdminPage, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT k.*, u.username FROM kyc_verifications k JOIN users u ON u.user_id=k.user_id
+       ORDER BY (k.status='pending') DESC, k.verified_at DESC NULLS LAST, k.submitted_at DESC LIMIT 100`
+    );
+    const t = tok(req);
+    const body = `<h2>Verification queue & overrides</h2>
+      <table id="verifications-table"><thead><tr><th>User</th><th>Level</th><th>Status</th><th>Provider</th><th>Set tier</th></tr></thead><tbody>${
+        rows.map(k => `<tr>
+          <td>@${esc(k.username)}</td><td>${esc(k.level)}</td><td>${esc(k.status)}</td><td>${esc(k.provider||'—')}</td>
+          <td><form method="post" action="/admin/verifications/${k.user_id}${t}">
+            <select name="level"><option>basic</option><option>social</option><option>premium</option></select>
+            <button>Set</button></form></td></tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('Verifications', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.get('/admin/markets', requireAdminPage, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM opinion_markets ORDER BY created_at DESC LIMIT 100');
+    const t = tok(req);
+    const tokenField = req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : '';
+    const body = `<h2>Create opinion market</h2>
+      <form method="post" action="/admin/markets${t}" class="grid-form">${tokenField}
+        <input name="title" placeholder="Title" required>
+        <input name="description" placeholder="Description">
+        <input name="resolution_criteria" placeholder="Resolution criteria">
+        <button type="submit">Create</button></form>
+      <h2>Markets</h2>
+      <table id="markets-table"><thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Resolve</th></tr></thead><tbody>${
+        rows.map(m => `<tr><td>${m.id}</td><td>${esc(m.title)}</td><td>${esc(m.status)}</td>
+          <td>${m.status === 'open'
+            ? `<form method="post" action="/admin/markets/${m.id}/resolve${t}">${tokenField}<select name="outcome"><option>YES</option><option>NO</option></select><button>Resolve</button></form>`
+            : esc(m.resolved_outcome || '—')}</td></tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('Markets', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+app.get('/admin/ico', requireAdminPage, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM ico_offerings ORDER BY created_at DESC LIMIT 100');
+    const t = tok(req);
+    const tokenField = req.query.token ? `<input type="hidden" name="token" value="${esc(req.query.token)}">` : '';
+    const body = `<h2>Create ICO offering</h2>
+      <form method="post" action="/admin/ico${t}" class="grid-form">${tokenField}
+        <input name="token_name" placeholder="Token name" required>
+        <input name="token_symbol" placeholder="Symbol" required>
+        <input name="price_per_token" type="number" step="any" placeholder="Price (USDC)" required>
+        <input name="total_supply" type="number" step="any" placeholder="Total supply" required>
+        <input name="hard_cap" type="number" step="any" placeholder="Hard cap (USDC)" required>
+        <button type="submit">Create</button></form>
+      <h2>Offerings</h2>
+      <table id="ico-table"><thead><tr><th>Symbol</th><th>Status</th><th>Raised</th><th></th></tr></thead><tbody>${
+        rows.map(o => `<tr><td>${esc(o.token_symbol)}</td><td>${esc(o.status)}</td><td>${fromUnits(o.raised).toFixed(0)}/${fromUnits(o.hard_cap).toFixed(0)}</td>
+          <td>${o.status === 'active' ? `<form method="post" action="/admin/ico/${o.id}/end${t}">${tokenField}<button class="danger">End</button></form>` : ''}</td></tr>`).join('')
+      }</tbody></table>`;
+    res.send(adminLayout('ICO', body));
+  } catch (e) { res.status(500).send(adminLayout('Error', `<p>${esc(e.message)}</p>`)); }
+});
+
+// Admin form-post handlers (redirect back to the relevant page).
+app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+
+app.post('/admin/users/:id/ban', requireAdminPage, async (req, res) => {
+  await pool.query('UPDATE users SET is_banned=true WHERE user_id=$1', [req.params.id]);
+  await pool.query('UPDATE posts SET deleted=true WHERE user_id=$1', [req.params.id]);
+  banCache.delete(parseInt(req.params.id));
+  await logAdmin(req.user.id, 'ban_user', { target_user_id: parseInt(req.params.id) });
+  res.redirect('/admin/users' + tok(req));
+});
+app.post('/admin/users/:id/unban', requireAdminPage, async (req, res) => {
+  await pool.query('UPDATE users SET is_banned=false WHERE user_id=$1', [req.params.id]);
+  banCache.delete(parseInt(req.params.id));
+  await logAdmin(req.user.id, 'unban_user', { target_user_id: parseInt(req.params.id) });
+  res.redirect('/admin/users' + tok(req));
+});
+app.post('/admin/users/:id/admin', requireAdminPage, async (req, res) => {
+  await pool.query('UPDATE users SET is_admin=NOT is_admin WHERE user_id=$1', [req.params.id]);
+  await logAdmin(req.user.id, 'toggle_admin', { target_user_id: parseInt(req.params.id) });
+  res.redirect('/admin/users' + tok(req));
+});
+app.post('/admin/verifications/:id', requireAdminPage, async (req, res) => {
+  const level = ['basic', 'social', 'premium'].includes(req.body.level) ? req.body.level : 'basic';
+  await pool.query(
+    "UPDATE kyc_verifications SET level=$1, status='approved', verified_at=NOW(), reviewed_by_user_id=$2 WHERE user_id=$3",
+    [level, req.user.id, req.params.id]
+  );
+  await logAdmin(req.user.id, 'verify_override', { target_user_id: parseInt(req.params.id), reason: level });
+  res.redirect('/admin/verifications' + tok(req));
+});
+app.post('/admin/markets', requireAdminPage, async (req, res) => {
+  const { title, description, resolution_criteria } = req.body;
+  if (validStr(title, 200)) {
+    const { rows: [m] } = await pool.query(
+      'INSERT INTO opinion_markets(title,description,resolution_criteria,created_by_user_id) VALUES($1,$2,$3,$4) RETURNING id',
+      [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), req.user.id]
+    );
+    await logAdmin(req.user.id, 'create_market', { target_market_id: m.id });
+  }
+  res.redirect('/admin/markets' + tok(req));
+});
+app.post('/admin/markets/:id/resolve', requireAdminPage, async (req, res) => {
+  const outcome = ['YES', 'NO'].includes(req.body.outcome) ? req.body.outcome : null;
+  if (outcome) {
+    await pool.query("UPDATE opinion_markets SET status='resolved', resolved_outcome=$1, resolved_at=NOW() WHERE id=$2", [outcome, req.params.id]);
+    await logAdmin(req.user.id, 'resolve_market', { target_market_id: parseInt(req.params.id), reason: outcome });
+  }
+  res.redirect('/admin/markets' + tok(req));
+});
+app.post('/admin/ico', requireAdminPage, async (req, res) => {
+  const { token_name, token_symbol, price_per_token, total_supply, hard_cap } = req.body;
+  if (validStr(token_name, 100) && validStr(token_symbol, 20) &&
+      [price_per_token, total_supply, hard_cap].every(v => parseAmount(v) != null)) {
+    await pool.query(
+      'INSERT INTO ico_offerings(token_name,token_symbol,price_per_token,total_supply,hard_cap,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6)',
+      [token_name, token_symbol, toUnits(price_per_token), toUnits(total_supply), toUnits(hard_cap), req.user.id]
+    );
+    await logAdmin(req.user.id, 'create_ico', { reason: token_symbol });
+  }
+  res.redirect('/admin/ico' + tok(req));
+});
+app.post('/admin/ico/:id/end', requireAdminPage, async (req, res) => {
+  await pool.query("UPDATE ico_offerings SET status='ended' WHERE id=$1", [req.params.id]);
+  await logAdmin(req.user.id, 'end_ico', { reason: String(req.params.id) });
+  res.redirect('/admin/ico' + tok(req));
+});
+
 // ── Static + HTML shell ────────────────────────────────────────────────────────
 
-// Silence the browser's auto-request for /favicon.ico: return 204 No Content
-// before the static + catch-all handlers so it never hits the auth-gated
-// catch-all (which would 401 and log a console error, failing CI checks).
+// Browsers always request a favicon; without a file, the catch-all below would
+// gate it and return 401 to unauthenticated tabs, generating a console error.
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1147,8 +1796,55 @@ async function start() {
     );
   `);
 
+  // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
+  // Standardize verification vocabulary: verified→social, elite→premium.
+  await pool.query("UPDATE kyc_verifications SET level='social' WHERE level='verified'");
+  await pool.query("UPDATE kyc_verifications SET level='premium' WHERE level='elite'");
+  await pool.query(`
+    ALTER TABLE kyc_verifications ADD COLUMN IF NOT EXISTS provider VARCHAR(20);
+    ALTER TABLE kyc_verifications ADD COLUMN IF NOT EXISTS attestation_ref TEXT;
+    ALTER TABLE kyc_verifications ADD COLUMN IF NOT EXISTS anti_sybil_token TEXT;
+    ALTER TABLE kyc_verifications ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+    ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+  `);
+  // UNIQUE on anti_sybil_token enforces one social account per wallet.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS kyc_anti_sybil_uniq
+    ON kyc_verifications (anti_sybil_token) WHERE anti_sybil_token IS NOT NULL
+  `);
+
+  // funding_payments — per-position funding settlements (Phase 3, private).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS funding_payments (
+      id SERIAL PRIMARY KEY,
+      position_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      market_id INTEGER NOT NULL,
+      amount BIGINT NOT NULL,
+      rate NUMERIC(12,8) NOT NULL,
+      mode VARCHAR(10) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      user_id INTEGER NOT NULL,
+      key VARCHAR(120) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id, key)
+    );
+  `);
+
+  // Initialize the funding schedule for any market missing it.
+  await pool.query(
+    `UPDATE futures_markets SET next_funding_at=NOW() + ($1 || ' milliseconds')::interval
+     WHERE next_funding_at IS NULL`, [String(FUNDING_INTERVAL_MS)]
+  );
+
   // Privacy markings
   await pool.query(`
+    COMMENT ON TABLE funding_payments IS 'staging:private';
+    COMMENT ON TABLE idempotency_keys IS 'staging:private';
     COMMENT ON TABLE wallet_balances IS 'staging:private';
     COMMENT ON TABLE paper_balances IS 'staging:private';
     COMMENT ON TABLE defi_swaps IS 'staging:private';
@@ -1190,12 +1886,17 @@ async function start() {
       ON CONFLICT(user_id) DO NOTHING
     `);
 
-    // Seed KYC
+    // Seed verifications (new vocabulary + social-OAuth providers). Each social
+    // identity carries a unique synthetic anti_sybil_token so seeded users never
+    // false-collide on the UNIQUE index.
     await pool.query(`
-      INSERT INTO kyc_verifications(user_id,level,status) VALUES
-        (9001,'verified','approved'),(9002,'elite','approved'),
-        (9003,'verified','pending'),(9004,'basic','approved'),
-        (9005,'basic','approved'),(9006,'elite','approved')
+      INSERT INTO kyc_verifications(user_id,level,status,provider,attestation_ref,anti_sybil_token,verified_at) VALUES
+        (9001,'social','approved','x','staging-x-9001','staging-social-9001',NOW()),
+        (9002,'premium','approved','zkpassport','staging-zk-9002',NULL,NOW()),
+        (9003,'social','pending','instagram','staging-instagram-9003','staging-social-9003',NULL),
+        (9004,'basic','approved',NULL,NULL,NULL,NULL),
+        (9005,'basic','approved',NULL,NULL,NULL,NULL),
+        (9006,'premium','approved','zkpassport','staging-zk-9006',NULL,NOW())
       ON CONFLICT(user_id) DO NOTHING
     `);
 
@@ -1275,6 +1976,33 @@ async function start() {
         (9004,9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C')
       ON CONFLICT(id) DO NOTHING
     `);
+
+    // Seed open futures positions (one paper, one live) so PnL + funding
+    // columns render, plus a little funding history.
+    const ethFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='ETH-PERP'")).rows[0];
+    const btcFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='BTC-PERP'")).rows[0];
+    if (ethFut && btcFut) {
+      await pool.query(`
+        INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,last_funding_at) VALUES
+          (900001,9001,$1,'live','long',5,2400,1.0,480000000,1968,'open',NOW()),
+          (900002,9004,$2,'paper','short',10,68000,0.05,340000000,74800,'open',NOW())
+        ON CONFLICT(id) DO NOTHING
+      `, [ethFut.id, btcFut.id]);
+      await pool.query(`
+        INSERT INTO funding_payments(id,position_id,user_id,market_id,amount,rate,mode) VALUES
+          (900001,900001,9001,$1,-240,0.0001,'live'),
+          (900002,900002,9004,$2,170,0.0001,'paper')
+        ON CONFLICT(id) DO NOTHING
+      `, [ethFut.id, btcFut.id]);
+      await pool.query(`
+        INSERT INTO transactions(user_id,type,token_symbol,amount,description)
+        SELECT * FROM (VALUES
+          (9001,'funding','USDC',-240,'Staging demo funding ETH-PERP'),
+          (9004,'funding','USDC',170,'Staging demo funding BTC-PERP')
+        ) v(user_id,type,token_symbol,amount,description)
+        WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo funding ETH-PERP')
+      `).catch(() => {});
+    }
   }
 
   app.listen(port, () => console.log(`BloomMoney listening on :${port}`));

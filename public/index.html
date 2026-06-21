@@ -92,6 +92,8 @@
       <span class="font-bold text-violet-400">🌸 BloomMoney</span>
     </div>
     <div class="flex items-center gap-2 text-xs">
+      <button class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button id="hdr-verify" class="text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
       <span id="hdr-wallet" class="text-zinc-500 font-mono hidden sm:block"></span>
       <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
         <span class="text-violet-400 font-semibold" id="hdr-bloom">—</span>
@@ -111,18 +113,17 @@
 
     <!-- Desktop Sidebar + Mobile Drawer -->
     <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-zinc-900 border-r border-zinc-800 flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
-      <button class="nav-item" data-view="feed">🏠 Feed</button>
-      <button class="nav-item" data-view="profile">👤 Profile</button>
-      <div class="py-1 px-2 text-xs text-zinc-600 font-medium mt-2">DeFi</div>
-      <button class="nav-item pl-5" data-view="swap">↔ Swap</button>
-      <button class="nav-item pl-5" data-view="stake">🔒 Stake</button>
-      <button class="nav-item pl-5" data-view="liquidity">💧 Liquidity</button>
-      <button class="nav-item pl-5" data-view="ico">🚀 ICO</button>
-      <button class="nav-item mt-1" data-view="markets">📊 Opinion Market</button>
+      <button class="nav-item" data-view="home">🏠 Home</button>
+      <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
-      <button class="nav-item" data-view="nfts">🎨 NFT Mint</button>
-      <button class="nav-item" data-view="kyc">🪪 Identity</button>
-      <button class="nav-item text-amber-400 hidden" id="admin-nav" data-view="admin">⚙️ Admin</button>
+      <button class="nav-item" data-view="earn">🌱 Earn</button>
+      <button class="nav-item" data-view="predict">📊 Predict</button>
+      <button class="nav-item" data-view="profile">👤 Profile</button>
+      <div class="py-1 px-2 text-xs text-zinc-600 font-medium mt-2">Discover</div>
+      <button class="nav-item" data-view="explore">🔭 Explore</button>
+      <button class="nav-item" data-view="verify">🪪 Verify</button>
+      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
+      <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
     </nav>
 
     <!-- Main Content -->
@@ -146,7 +147,10 @@
       <!-- ICO -->
       <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
-      <!-- Opinion Markets -->
+      <!-- Earn (composite: stake / liquidity / ico) -->
+      <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Opinion / Prediction Markets -->
       <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Futures -->
@@ -154,6 +158,12 @@
 
       <!-- NFTs -->
       <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Explore -->
+      <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Verify -->
+      <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
 
       <!-- KYC -->
       <section id="section-kyc" class="view hidden max-w-lg mx-auto py-4 px-4"></section>
@@ -164,13 +174,14 @@
     </main>
   </div>
 
-  <!-- Mobile Bottom Nav -->
-  <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex z-30">
-    <button class="flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 hover:text-white transition-colors" onclick="navigate('feed')">🏠<span>Feed</span></button>
-    <button class="flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 hover:text-white transition-colors" onclick="navigate('markets')">📊<span>Markets</span></button>
-    <button class="flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 hover:text-white transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
-    <button class="flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 hover:text-white transition-colors" onclick="navigate('nfts')">🎨<span>NFTs</span></button>
-    <button class="flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 hover:text-white transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+  <!-- Mobile Bottom Nav (six tabs) -->
+  <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex z-30">
+    <button data-tab="home" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
+    <button data-tab="trade" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
+    <button data-tab="futures" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
+    <button data-tab="earn" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
+    <button data-tab="predict" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
+    <button data-tab="profile" class="bottom-tab flex-1 py-2 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
   </nav>
 </div><!-- /#app -->
 
@@ -194,6 +205,8 @@
 .btn-g { background: #059669; color: #fff; }
 .btn-g:hover { background: #047857; }
 .tag-basic { background: rgba(59,130,246,0.15); color: #93c5fd; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-social { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.tag-premium { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-verified { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
@@ -208,7 +221,7 @@ const S = {
   user: null,
   balances: {},
   kyc: null,
-  view: 'feed',
+  view: 'home',
   prices: {},
   marketId: null,
   profileUser: null,
@@ -257,20 +270,45 @@ function tsAgo(d) {
   if (s < 86400) return Math.floor(s/3600)+'h';
   return Math.floor(s/86400)+'d';
 }
+function tierLabel(lvl) {
+  return { basic: 'Basic', social: 'Social ✓', premium: 'Premium ★' }[lvl] || (lvl || 'Basic');
+}
 function kycTag(lvl) {
   if (!lvl) return '';
-  return `<span class="tag-${lvl}">${lvl}</span>`;
+  return `<span class="tag-${lvl}">${tierLabel(lvl)}</span>`;
+}
+function fundingCountdown(ts) {
+  const ms = new Date(ts) - Date.now();
+  if (ms <= 0) return 'due';
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+  if (m >= 60) return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  return m + 'm ' + s + 's';
 }
 function err(msg) { return `<div class="text-red-400 text-sm py-2">${msg}</div>`; }
 function spin() { return `<div class="flex justify-center py-8"><div class="spinner"></div></div>`; }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
+// Six primary tabs (home/trade/futures/earn/predict/profile) plus explore,
+// verify and nfts. Legacy aliases (feed/swap/markets/stake/…) still resolve so
+// internal deep-links keep working.
 const VIEW_SECTION = {
-  feed: 'app-feed', profile: 'section-profile', swap: 'section-swap',
-  stake: 'section-stake', liquidity: 'section-liquidity', ico: 'section-ico',
-  markets: 'section-markets', futures: 'section-futures', nfts: 'section-nfts',
-  kyc: 'section-kyc', admin: 'section-admin'
+  home: 'app-feed', feed: 'app-feed',
+  trade: 'section-swap', swap: 'section-swap',
+  futures: 'section-futures',
+  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
+  predict: 'section-markets', markets: 'section-markets',
+  profile: 'section-profile',
+  explore: 'section-explore',
+  verify: 'section-verify', kyc: 'section-verify',
+  nfts: 'section-nfts',
+  admin: 'section-admin',
+};
+// Which bottom tab is highlighted for a given view.
+const VIEW_TAB = {
+  home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
+  earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
+  predict: 'predict', markets: 'predict', profile: 'profile',
 };
 
 function navigate(view, opts) {
@@ -281,6 +319,11 @@ function navigate(view, opts) {
   if (sec) sec.classList.remove('hidden');
   document.querySelectorAll('.nav-item').forEach(b => {
     b.classList.toggle('active', b.dataset.view === view);
+  });
+  const tab = VIEW_TAB[view];
+  document.querySelectorAll('.bottom-tab').forEach(b => {
+    b.classList.toggle('text-violet-400', b.dataset.tab === tab);
+    b.classList.toggle('text-zinc-400', b.dataset.tab !== tab);
   });
   hideMobileSidebar();
   loadView(view);
@@ -293,16 +336,15 @@ async function loadView(view) {
   sec.innerHTML = spin();
   try {
     switch (view) {
-      case 'feed': await renderFeed(sec); break;
+      case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
-      case 'swap': await renderSwap(sec); break;
-      case 'stake': await renderStake(sec); break;
-      case 'liquidity': await renderLiquidity(sec); break;
-      case 'ico': await renderICO(sec); break;
-      case 'markets': await renderMarkets(sec); break;
+      case 'trade': case 'swap': await renderSwap(sec); break;
+      case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
+      case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'futures': await renderFutures(sec); break;
       case 'nfts': await renderNFTs(sec); break;
-      case 'kyc': await renderKYC(sec); break;
+      case 'explore': await renderExplore(sec); break;
+      case 'verify': case 'kyc': await renderVerify(sec); break;
       case 'admin': await renderAdmin(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
@@ -327,6 +369,12 @@ document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
+  // Skip the network round-trip when there's no token to present — this avoids
+  // a guaranteed 401 that shows up as a console error in headless test runners.
+  if (!S.token) {
+    document.getElementById('wallet-gate').classList.remove('hidden');
+    return;
+  }
   try {
     const data = await api('GET', '/api/me');
     S.user = data.user;
@@ -356,7 +404,9 @@ function showApp() {
   document.getElementById('app').classList.remove('hidden');
   updateHeader();
   if (S.user.is_admin) {
-    document.getElementById('admin-nav').classList.remove('hidden');
+    const adminLink = document.getElementById('admin-nav');
+    adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
+    adminLink.classList.remove('hidden');
   }
   navigate(S.view);
 }
@@ -595,7 +645,7 @@ async function renderProfile(sec) {
                 </div>
               </div>
               <div class="flex gap-2">
-                ${isMe ? `<button class="btn btn-z" onclick="editMode=true;fullRender()">Edit Profile</button>` :
+                ${isMe ? `<button class="btn btn-v" onclick="navigate('verify')">Verify</button><button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
                   `<button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
               </div>
             </div>
@@ -606,6 +656,7 @@ async function renderProfile(sec) {
               <span><strong>${counts.post_count}</strong> <span class="text-zinc-500">posts</span></span>
             </div>`}
         </div>
+        ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
           ${['posts','replies','nfts'].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
@@ -859,6 +910,83 @@ async function renderICO(sec) {
   await load();
 }
 
+// ── Earn (composite: Stake / Liquidity / ICO) ───────────────────────────────────
+async function renderEarn(sec) {
+  let tab = S.earnTab || 'stake';
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">🌱 Earn</h2>
+    <div class="flex gap-2 mb-4 border-b border-zinc-800 pb-2">
+      ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['ico','🚀 ICO']].map(([k,l])=>
+        `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${tab===k?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="setEarnTab('${k}')">${l}</button>`).join('')}
+    </div>
+    <div id="earn-sub"></div>`;
+  const sub = document.getElementById('earn-sub');
+  sub.innerHTML = spin();
+  try {
+    if (tab === 'stake') await renderStake(sub);
+    else if (tab === 'liquidity') await renderLiquidity(sub);
+    else await renderICO(sub);
+  } catch (e) { sub.innerHTML = err(e.message); }
+  window.setEarnTab = (t) => { S.earnTab = t; renderEarn(sec); };
+}
+
+// ── Explore ─────────────────────────────────────────────────────────────────────
+async function renderExplore(sec) {
+  const [people, markets, ico, nfts] = await Promise.all([
+    api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
+    api('GET', '/api/markets').then(d => d.markets).catch(() => []),
+    api('GET', '/api/ico').then(d => d.offerings).catch(() => []),
+    api('GET', '/api/nfts').then(d => d.nfts).catch(() => []),
+  ]);
+  const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
+  const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
+  const topNfts = nfts.slice(0, 6);
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
+
+    <h3 class="font-semibold mb-2">People to follow</h3>
+    ${people.length ? `<div class="space-y-2 mb-5">${people.map(p => `
+      <div class="card flex items-center justify-between gap-2">
+        <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
+          <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold">${esc((p.username||'?')[0].toUpperCase())}</div>
+          <div class="text-left min-w-0">
+            <div class="text-sm font-medium truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''}</div>
+            <div class="text-xs text-zinc-500">${p.followers} followers</div>
+          </div>
+        </button>
+        <button class="btn btn-v text-xs shrink-0" onclick="exploreFollow('${esc(p.username)}',this)">Follow</button>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No suggestions right now</p>'}
+
+    <h3 class="font-semibold mb-2">Active markets</h3>
+    ${activeMarkets.length ? `<div class="space-y-2 mb-5">${activeMarkets.map(m => {
+      const yesPct = (Number(m.no_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(0);
+      return `<button class="card w-full text-left hover:border-zinc-600" onclick="S.marketId=${m.id};navigate('predict')">
+        <div class="text-sm font-medium">${esc(m.title)}</div>
+        <div class="text-xs text-zinc-500">YES ${yesPct}% · ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC liquidity</div>
+      </button>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No active markets</p>'}
+
+    <h3 class="font-semibold mb-2">Live token sales</h3>
+    ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
+      <button class="card w-full text-left hover:border-zinc-600" onclick="navigate('earn');S.earnTab='ico'">
+        <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-zinc-500">${esc(o.token_symbol)}</span></div>
+        <div class="text-xs text-zinc-500">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
+      </button>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No live sales</p>'}
+
+    <h3 class="font-semibold mb-2">Top NFTs</h3>
+    ${topNfts.length ? `<div class="grid grid-cols-3 gap-3">${topNfts.map(n => `
+      <div class="card space-y-1 overflow-hidden">
+        <div class="aspect-square overflow-hidden rounded-lg bg-zinc-800"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
+        <p class="text-xs font-medium truncate">${esc(n.name)}</p>
+        <p class="text-xs text-zinc-600 truncate">@${esc(n.owner_username)}</p>
+      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No NFTs yet</p>'}
+  `;
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+}
+
+
 // ── Opinion Markets ───────────────────────────────────────────────────────────
 async function renderMarkets(sec) {
   if (S.marketId) { await renderMarketDetail(sec); return; }
@@ -997,6 +1125,7 @@ async function renderFutures(sec) {
 
   if (!S.futuresMarket && markets.length) S.futuresMarket = markets[0];
   const mkt = S.futuresMarket;
+  const futTier = (S.kyc && S.kyc.status === 'approved') ? S.kyc.level : 'basic';
 
   let side = 'long', leverage = 5, qty = '';
   function marginPreview() {
@@ -1021,6 +1150,10 @@ async function renderFutures(sec) {
     ${S.futuresMode==='paper'
       ? `<div class="card mb-4 flex gap-4 items-center"><span class="text-zinc-400 text-sm">Paper Balance:</span><span class="text-violet-300 font-bold">${fmtUSD(paperBal)} USDC</span></div>`
       : `<div class="card mb-4 flex gap-4 items-center"><span class="text-amber-400 text-sm font-medium">⚠ LIVE MODE — real balance</span><span class="text-emerald-400 font-bold">${getBal('USDC')} USDC</span></div>`}
+    ${S.futuresMode==='live' && futTier==='basic'
+      ? `<div class="card mb-4 border-amber-700/50"><p class="text-sm text-amber-300">🔒 Live trading needs <b>Social</b> verification. <button class="underline" onclick="navigate('verify')">Verify to unlock →</button></p></div>`
+      : S.futuresMode==='live' && futTier==='social'
+      ? `<div class="card mb-4 border-amber-700/50"><p class="text-xs text-zinc-400">Social tier: up to 5× leverage. <button class="underline text-violet-300" onclick="navigate('verify')">Go Premium for 20× →</button></p></div>` : ''}
     <div class="grid md:grid-cols-2 gap-4 mb-4">
       <div class="card space-y-3">
         <h3 class="font-semibold">Place Order</h3>
@@ -1051,20 +1184,26 @@ async function renderFutures(sec) {
         <p id="fut-msg" class="text-sm"></p>
       </div>
       <div class="card">
-        <h3 class="font-semibold mb-3">Markets</h3>
-        <div class="space-y-2">${markets.map(m => `
-          <div class="flex justify-between items-center text-sm py-1 border-b border-zinc-800 last:border-0">
+        <h3 class="font-semibold mb-3">Markets · Funding</h3>
+        <div class="space-y-2">${markets.map(m => {
+          const rate = (parseFloat(m.funding_rate||0)*100);
+          const next = m.next_funding_at ? fundingCountdown(m.next_funding_at) : '—';
+          return `<div class="flex justify-between items-center text-sm py-1 border-b border-zinc-800 last:border-0">
             <span class="font-medium">${m.symbol}</span>
             <span class="font-mono">$${parseFloat(m.mark_price).toFixed(2)}</span>
-          </div>`).join('')}</div>
+            <span class="text-xs ${rate>=0?'text-emerald-400':'text-red-400'}" title="funding rate">${rate>=0?'+':''}${rate.toFixed(4)}%</span>
+            <span class="text-xs text-zinc-500" title="next funding">⏱ ${next}</span>
+          </div>`;}).join('')}</div>
+        <p class="text-xs text-zinc-600 mt-2">Longs pay shorts when funding is positive.</p>
       </div>
     </div>
     <div class="card mb-4">
       <h3 class="font-semibold mb-3">Open Positions</h3>
       ${openPositions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
-        <thead><tr class="text-zinc-500 text-xs">${['Market','Mode','Side','Leverage','Size','Entry','Mark','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+        <thead><tr class="text-zinc-500 text-xs">${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
         <tbody>${openPositions.map(p => {
           const pnl = parseFloat(p.unrealized_pnl||0)/1e6;
+          const fund = parseFloat(p.funding_paid||0)/1e6;
           return `<tr class="border-t border-zinc-800">
             <td class="py-1.5 pr-3 font-medium">${p.symbol}</td>
             <td class="pr-3 text-xs">${p.mode==='paper'?'📄':'⚡'}</td>
@@ -1073,6 +1212,7 @@ async function renderFutures(sec) {
             <td class="pr-3 font-mono">${parseFloat(p.quantity).toFixed(4)}</td>
             <td class="pr-3 font-mono">$${parseFloat(p.entry_price).toFixed(2)}</td>
             <td class="pr-3 font-mono">$${parseFloat(p.mark_price||0).toFixed(2)}</td>
+            <td class="pr-3 ${fund>=0?'text-emerald-400':'text-red-400'}" title="funding paid/received">${fund>=0?'+':''}${fund.toFixed(2)}</td>
             <td class="pr-3 ${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)}</td>
             <td><button class="btn btn-r text-xs px-2 py-1" onclick="closeFutures(${p.id})">Close</button></td>
           </tr>`;}).join('')}</tbody>
@@ -1100,7 +1240,8 @@ async function renderFutures(sec) {
         market_id: S.futuresMarket.id,
         side, leverage: parseInt(levEl?.value||5),
         quantity: parseFloat(qtyEl?.value||0),
-        mode: S.futuresMode
+        mode: S.futuresMode,
+        idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now()
       });
       if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Order placed'; }
       await refreshBalances();
@@ -1169,76 +1310,98 @@ async function renderNFTs(sec) {
   await load();
 }
 
-// ── KYC ───────────────────────────────────────────────────────────────────────
-async function renderKYC(sec) {
-  const { kyc } = await api('GET', '/api/kyc');
-  S.kyc = kyc;
+// ── Verify (three-tier self-service) ────────────────────────────────────────────
+const PROVIDER_LABEL = { x: 'X', instagram: 'Instagram', tiktok: 'TikTok', coinbase: 'Coinbase' };
 
-  const levels = ['basic','verified','elite'];
-  const curIdx = kyc ? levels.indexOf(kyc.level) : -1;
-  const docTypes = ['passport','driver_license','national_id'];
+async function renderVerify(sec) {
+  const [{ kyc }, providers] = await Promise.all([
+    api('GET', '/api/kyc').catch(() => ({ kyc: null })),
+    api('GET', '/api/verify/providers').catch(() => ({ social_providers: [], social_enabled: false, premium_enabled: false, staging: false })),
+  ]);
+  S.kyc = kyc;
+  const level = (kyc && kyc.status === 'approved') ? kyc.level : 'basic';
+  const isSocial = level === 'social' || level === 'premium';
+  const isPremium = level === 'premium';
+
+  function tierCard(name, badge, active, unlocks, action) {
+    return `<div class="card space-y-2 ${active ? 'border-violet-600' : ''}">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">${badge} ${name}</h3>
+        ${active ? '<span class="tag-social">Active</span>' : '<span class="text-xs text-zinc-500">Locked</span>'}
+      </div>
+      <ul class="text-xs text-zinc-400 list-disc pl-4 space-y-0.5">${unlocks.map(u => `<li>${u}</li>`).join('')}</ul>
+      ${action || ''}
+    </div>`;
+  }
+
+  const socialAction = isSocial
+    ? `<p class="text-xs text-emerald-400">✓ Verified via ${esc(kyc?.provider || 'social')}</p>`
+    : providers.social_enabled && providers.social_providers.length
+      ? `<div class="flex flex-wrap gap-2">${providers.social_providers.map(p =>
+          `<button class="btn btn-v text-xs" onclick="connectSocial('${p}')">Connect ${PROVIDER_LABEL[p] || p}</button>`).join('')}</div>
+         <p id="social-msg" class="text-sm"></p>`
+      : `<p class="text-xs text-amber-400">No social providers are configured right now — try Premium instead.</p>`;
+
+  const premiumAction = isPremium
+    ? `<p class="text-xs text-emerald-400">✓ Premium verified via zkPassport</p>`
+    : providers.premium_enabled
+      ? `<button class="btn btn-v text-xs" onclick="connectZk()">Verify with zkPassport</button><p id="zk-msg" class="text-sm"></p>`
+      : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
   sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">Identity Verification</h2>
-    <div class="card mb-4">
-      <div class="flex items-center gap-3 mb-3">
-        <div class="text-3xl">${kyc?.level==='elite'?'🥇':kyc?.level==='verified'?'✅':kyc?'🔵':'⬜'}</div>
-        <div>
-          <div class="font-bold text-lg">${kyc ? kyc.level.toUpperCase() : 'UNVERIFIED'}</div>
-          ${kyc ? `<div class="text-xs ${kyc.status==='approved'?'text-emerald-400':kyc.status==='pending'?'text-amber-400':'text-red-400'}">${kyc.status.toUpperCase()}</div>` : ''}
-        </div>
-      </div>
-      <div class="flex gap-2 items-center">
-        ${levels.map((l, i) => `<div class="flex items-center gap-1">
-          <div class="w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold ${i<=curIdx?'bg-violet-600':'bg-zinc-700'}">${i+1}</div>
-          <span class="text-xs ${i<=curIdx?'text-white':'text-zinc-500'}">${l}</span>
-          ${i < levels.length-1 ? '<div class="w-6 h-px bg-zinc-700"></div>' : ''}
-        </div>`).join('')}
-      </div>
-      ${kyc?.rejection_reason ? `<div class="mt-3 text-xs text-red-400 bg-red-900/20 rounded-lg p-2">Rejected: ${esc(kyc.rejection_reason)}</div>` : ''}
-    </div>
+    <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
+    <p class="text-sm text-zinc-500 mb-4">Your tier: <span class="font-semibold text-zinc-200">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
+    <div class="space-y-3">
+      ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
+        '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
+      ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
+      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 20× leverage', 'Higher trade-size limits', 'Premium profile badge'], premiumAction)}
+    </div>`;
 
-    ${kyc?.status === 'pending' ? `<div class="card mb-4"><p class="text-amber-400 text-sm">⏳ Verification pending admin review</p></div>` : ''}
-
-    ${(!kyc || kyc.level === 'basic') && kyc?.status !== 'pending' ? `
-    <div class="card mb-4 space-y-3">
-      <h3 class="font-semibold">Apply for Verified Badge</h3>
-      <p class="text-xs text-zinc-500">Unlock higher trading features by submitting identity documents.</p>
-      <div>
-        <label class="text-xs text-zinc-500">Document Type</label>
-        <select id="kyc-doc" class="inp mt-1">${docTypes.map(d=>`<option value="${d}">${d.replace('_',' ')}</option>`).join('')}</select>
-      </div>
-      <button class="btn btn-v" onclick="submitKYC('verified')">Submit for Verified</button>
-      <p id="kyc-msg" class="text-sm"></p>
-    </div>` : ''}
-
-    ${kyc?.level === 'verified' && kyc?.status === 'approved' ? `
-    <div class="card space-y-3">
-      <h3 class="font-semibold">Apply for Elite Badge</h3>
-      <p class="text-xs text-zinc-500">Unlock leverage above 5× for futures trading.</p>
-      <label class="flex items-center gap-2 text-sm cursor-pointer">
-        <input type="checkbox" id="kyc-bio" class="w-4 h-4 accent-violet-600">
-        <span>I consent to biometric verification</span>
-      </label>
-      <button class="btn btn-v" onclick="submitKYC('elite')">Submit for Elite</button>
-      <p id="kyc-msg-elite" class="text-sm"></p>
-    </div>` : ''}`;
-
-  window.submitKYC = async (level) => {
-    const msgId = level === 'elite' ? 'kyc-msg-elite' : 'kyc-msg';
-    const msg = document.getElementById(msgId);
+  window.connectSocial = async (provider) => {
+    const msg = document.getElementById('social-msg');
     try {
-      const body = { level };
-      if (level === 'verified') body.document_type = document.getElementById('kyc-doc')?.value;
-      if (level === 'elite') body.biometric_consent = document.getElementById('kyc-bio')?.checked;
-      await api('POST', '/api/kyc/submit', body);
-      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Submitted for review'; }
-      await renderKYC(sec);
-    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+      const start = await api('POST', '/api/verify/social/start', { provider });
+      if (start.simulated) {
+        // Staging / simulated path: complete immediately with the signed state.
+        await api('POST', '/api/verify/social/complete', { provider, code: 'staging-code', state: start.state });
+        if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = '✓ Connected'; }
+        await renderVerify(sec);
+      } else if (start.oauth_url) {
+        // Production: hand off to the provider's OAuth screen.
+        window.location.href = start.oauth_url;
+      }
+    } catch (e) {
+      if (msg) {
+        msg.className = 'text-red-400 text-sm';
+        msg.textContent = e.message === 'social_account_in_use'
+          ? 'That account already verifies another wallet.' : e.message;
+      }
+    }
   };
+
+  window.connectZk = async () => {
+    const msg = document.getElementById('zk-msg');
+    try {
+      // In a real build the zkPassport client SDK produces this proof; staging
+      // auto-approves any payload.
+      await api('POST', '/api/verify/zkpassport', { proof: { simulated: true } });
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = '✓ Premium verified'; }
+      await renderVerify(sec);
+    } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
+  };
+
+  // OAuth return handler: if a provider redirected back with ?code&state, finish.
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('code') && qp.get('state') && qp.get('provider')) {
+    try {
+      await api('POST', '/api/verify/social/complete', { provider: qp.get('provider'), code: qp.get('code'), state: qp.get('state') });
+      await renderVerify(sec);
+    } catch {}
+  }
 }
 
-// ── Admin ────────────────────────────────────────────────────────────────────
+// ── Admin (in-SPA panel for #section-admin) ──────────────────────────────────
 async function renderAdmin(sec) {
   let adminTab = 'stats';
 
