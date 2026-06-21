@@ -1200,6 +1200,8 @@ async function renderTokenDetail(sec) {
     BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400',  btnCls: 'bg-violet-600 hover:bg-violet-500', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
     USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'           },
   };
+  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD' };
+  const useTradingView = sym in TV_SYMBOLS;
 
   const meta = TOKEN_META_DETAIL[sym];
   if (!meta) { S.tradeToken = null; navigate('trade'); return; }
@@ -1226,8 +1228,31 @@ async function renderTokenDetail(sec) {
     chartWrap.innerHTML = svgLineChart(pts, { color: meta.color, width: 480, height: 140 });
   }
 
-  function fmtDetailPrice(sym) {
-    const p = S.prices[sym];
+  function mountTradingViewChart(tokenSym) {
+    const container = document.getElementById('tv-chart-container');
+    if (!container) return;
+    container.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+    script.type = 'text/javascript';
+    script.async = true;
+    script.textContent = JSON.stringify({
+      autosize: true,
+      symbol: TV_SYMBOLS[tokenSym],
+      interval: 'D',
+      timezone: 'Etc/UTC',
+      theme: 'dark',
+      style: '1',
+      locale: 'en',
+      hide_top_toolbar: false,
+      hide_legend: true,
+      allow_symbol_change: false,
+    });
+    container.appendChild(script);
+  }
+
+  function fmtDetailPrice(s) {
+    const p = S.prices[s];
     if (p == null) return '—';
     if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (p >= 1)    return '$' + p.toFixed(2);
@@ -1246,6 +1271,16 @@ async function renderTokenDetail(sec) {
     const changeStr = change === null ? '—' : (change >= 0 ? `+${change.toFixed(2)}%` : `${change.toFixed(2)}%`);
     const changeCls = change === null ? 'text-zinc-500' : change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-zinc-500';
 
+    const chartSection = useTradingView
+      ? `<div id="tv-chart-container" class="tradingview-widget-container" style="height:400px;min-height:400px"></div>`
+      : `<div>
+          <div class="flex gap-2 mb-3">
+            <button id="btn-24h" class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(24)">24H</button>
+            <button id="btn-7d"  class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(168)">7D</button>
+          </div>
+          <div id="token-detail-chart"></div>
+        </div>`;
+
     sec.innerHTML = `
       <button class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('trade')">← Markets</button>
       <div class="card space-y-4 mb-4">
@@ -1261,17 +1296,15 @@ async function renderTokenDetail(sec) {
           </div>
         </div>
         <p class="text-sm text-zinc-400">${esc(meta.desc)}</p>
-        <div>
-          <div class="flex gap-2 mb-3">
-            <button id="btn-24h" class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(24)">24H</button>
-            <button id="btn-7d"  class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(168)">7D</button>
-          </div>
-          <div id="token-detail-chart"></div>
-        </div>
+        ${chartSection}
       </div>
       <button class="w-full py-3 rounded-xl font-semibold text-white transition-colors ${meta.btnCls}" onclick="window._swapFromDetail('${sym}')">Swap ${esc(sym)} →</button>`;
 
-    await renderChart();
+    if (useTradingView) {
+      mountTradingViewChart(sym);
+    } else {
+      await renderChart();
+    }
   }
 
   window._setTokenChartHours = async (h) => {
@@ -1286,7 +1319,6 @@ async function renderTokenDetail(sec) {
   window._swapFromDetail = (s) => {
     S.tradeToken = null;
     navigate('trade');
-    // After navigation re-renders the swap form, select the token
     setTimeout(() => { if (window.swapFromChange) window.swapFromChange(s); }, 50);
   };
 
