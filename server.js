@@ -807,6 +807,26 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/trade/market-stats', async (req, res) => {
+  try {
+    const symbols = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+    const { rows } = await pool.query(`
+      SELECT token, COUNT(*)::int AS swap_count
+      FROM (
+        SELECT from_token AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+        UNION ALL
+        SELECT to_token   AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+      ) t
+      WHERE token = ANY($1)
+      GROUP BY token
+    `, [symbols]);
+    const statsMap = {};
+    rows.forEach(r => { statsMap[r.token] = r.swap_count; });
+    const stats = symbols.map(sym => ({ symbol: sym, swap_count: statsMap[sym] || 0 }));
+    res.json({ stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Live ticker prices for the post composer "AI Trade Helper" badge. Resolves
 // only known tickers via COINGECKO_TICKER_MAP; unrecognized symbols are
 // silently dropped so the badge degrades gracefully. Reuses the cached
@@ -4097,6 +4117,25 @@ async function start() {
 
     // Seed demo conversations + messages (private tables → empty in staging).
     await ensureMessagingSeed();
+
+    // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
+    // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
+    const { rows: [swapExists] } = await pool.query(
+      `SELECT 1 FROM defi_swaps WHERE user_id=9001 LIMIT 1`
+    );
+    if (!swapExists) {
+      await pool.query(`
+        INSERT INTO defi_swaps(user_id, from_token, to_token, from_amount, to_amount, rate, created_at) VALUES
+          (9001,'USDC','BTC',  5000000000,  77526, 0.0000155, NOW() - interval '2 hours'),
+          (9001,'USDC','ETH',  2000000000, 606060, 0.000303,  NOW() - interval '3 hours'),
+          (9002,'USDC','BTC',  1000000000,  15505, 0.0000155, NOW() - interval '5 hours'),
+          (9002,'ETH', 'USDC',    500000,1650000000, 3300,    NOW() - interval '6 hours'),
+          (9002,'USDC','BTC',   800000000,  12404, 0.0000155, NOW() - interval '7 hours'),
+          (9003,'USDC','BLOOM', 800000000,1600000000, 2.0,    NOW() - interval '8 hours'),
+          (9001,'BTC', 'ETH',     10000,   642857, 64.2857,   NOW() - interval '9 hours'),
+          (9003,'ETH', 'BTC',    300000,    4600, 0.01533,    NOW() - interval '10 hours')
+      `);
+    }
   }
 
   // ── Boot-time daily market creation (all environments) ──────────────────────

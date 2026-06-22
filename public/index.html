@@ -1763,13 +1763,18 @@ async function renderSwap(sec) {
   };
   const MARKET_ORDER = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'USDT', 'ADA', 'DOGE', 'TON', 'BLOOM', 'USDC'];
 
-  // Fetch all four price histories in parallel
+  let marketTab = 'most_active';
+  let marketStats = {};
+
+  // Fetch price histories and market stats in parallel
   let histories = {};
   try {
-    const results = await Promise.all(
-      MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))
-    );
-    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (results[i] && results[i].history) || []; });
+    const [histResults, statsData] = await Promise.all([
+      Promise.all(MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))),
+      api('GET', '/api/trade/market-stats').catch(() => ({ stats: [] })),
+    ]);
+    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (histResults[i] && histResults[i].history) || []; });
+    (statsData.stats || []).forEach(s => { marketStats[s.symbol] = s.swap_count; });
   } catch {}
 
   function buildSparkline(hist, color) {
@@ -1802,34 +1807,84 @@ async function renderSwap(sec) {
     return '$' + p.toFixed(4);
   }
 
-  const rows = MARKET_ORDER.map(sym => {
-    const meta = TOKEN_META[sym];
-    const hist = histories[sym];
-    const change = computeChange(hist);
-    const changeStr = change === null ? '—' :
-      (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
-    const changeClass = change === null ? 'text-[#8b95ab]' :
-      change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
-    const sparkline = buildSparkline(hist, meta.color);
-    return `
-      <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
-           onclick="openTokenDetail('${sym}')">
-        <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
-        <div class="flex-1 min-w-0">
-          <div class="text-sm font-semibold">${sym}</div>
-          <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
-        </div>
-        <div class="text-right shrink-0">
-          <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
-          <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
-        </div>
-        <div class="shrink-0">${sparkline}</div>
-      </div>`;
-  }).join('');
+  function getSortedSymbols(tab) {
+    const syms = [...MARKET_ORDER];
+    if (tab === 'most_active') {
+      syms.sort((a, b) => (marketStats[b] || 0) - (marketStats[a] || 0));
+    } else if (tab === 'top_gainer') {
+      syms.sort((a, b) => {
+        const ca = computeChange(histories[a]);
+        const cb = computeChange(histories[b]);
+        if (ca === null && cb === null) return 0;
+        if (ca === null) return 1;
+        if (cb === null) return -1;
+        return cb - ca;
+      });
+    } else if (tab === 'top_loser') {
+      syms.sort((a, b) => {
+        const ca = computeChange(histories[a]);
+        const cb = computeChange(histories[b]);
+        if (ca === null && cb === null) return 0;
+        if (ca === null) return 1;
+        if (cb === null) return -1;
+        return ca - cb;
+      });
+    }
+    return syms;
+  }
+
+  function renderMarketRows(tab) {
+    const rowsEl = document.getElementById('swap-market-rows');
+    if (!rowsEl) return;
+    const tabBtns = { most_active: 'mkt-tab-most-active', top_gainer: 'mkt-tab-top-gainer', top_loser: 'mkt-tab-top-loser' };
+    Object.entries(tabBtns).forEach(([t, id]) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+    });
+    const sorted = getSortedSymbols(tab);
+    rowsEl.innerHTML = sorted.map(sym => {
+      const meta = TOKEN_META[sym];
+      const hist = histories[sym];
+      const change = computeChange(hist);
+      const changeStr = change === null ? '—' :
+        (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
+      const changeClass = change === null ? 'text-[#8b95ab]' :
+        change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
+      const sparkline = buildSparkline(hist, meta.color);
+      return `
+        <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
+             onclick="openTokenDetail('${sym}')">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">${sym}</div>
+            <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
+            <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
+          </div>
+          <div class="shrink-0">${sparkline}</div>
+        </div>`;
+    }).join('');
+  }
+
+  window.setMarketTab = (tab) => {
+    marketTab = tab;
+    renderMarketRows(tab);
+  };
 
   mwrap.innerHTML = `
-    <h3 class="font-semibold mb-2 mt-6 text-[#e8eaf0]">Markets</h3>
-    <div class="space-y-2">${rows}</div>`;
+    <div class="flex items-center justify-between mt-6 mb-2">
+      <h3 class="font-semibold text-[#e8eaf0]">Markets</h3>
+      <div class="flex gap-2">
+        <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
+        <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
+        <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
+      </div>
+    </div>
+    <div id="swap-market-rows" class="space-y-2"></div>`;
+
+  renderMarketRows(marketTab);
 }
 
 // ── Token Detail ──────────────────────────────────────────────────────────────
