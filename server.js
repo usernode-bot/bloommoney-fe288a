@@ -3012,16 +3012,16 @@ async function start() {
 
     // Seed posts
     const posts = [
-      [9001,'Staging demo post #1 — BloomMoney is the future of onchain finance! 🌸'],
-      [9002,'Staging demo post #2 — Just minted my first NFT on BloomMoney. The UI is incredible.'],
-      [9003,'Staging demo post #3 — Opinion markets are live! Betting YES on ETH to $5k before 2027.'],
-      [9004,'Staging demo post #4 — Paper trading BTC-PERP with 10x leverage. Up 23% today! 📈'],
-      [9005,'Staging demo post #5 — Staking 500 BLOOM at 12% APY. Passive income is the way.'],
-      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 BLOOM. The rate is great right now!'],
-      [9002,'Staging demo post #7 — Added liquidity to BLOOM/USDC pool. Earning fees every day.'],
-      [9003,'Staging demo post #8 — Invested in the SDC ICO. Early adopter advantages are real.'],
-      [9006,'Staging demo post #9 — Platform stats looking healthy. 500 trades in 24 hours!'],
-      [9004,'Staging demo post #10 — Closed my ETH-PERP long for +15% PnL. BloomMoney futures rule!'],
+      [9001,'Staging demo post #1 — $BTC consolidating at support. BloomMoney is the future of onchain finance! 🌸'],
+      [9002,'Staging demo post #2 — $ETH looking bullish after the merge. Just minted my first NFT on BloomMoney.'],
+      [9003,'Staging demo post #3 — Opinion markets are live! Betting YES on $ETH to $5k before 2027. 📊'],
+      [9004,'Staging demo post #4 — Paper trading $BTC-PERP with 10x leverage. Up 23% today! 📈'],
+      [9005,'Staging demo post #5 — Staking 500 $BLOOM at 12% APY. Passive income is the way.'],
+      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 $BLOOM. The rate is great right now!'],
+      [9002,'Staging demo post #7 — Added liquidity to $BLOOM/USDC pool. Earning fees every day.'],
+      [9003,'Staging demo post #8 — $BTC dominance rising. Invested in the SDC ICO. Early adopter advantages are real.'],
+      [9006,'Staging demo post #9 — Platform stats looking healthy. $ETH volume up 30% in 24 hours! 🚀'],
+      [9004,'Staging demo post #10 — Closed my $ETH-PERP long for +15% PnL. BloomMoney futures rule!'],
     ];
     for (let i = 0; i < posts.length; i++) {
       const uid = posts[i][0];
