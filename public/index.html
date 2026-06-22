@@ -1089,59 +1089,232 @@ async function renderProfile(sec) {
   }
 
   async function renderPortfolioTab() {
-    const data = await fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r => r.json());
-    const holdings = data.holdings || [];
-    const prices = data.prices || {};
+    const PTOK = {
+      BTC:   { color: '#f59e0b', bg: 'bg-amber-400/10',    text: 'text-amber-400'   },
+      ETH:   { color: '#38bdf8', bg: 'bg-sky-400/10',      text: 'text-sky-400'     },
+      SOL:   { color: '#a855f7', bg: 'bg-purple-500/10',   text: 'text-purple-400'  },
+      DOGE:  { color: '#eab308', bg: 'bg-yellow-400/10',   text: 'text-yellow-400'  },
+      ADA:   { color: '#3b82f6', bg: 'bg-blue-500/10',     text: 'text-blue-400'    },
+      LINK:  { color: '#60a5fa', bg: 'bg-blue-300/10',     text: 'text-blue-300'    },
+      DOT:   { color: '#ec4899', bg: 'bg-pink-500/10',     text: 'text-pink-400'    },
+      AVAX:  { color: '#ef4444', bg: 'bg-red-500/10',      text: 'text-red-400'     },
+      BLOOM: { color: '#7c5cfc', bg: 'bg-[#7c5cfc]/10',   text: 'text-[#7c5cfc]'  },
+      USDC:  { color: '#10b981', bg: 'bg-emerald-400/10',  text: 'text-emerald-400' },
+    };
 
-    let totalValue = 0, totalCost = 0;
-    const rows = holdings.map(h => {
-      const qty = parseFloat(h.quantity);
-      const buyPrice = parseFloat(h.purchase_price);
-      const livePrice = prices[h.ticker?.toUpperCase()] ?? null;
-      const costBasis = qty * buyPrice;
-      let currentValue = null, pnl = null, pnlPct = null;
-      if (livePrice != null) {
-        currentValue = qty * livePrice;
-        pnl = currentValue - costBasis;
-        pnlPct = costBasis > 0 ? (pnl / costBasis * 100) : 0;
-        totalValue += currentValue;
-        totalCost += costBasis;
+    function pSparkline(hist, color) {
+      if (!hist || hist.length < 2) {
+        return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5" stroke-opacity="0.4"/></svg>`;
       }
-      const pnlCls = (pnl != null && pnl >= 0) ? 'text-emerald-400' : 'text-red-400';
-      const qtyStr = qty < 1 ? qty.toFixed(6) : qty < 10 ? qty.toFixed(4) : qty.toFixed(2);
-      return `
-        <div class="card space-y-2">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="font-semibold text-sm">${esc(h.asset_name)}</span>
-            ${h.ticker ? `<span class="text-[#8b95ab] font-mono text-xs bg-[#1c2236] px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
-          </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div><div class="text-[#8b95ab]">Quantity</div><div class="font-mono">${qtyStr}</div></div>
-            <div><div class="text-[#8b95ab]">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
-            <div><div class="text-[#8b95ab]">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-[#4e5872]">—</span>'}</div></div>
-            <div>
-              <div class="text-[#8b95ab]">Value / P&amp;L</div>
-              ${currentValue != null
-                ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
-                : `<div class="text-[#4e5872]">—</div>`}
-            </div>
-          </div>
-        </div>`;
-    });
+      const ps = hist.map(h => parseFloat(h.price_usd));
+      const mn = Math.min(...ps), mx = Math.max(...ps);
+      const rng = Math.max(mx - mn, 0.000001);
+      const xStep = 60 / (ps.length - 1);
+      const pts = ps.map((p, i) => `${(i*xStep).toFixed(1)},${(22-((p-mn)/rng)*20).toFixed(1)}`).join(' ');
+      return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+    }
 
-    const totalPnl = totalValue - totalCost;
-    const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
-    const totalPnlCls = totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+    function fmtLivePrice(p) {
+      if (p == null) return '—';
+      if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (p >= 1)    return '$' + p.toFixed(2);
+      return '$' + p.toFixed(4);
+    }
 
-    return `
-      <div class="card bg-[#161b2a]/80 space-y-1">
-        <div class="text-xs text-[#8b95ab]">Portfolio value</div>
-        <div class="text-2xl font-bold text-[#7c5cfc]">$${totalValue.toFixed(2)}</div>
-        ${totalCost > 0 ? `<div class="text-sm ${totalPnlCls} font-mono">${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} (${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%) overall P&L</div>` : ''}
+    function fmtQty(qty) {
+      return qty < 1 ? qty.toFixed(6) : qty < 10 ? qty.toFixed(4) : qty.toFixed(2);
+    }
+
+    // Fetch portfolio data and chart data in parallel
+    const [portData, initChart] = await Promise.all([
+      fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r => r.json()),
+      isMe ? api('GET', '/api/portfolio/chart?range=1d').catch(() => ({ points: [], range: '1d' })) : Promise.resolve({ points: [], range: '1d' }),
+    ]);
+
+    const holdings = portData.holdings || [];
+    const prices   = portData.prices   || {};
+
+    // Fetch 24h sparkline history for all held tickers in parallel
+    const tickers = [...new Set(holdings.map(h => h.ticker?.toUpperCase()).filter(Boolean))];
+    const sparkData = {};
+    if (tickers.length) {
+      const results = await Promise.all(
+        tickers.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))
+      );
+      tickers.forEach((sym, i) => { sparkData[sym] = results[i].history || []; });
+    }
+
+    // Compute total value and chart delta
+    let totalValue = 0;
+    for (const h of holdings) {
+      const p = prices[h.ticker?.toUpperCase()] ?? null;
+      if (p != null) totalValue += parseFloat(h.quantity) * p;
+    }
+
+    let chartRange = '1d';
+    let chartPoints = initChart.points || [];
+
+    function computeDelta(pts) {
+      if (!pts || pts.length < 2) return null;
+      const first = pts[0].value, last = pts[pts.length - 1].value;
+      return { delta: last - first, pct: first > 0 ? ((last - first) / first * 100) : 0 };
+    }
+
+    function heroHtml(pts) {
+      const d = computeDelta(pts);
+      const rangeLabel = chartRange === '1m' ? '30d' : chartRange === '1w' ? '7d' : '24h';
+      const deltaHtml = d ? `<div class="text-sm font-medium mt-1 ${d.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+        ${d.delta >= 0 ? '+' : ''}$${Math.abs(d.delta).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+        &nbsp;(${d.delta >= 0 ? '+' : ''}${d.pct.toFixed(2)}%)
+        <span class="text-[#4e5872] font-normal">${rangeLabel}</span>
+      </div>` : '';
+      return `<div class="portfolio-hero" id="ptab-hero">
+        <div class="text-xs text-[#8b95ab] uppercase tracking-widest mb-1">Total Portfolio Value</div>
+        <div class="text-4xl font-bold text-[#e8eaf0] tracking-tight">$${totalValue.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+        ${deltaHtml}
+      </div>`;
+    }
+
+    function areaChartHtml(pts) {
+      const W = 480, H = 160, color = '#7c5cfc';
+      const pad = { t: 10, r: 8, b: 28, l: 8 };
+      const IW = W - pad.l - pad.r, IH = H - pad.t - pad.b;
+      if (!pts || pts.length < 2) {
+        return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl"><rect width="${W}" height="${H}" fill="#0d1021" rx="12"/><text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#4e5872" font-size="11" font-family="sans-serif">Not enough history yet</text></svg>`;
+      }
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const xMin = Math.min(...xs), xMax = Math.max(...xs);
+      let yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const yRng = yMax - yMin;
+      yMin -= yRng * 0.08; yMax += yRng * 0.08;
+      if (yMax - yMin < 0.01) { yMin -= 1; yMax += 1; }
+      const xS = x => pad.l + (xMax === xMin ? IW/2 : (x-xMin)/(xMax-xMin)*IW);
+      const yS = y => pad.t + IH - ((y-yMin)/(yMax-yMin))*IH;
+      const linePts = pts.map(p => `${xS(p.x).toFixed(1)},${yS(p.y).toFixed(1)}`).join(' ');
+      const areaPts = `${linePts} ${xS(xs[xs.length-1]).toFixed(1)},${(pad.t+IH).toFixed(1)} ${xS(xs[0]).toFixed(1)},${(pad.t+IH).toFixed(1)}`;
+      const fmtTs = ts => { const d = new Date(ts); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); };
+      const fmtV  = v  => v >= 10000 ? '$'+(v/1000).toFixed(1)+'k' : '$'+v.toFixed(0);
+      return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl">
+        <defs>
+          <linearGradient id="ptabGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="${color}" stop-opacity="0.25"/>
+            <stop offset="85%" stop-color="${color}" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <rect width="${W}" height="${H}" fill="#0d1021" rx="12"/>
+        <polygon points="${areaPts}" fill="url(#ptabGrad)"/>
+        <polyline points="${linePts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${xS(xs[xs.length-1]).toFixed(1)}" cy="${yS(ys[ys.length-1]).toFixed(1)}" r="3.5" fill="${color}"/>
+        <text x="${pad.l+2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif">${fmtTs(xs[0])}</text>
+        <text x="${pad.l+IW-2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif" text-anchor="end">${fmtTs(xs[xs.length-1])}</text>
+        <text x="${pad.l+2}" y="${pad.t+12}" fill="#4e5872" font-size="9" font-family="sans-serif">${fmtV(yMax)}</text>
+        <text x="${pad.l+2}" y="${pad.t+IH-2}" fill="#4e5872" font-size="9" font-family="sans-serif">${fmtV(yMin)}</text>
+      </svg>`;
+    }
+
+    function chartSectionHtml(pts) {
+      if (!isMe) return '';
+      const cpts = (pts || []).map(p => ({ x: new Date(p.ts).getTime(), y: p.value }));
+      return `<div id="ptab-chart-section" class="space-y-2">
+        <div class="flex gap-1.5 items-center">
+          ${['1d','1w','1m'].map(r => `<button id="ptab-rng-${r}" onclick="window.portfolioSetRange('${r}')"
+            class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${r === chartRange ? 'pill-active' : 'pill-inactive'}">${r.toUpperCase()}</button>`).join('')}
+        </div>
+        <div id="ptab-chart">${areaChartHtml(cpts)}</div>
+      </div>`;
+    }
+
+    function tokenRowHtml(h) {
+      const sym = h.ticker?.toUpperCase();
+      const meta = PTOK[sym] || { color: '#8b95ab', bg: 'bg-[#1c2236]', text: 'text-[#8b95ab]' };
+      const qty = parseFloat(h.quantity);
+      const live = prices[sym] ?? null;
+      const val = live != null ? qty * live : null;
+      const hist = sparkData[sym] || [];
+      const ch24 = hist.length >= 2
+        ? ((parseFloat(hist[hist.length-1].price_usd) - parseFloat(hist[0].price_usd)) / parseFloat(hist[0].price_usd) * 100)
+        : null;
+      const tradeable = ['ETH','BTC','BLOOM','USDC'].includes(sym);
+      return `<div class="flex items-center gap-3 py-3 px-1 border-b border-[rgba(255,255,255,0.04)] last:border-0 ${tradeable ? 'cursor-pointer hover:bg-[#1c2236]/40 rounded transition-colors' : ''}"
+               ${tradeable ? `onclick="window.openTokenDetail('${sym}')"` : ''}>
+        <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${meta.bg} ${meta.text}">${sym || '?'}</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold text-[#e8eaf0] truncate">${esc(h.asset_name)}</div>
+          <div class="text-xs text-[#8b95ab]">${sym || ''}</div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="text-sm font-semibold">${fmtLivePrice(live)}</div>
+          <div class="text-xs font-medium ${ch24 == null ? 'text-[#8b95ab]' : ch24 >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+            ${ch24 == null ? '—' : (ch24 >= 0 ? '+' : '') + ch24.toFixed(2) + '%'}
+          </div>
+        </div>
+        <div class="text-right shrink-0 min-w-[4.5rem] hidden sm:block">
+          <div class="text-xs text-[#8b95ab]">${fmtQty(qty)} ${sym || ''}</div>
+          <div class="text-sm font-semibold">${val != null ? '$'+val.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</div>
+        </div>
+        <div class="shrink-0">${pSparkline(hist, meta.color)}</div>
+      </div>`;
+    }
+
+    function tokensHtml() {
+      if (!holdings.length) {
+        return `<div class="text-center py-10 text-[#4e5872] text-sm">Your holdings will appear here once you make your first trade.</div>`;
+      }
+      return `<div>${holdings.map(tokenRowHtml).join('')}</div>`;
+    }
+
+    const html = `<div class="md:flex md:gap-6 space-y-5 md:space-y-0">
+      <div class="md:w-[55%] space-y-4">
+        ${heroHtml(chartPoints)}
+        ${chartSectionHtml(chartPoints)}
       </div>
-      ${holdings.length
-        ? `<div class="space-y-3">${rows.join('')}</div>`
-        : `<div class="card text-center py-6 text-[#4e5872] text-sm">Portfolio not yet generated.</div>`}`;
+      <div class="md:w-[45%]">
+        <div class="flex gap-2 mb-4">
+          <button id="ptab-sub-tokens"   onclick="window.portfolioSwitchSubTab('tokens')"   class="text-sm px-4 py-1 font-medium transition-colors pill-active">Tokens</button>
+          <button id="ptab-sub-nfts"     onclick="window.portfolioSwitchSubTab('nfts')"     class="text-sm px-4 py-1 font-medium transition-colors pill-inactive">NFTs</button>
+          ${isMe ? `<button id="ptab-sub-activity" onclick="window.portfolioSwitchSubTab('activity')" class="text-sm px-4 py-1 font-medium transition-colors pill-inactive">Activity</button>` : ''}
+        </div>
+        <div id="ptab-content">${tokensHtml()}</div>
+      </div>
+    </div>`;
+
+    // Wire up sub-tab switching (closure captures renderNFTTab / renderActivityTab)
+    window.portfolioSwitchSubTab = async (t) => {
+      ['tokens','nfts','activity'].forEach(tab => {
+        const btn = document.getElementById(`ptab-sub-${tab}`);
+        if (btn) btn.className = `text-sm px-4 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+      });
+      const el = document.getElementById('ptab-content');
+      if (!el) return;
+      el.innerHTML = `<div class="py-6 flex justify-center">${spin()}</div>`;
+      if (t === 'tokens')   el.innerHTML = tokensHtml();
+      else if (t === 'nfts')     el.innerHTML = await renderNFTTab().catch(e => err(e.message));
+      else if (t === 'activity') el.innerHTML = await renderActivityTab().catch(e => err(e.message));
+    };
+
+    // Wire up chart range switching
+    window.portfolioSetRange = async (r) => {
+      if (r === chartRange) return;
+      chartRange = r;
+      ['1d','1w','1m'].forEach(rng => {
+        const btn = document.getElementById(`ptab-rng-${rng}`);
+        if (btn) btn.className = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${rng === r ? 'pill-active' : 'pill-inactive'}`;
+      });
+      const chartEl = document.getElementById('ptab-chart');
+      if (chartEl) chartEl.innerHTML = `<div class="py-8 flex justify-center">${spin()}</div>`;
+      try {
+        const data = await api('GET', `/api/portfolio/chart?range=${r}`);
+        chartPoints = data.points || [];
+        const cpts = chartPoints.map(p => ({ x: new Date(p.ts).getTime(), y: p.value }));
+        if (chartEl) chartEl.innerHTML = areaChartHtml(cpts);
+        const heroEl = document.getElementById('ptab-hero');
+        if (heroEl) heroEl.outerHTML = heroHtml(chartPoints);
+      } catch {
+        if (chartEl) chartEl.innerHTML = `<p class="text-[#4e5872] text-sm text-center py-6">Could not load chart data.</p>`;
+      }
+    };
+
+    return html;
   }
 
   async function renderActivityTab() {
@@ -1206,9 +1379,7 @@ async function renderProfile(sec) {
     let tabContent = spin();
     if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
     else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
-    else if (activeTab === 'nfts') tabContent = await renderNFTTab().catch(() => '');
     else if (activeTab === 'portfolio') tabContent = await renderPortfolioTab().catch(e => err(e.message));
-    else if (activeTab === 'activity') tabContent = await renderActivityTab().catch(e => err(e.message));
 
     sec.innerHTML = `
       <div class="space-y-4">
@@ -1266,7 +1437,7 @@ async function renderProfile(sec) {
         </div>
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 flex-wrap border-b border-[rgba(255,255,255,0.06)] pb-3">
-          ${['posts','replies','nfts','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab===t?'pill-active':'pill-inactive'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+          ${['posts','replies','portfolio'].map(t => `<button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab===t?'pill-active':'pill-inactive'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
