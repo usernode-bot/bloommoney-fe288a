@@ -1100,8 +1100,32 @@ async function renderProfile(sec) {
     let tabContent = spin();
     if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
     else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
-    else if (activeTab === 'nfts') tabContent = await renderNFTTab().catch(() => '');
-    else if (activeTab === 'portfolio') tabContent = await renderPortfolioTab().catch(e => err(e.message));
+    else if (activeTab === 'portfolio') {
+      const [holdingsHtml, nftHtml] = await Promise.all([
+        renderPortfolioTab().catch(e => err(e.message)),
+        renderNFTTab().catch(() => '<p class="text-zinc-600 text-sm">Could not load NFTs.</p>')
+      ]);
+      let mintSection = '';
+      if (isMe) {
+        await refreshBalances();
+        mintSection = `
+          <div class="card space-y-3">
+            <h3 class="font-semibold">Mint NFT <span class="text-zinc-500 text-sm font-normal">(costs 10 BLOOM)</span></h3>
+            <input id="profile-nft-name" class="inp" placeholder="Name">
+            <input id="profile-nft-desc" class="inp" placeholder="Description (optional)">
+            <input id="profile-nft-img" class="inp" placeholder="Image URL">
+            <button class="btn btn-v" onclick="profileMintNFT()">Mint for 10 BLOOM</button>
+            <div class="text-xs text-zinc-500">Balance: ${getBal('BLOOM')} BLOOM</div>
+            <p id="profile-nft-msg" class="text-sm"></p>
+          </div>`;
+      }
+      tabContent = holdingsHtml + `
+        <div class="space-y-3 pt-2">
+          <div class="text-xs text-zinc-500 uppercase tracking-wide font-medium pt-2 border-t border-zinc-800">NFT Collection</div>
+          ${mintSection}
+          ${nftHtml}
+        </div>`;
+    }
     else if (activeTab === 'activity') tabContent = await renderActivityTab().catch(e => err(e.message));
 
     sec.innerHTML = `
@@ -1141,13 +1165,26 @@ async function renderProfile(sec) {
         </div>
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
         <div class="flex gap-2 border-b border-zinc-800 pb-2">
-          ${['posts','replies','nfts','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+          ${['posts','replies','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
   }
 
   window.switchProfileTab = (t) => { activeTab = t; fullRender(); };
+
+  window.profileMintNFT = async () => {
+    const name = document.getElementById('profile-nft-name')?.value;
+    const desc = document.getElementById('profile-nft-desc')?.value;
+    const img = document.getElementById('profile-nft-img')?.value;
+    const msg = document.getElementById('profile-nft-msg');
+    try {
+      const d = await api('POST', '/api/nfts/mint', { name, description: desc, image_url: img });
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = `✓ Minted ${d.token_id}`; }
+      await refreshBalances();
+      await fullRender();
+    } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
+  };
 
   window.linkAccount = async (provider) => {
     try {
