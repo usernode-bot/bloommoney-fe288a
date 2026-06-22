@@ -180,6 +180,7 @@
     { "name": "NFT nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"nfts\"]" },
     { "name": "NFTs API returns seeded NFTs", "path": "/api/nfts", "expectSelector": "body" },
     { "name": "NFT collections API returns JSON", "path": "/api/nft-collections", "expectSelector": "body" },
+    { "name": "NFT collections API returns seeded demo collection", "path": "/api/nft-collections", "expectText": "Pixel Pioneers" },
     { "name": "NFT detail API returns JSON", "path": "/api/nfts/9001", "expectSelector": "body" },
     { "name": "NFT activity API returns JSON", "path": "/api/nft-activity", "expectSelector": "body" },
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
