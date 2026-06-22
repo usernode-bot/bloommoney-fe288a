@@ -161,6 +161,7 @@
     { "name": "ROI API returns JSON", "path": "/api/users/staging-alice/roi", "expectSelector": "body" },
     { "name": "Open positions API returns JSON", "path": "/api/users/staging-charlie/open-positions", "expectSelector": "body" },
     { "name": "Post card avatar renders", "path": "/?demo=1", "expectSelector": ".post-avatar" },
+    { "name": "Uploaded avatar shown in feed", "path": "/?demo=1", "expectSelector": ".post-avatar[src^='data:image/svg+xml;base64']" },
     { "name": "Ticker prices API returns JSON", "path": "/api/ticker-prices?symbols=BTC,ETH", "expectSelector": "body" },
     { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
     { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
