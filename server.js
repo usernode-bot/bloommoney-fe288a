@@ -74,7 +74,7 @@ app.use((req, res, next) => {
   // CSP compatible with the Tailwind CDN + the hosted Usernode bridge origin.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
     "connect-src 'self' https://social-vibecoding.usernodelabs.org",
     "img-src 'self' data: https:",
