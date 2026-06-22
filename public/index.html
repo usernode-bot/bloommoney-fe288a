@@ -83,14 +83,14 @@
 <!-- ───── Tip Modal ───── -->
 <div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
   <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
-    <h2 class="text-xl font-bold mb-4" id="tip-modal-title">Send TOK</h2>
+    <h2 class="text-xl font-bold mb-4" id="tip-modal-title">Send BLOOM</h2>
     <div class="space-y-4">
       <div>
-        <label class="text-sm text-[#8b95ab] block mb-2">Amount (TOK)</label>
+        <label class="text-sm text-[#8b95ab] block mb-2">Amount (BLOOM)</label>
         <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
       </div>
       <div class="text-sm text-[#8b95ab]">
-        Your balance: <span id="tip-balance" class="text-amber-400 font-semibold">0 TOK</span>
+        Your balance: <span id="tip-balance" class="text-[#7c5cfc] font-semibold">0 BLOOM</span>
       </div>
       <div id="tip-error" class="text-red-400 text-sm hidden"></div>
       <div class="flex gap-2 justify-end">
@@ -1054,9 +1054,9 @@ window.openTipModal = (postId, creatorUsername) => {
   const amountInput = document.getElementById('tip-amount');
   const errorDiv = document.getElementById('tip-error');
 
-  title.textContent = `Send TOK to @${esc(creatorUsername)}`;
-  const tokBal = S.balances['TOK'] || 0;
-  balance.textContent = `${fmtAmt('TOK', tokBal)} TOK`;
+  title.textContent = `Send BLOOM to @${esc(creatorUsername)}`;
+  const bloomTipBal = S.balances['BLOOM'] || 0;
+  balance.textContent = `${fmtAmt('BLOOM', bloomTipBal)} BLOOM`;
   amountInput.value = '';
   errorDiv.classList.add('hidden');
   errorDiv.textContent = '';
@@ -1085,10 +1085,10 @@ window.submitTip = async () => {
     return;
   }
 
-  const tokBal = S.balances['TOK'] || 0;
+  const bloomTipBal = S.balances['BLOOM'] || 0;
   const amountUnits = toUnits(amount.toString());
-  if (amountUnits > tokBal) {
-    errorDiv.textContent = 'Insufficient TOK balance';
+  if (amountUnits > bloomTipBal) {
+    errorDiv.textContent = 'Insufficient BLOOM balance';
     errorDiv.classList.remove('hidden');
     return;
   }
@@ -1392,6 +1392,9 @@ async function renderProfile(sec) {
       nft_royalty:       { label: 'NFT Royalty',       color: 'text-amber-400',  bg: 'bg-amber-900/30' },
       nft_gas:           { label: 'Mint Gas',          color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
       nft_transfer_gas:  { label: 'Transfer Gas',      color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
+      swap_gas:          { label: 'Swap Gas',           color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
+      futures_gas:       { label: 'Futures Gas',        color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
+      tip:               { label: 'Tip',                color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
     };
 
     function activityRows(items) {
@@ -1735,11 +1738,17 @@ async function renderSwap(sec) {
     const svgSwapArrows = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>`;
     const svgInfo = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#52525b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
 
+    const bloomSwapBal = parseFloat(S.balances['BLOOM'] || 0) / 1_000_000;
+    const hasBloomGas = bloomSwapBal >= 1;
+    const gasLabel = hasBloomGas
+      ? '<span style="color:#a78bfa;font-weight:600;">1 BLOOM</span>'
+      : '<span style="color:#f87171;font-weight:600;">1 BLOOM ⚠ insufficient</span>';
     const breakdownRows = [
       { label: 'Slippage tolerance', value: swapState.slippage + '%', info: true },
       { label: 'Price impact',       value: '0.01%',                  info: true },
       { label: 'Network fee',        value: '$0.04',                  info: false },
       { label: 'Exchange fee',       value: 'Free',                   info: false },
+      { label: 'Gas fee (BLOOM)',    value: gasLabel,                  info: false, raw: true },
       { label: 'Expected output',    value: expectedOut,              info: false },
     ];
 
@@ -1829,7 +1838,9 @@ async function renderSwap(sec) {
                   <span style="font-size:12px;color:#8b95ab;">${row.label}</span>
                   ${row.info ? svgInfo : ''}
                 </div>
-                <span style="font-size:12px;color:#e8eaf0;font-weight:500;">${row.value}</span>
+                ${row.raw
+                  ? `<span style="font-size:12px;font-weight:500;">${row.value}</span>`
+                  : `<span style="font-size:12px;color:#e8eaf0;font-weight:500;">${row.value}</span>`}
               </div>`).join('')}
           </div>
 
@@ -3554,7 +3565,7 @@ async function renderFutures(sec) {
         <div>
           <label class="text-xs text-[#4e5872]">Size</label>
           <input id="fut-qty" type="number" class="inp mt-1 text-xs" placeholder="0.0000" min="0" step="0.0001" oninput="futUpdatePreview(this.value)">
-          <div id="fut-preview" class="mt-1.5 space-y-0.5 text-xs text-[#8b95ab]">${preview ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>` : ''}</div>
+          <div id="fut-preview" class="mt-1.5 space-y-0.5 text-xs text-[#8b95ab]">${preview ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>` : ''}<div>Gas: <span class="text-[#a78bfa] font-mono">1 BLOOM</span></div></div>
         </div>
 
         <!-- Place Order -->
@@ -3681,9 +3692,13 @@ async function renderFutures(sec) {
     const preview = calcPreview(mkt);
     const el = document.getElementById('fut-preview');
     if (!el) return;
+    const bloomFutBal = parseFloat(S.balances['BLOOM'] || 0) / 1_000_000;
+    const gasLine = bloomFutBal >= 1
+      ? `<div>Gas: <span class="text-[#a78bfa] font-mono">1 BLOOM</span></div>`
+      : `<div>Gas: <span class="text-red-400 font-mono">1 BLOOM ⚠ insufficient</span></div>`;
     el.innerHTML = preview
-      ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>`
-      : '';
+      ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>${gasLine}`
+      : gasLine;
   }
 
   function updateLevUI() {
