@@ -221,7 +221,7 @@
       <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
 
       <!-- NFTs -->
-      <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-nfts" class="view hidden max-w-5xl mx-auto py-4 px-4"></section>
 
       <!-- Explore -->
       <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -1066,12 +1066,7 @@ async function renderProfile(sec) {
   async function renderNFTTab() {
     const { nfts } = await api('GET', `/api/nfts?owner=${encodeURIComponent(username)}`);
     return nfts.length
-      ? `<div class="grid grid-cols-2 gap-3">${nfts.map(n => `
-          <div class="card space-y-2">
-            <img src="${esc(n.image_url)}" class="w-full aspect-square object-cover rounded-lg bg-[#1c2236]" onerror="this.style.display='none'">
-            <p class="text-sm font-medium">${esc(n.name)}</p>
-            <p class="text-xs text-[#8b95ab] font-mono">${esc(n.token_id)}</p>
-          </div>`).join('')}</div>`
+      ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${nfts.map(n => nftCard(n, { onclick: `navigate('nfts');setTimeout(()=>window._nftNav&&window._nftNav('detail',${n.id}),50)` })).join('')}</div>`
       : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>';
   }
 
@@ -1146,12 +1141,17 @@ async function renderProfile(sec) {
 
   async function renderActivityTab() {
     const typeConfig = {
-      swap:         { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
-      market_trade: { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
-      futures_open: { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
-      futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
-      funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
-      ico_invest:   { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      swap:              { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
+      market_trade:      { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
+      futures_open:      { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      futures_pnl:       { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      funding:           { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
+      ico_invest:        { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      nft_buy:           { label: 'NFT Purchase',      color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
+      nft_sale:          { label: 'NFT Sale',          color: 'text-emerald-400',bg: 'bg-emerald-900/30' },
+      nft_royalty:       { label: 'NFT Royalty',       color: 'text-amber-400',  bg: 'bg-amber-900/30' },
+      nft_gas:           { label: 'Mint Gas',          color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
+      nft_transfer_gas:  { label: 'Transfer Gas',      color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
     };
 
     function activityRows(items) {
@@ -3183,57 +3183,599 @@ async function renderFutures(sec) {
   _activeInterval = setInterval(load, 5000);
 }
 
+// ── NFT shared helpers ────────────────────────────────────────────────────────
+function nftCard(n, { onclick = '', mini = false } = {}) {
+  const rarityColor = { legendary: 'text-amber-400', epic: 'text-purple-400', rare: 'text-blue-400', uncommon: 'text-green-400', common: 'text-[#8b95ab]' };
+  const rc = rarityColor[n.rarity] || 'text-[#8b95ab]';
+  const priceStr = n.price_usdc ? `<p class="text-xs text-emerald-400 font-semibold">${(Number(n.price_usdc)/1e6).toFixed(2)} USDC</p>` : '';
+  const clickAttr = onclick ? ` style="cursor:pointer" onclick="${onclick}"` : '';
+  if (mini) return `<div class="flex items-center gap-2 p-2 rounded-lg bg-[#161b2a] hover:bg-[#1c2236] transition"${clickAttr}>
+    <img src="${esc(n.image_url)}" class="w-10 h-10 rounded object-cover bg-[#0f1117]" onerror="this.style.display='none'">
+    <div class="min-w-0"><p class="text-sm font-medium truncate">${esc(n.name)}</p><p class="text-xs ${rc} capitalize">${esc(n.rarity||'common')}</p></div>
+    ${priceStr}
+  </div>`;
+  return `<div class="card overflow-hidden hover:bg-[#1c2236] transition group"${clickAttr}>
+    <div class="aspect-square overflow-hidden rounded-lg bg-[#0f1117] mb-2">
+      <img src="${esc(n.image_url)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onerror="this.style.display='none'">
+    </div>
+    <p class="text-sm font-semibold truncate mb-0.5">${esc(n.name)}</p>
+    <p class="text-xs text-[#8b95ab] truncate mb-1">${esc(n.collection||'BloomMoney Genesis')}</p>
+    <div class="flex items-center justify-between">
+      <span class="text-xs ${rc} capitalize">${esc(n.rarity||'common')}</span>
+      ${priceStr || `<span class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</span>`}
+    </div>
+  </div>`;
+}
+
+function renderSparkline(prices, width = 120, height = 32) {
+  if (!prices || prices.length < 2) return '';
+  const vals = prices.map(Number);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const pts = vals.map((v, i) => {
+    const x = (i / (vals.length - 1)) * width;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const trend = vals[vals.length - 1] >= vals[0] ? '#10b981' : '#ef4444';
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none">
+    <polyline points="${pts}" stroke="${trend}" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+  </svg>`;
+}
+
 // ── NFTs ──────────────────────────────────────────────────────────────────────
 async function renderNFTs(sec) {
-  let nftTab = 'mine';
+  let nftView = 'landing';
+  let nftViewArg = null;
+
+  async function navNFT(view, arg) {
+    nftView = view;
+    nftViewArg = arg ?? null;
+    await renderView();
+  }
+  window._nftNav = navNFT;
+
+  async function renderView() {
+    sec.innerHTML = `<div class="flex items-center justify-center py-12"><div class="spinner"></div></div>`;
+    try {
+      if (nftView === 'landing')   await renderNFTLanding(sec);
+      else if (nftView === 'explore') await renderNFTExplore(sec, nftViewArg || {});
+      else if (nftView === 'detail')  await renderNFTDetail(sec, nftViewArg);
+      else if (nftView === 'mint')    await renderNFTMint(sec);
+      else if (nftView === 'portfolio') await renderNFTPortfolio(sec, nftViewArg);
+      else if (nftView === 'activity')  await renderNFTActivity(sec);
+      else await renderNFTLanding(sec);
+    } catch (e) {
+      sec.innerHTML = `<div class="text-red-400 text-sm py-8 text-center">${esc(e.message)}</div>`;
+    }
+  }
+
+  await renderView();
+}
+
+function nftTopBar(activeView, navFn) {
+  const items = [
+    { key: 'landing',   label: 'Home' },
+    { key: 'explore',   label: 'Explore' },
+    { key: 'portfolio', label: 'Portfolio' },
+    { key: 'activity',  label: 'Activity' },
+  ];
+  return `<div class="flex items-center gap-2 mb-4 flex-wrap">
+    ${items.map(it => `<button class="pill-${activeView===it.key?'active':'inactive'} text-sm" onclick="${navFn}('${it.key}')">${it.label}</button>`).join('')}
+    <button class="ml-auto btn-v text-xs px-3 py-1 rounded-full font-semibold" onclick="${navFn}('mint')">+ Mint</button>
+  </div>`;
+}
+
+async function renderNFTLanding(sec) {
+  const [{ collections }, { nfts: trendingNFTs }, { events }] = await Promise.all([
+    api('GET', '/api/nft-collections').catch(() => ({ collections: [] })),
+    api('GET', '/api/nfts?listed=true&sort=price_desc&limit=8').catch(() => ({ nfts: [] })),
+    api('GET', '/api/nft-activity').catch(() => ({ events: [] })),
+  ]);
+
+  sec.innerHTML = nftTopBar('landing', 'window._nftNav') + `
+    <h2 class="text-2xl font-bold mb-1">NFT Marketplace</h2>
+    <p class="text-[#8b95ab] text-sm mb-6">Mint, trade, and collect BloomMoney NFTs</p>
+
+    ${collections.length ? `
+    <h3 class="font-semibold mb-3">Collections</h3>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      ${collections.slice(0,3).map(c => `
+        <div class="card overflow-hidden hover:bg-[#1c2236] transition cursor-pointer" onclick="window._nftNav('explore',{collection:${JSON.stringify(esc(c.name))}})">
+          <div class="h-20 overflow-hidden rounded-lg mb-2 bg-[#0f1117]">
+            <img src="${esc(c.banner_url||'')}" class="w-full h-full object-cover" onerror="this.style.display='none'">
+          </div>
+          <p class="font-semibold text-sm truncate">${esc(c.name)}</p>
+          <div class="flex justify-between text-xs text-[#8b95ab] mt-1">
+            <span>${c.item_count} items</span>
+            <span>Floor ${c.floor_price ? (Number(c.floor_price)/1e6).toFixed(2)+' USDC' : '—'}</span>
+          </div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold">Live Listings</h3>
+      <button class="text-xs text-[#7c5cfc] hover:underline" onclick="window._nftNav('explore',{listed:true})">View all →</button>
+    </div>
+    ${trendingNFTs.length ? `
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      ${trendingNFTs.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')}
+    </div>` : `<p class="text-[#4e5872] text-sm mb-6">No active listings yet. <button class="text-[#7c5cfc] hover:underline" onclick="window._nftNav('mint')">Mint the first NFT!</button></p>`}
+
+    ${events.length ? `
+    <h3 class="font-semibold mb-3">Recent Activity</h3>
+    <div class="card space-y-2">
+      ${events.slice(0,5).map(e => {
+        const typeLabel = { mint:'Minted', sale:'Sold', transfer:'Transferred' }[e.event_type] || e.event_type;
+        const typeColor = { mint:'text-[#7c5cfc]', sale:'text-emerald-400', transfer:'text-[#4e9af1]' }[e.event_type] || 'text-[#8b95ab]';
+        return `<div class="flex items-center gap-2 text-sm">
+          <img src="${esc(e.nft_image||'')}" class="w-8 h-8 rounded object-cover bg-[#0f1117]" onerror="this.style.display='none'">
+          <span class="${typeColor} font-medium">${typeLabel}</span>
+          <span class="text-[#e8eaf0] font-medium truncate">${esc(e.nft_name||'')}</span>
+          <span class="text-[#8b95ab] ml-auto text-xs">${tsAgo(e.created_at)}</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+  `;
+}
+
+async function renderNFTExplore(sec, filters) {
+  filters = filters || {};
+  let search = filters.search || '';
+  let collection = filters.collection || '';
+  let rarity = filters.rarity || '';
+  let sort = filters.sort || '';
+  let listed = filters.listed || false;
+  let offset = 0;
+  const PAGE = 24;
 
   async function load() {
-    await refreshBalances();
-    const mine = await api('GET', `/api/nfts?owner=${encodeURIComponent(S.user.username)}`);
-    const all = nftTab === 'all' ? await api('GET', '/api/nfts') : { nfts: [] };
-    const list = nftTab === 'mine' ? mine.nfts : all.nfts;
-
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">NFT Collection</h2>
-      <div class="card space-y-3 mb-4">
-        <h3 class="font-semibold">Mint NFT <span class="text-[#8b95ab] text-sm font-normal">(costs 10 BLOOM)</span></h3>
-        <input id="nft-name" class="inp" placeholder="Name">
-        <input id="nft-desc" class="inp" placeholder="Description (optional)">
-        <input id="nft-img" class="inp" placeholder="Image URL">
-        <button class="btn btn-v" onclick="mintNFT()">Mint for 10 BLOOM</button>
-        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('BLOOM')} BLOOM</div>
-        <p id="nft-msg" class="text-sm"></p>
-      </div>
-      <div class="flex gap-2 mb-3">
-        <button class="btn ${nftTab==='mine'?'btn-v':'btn-z'}" onclick="nftTab='mine';load()">My Collection</button>
-        <button class="btn ${nftTab==='all'?'btn-v':'btn-z'}" onclick="nftTab='all';load()">Browse All</button>
-      </div>
-      ${list.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${list.map(n => `
-        <div class="card space-y-2 overflow-hidden">
-          <div class="aspect-square overflow-hidden rounded-lg bg-[#161b2a]">
-            <img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'">
-          </div>
-          <p class="text-sm font-medium truncate">${esc(n.name)}</p>
-          <p class="text-xs text-[#8b95ab] font-mono truncate">${esc(n.token_id)}</p>
-          ${nftTab==='all' ? `<p class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</p>` : ''}
-        </div>`).join('')}</div>` : `<p class="text-[#4e5872] text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`}`;
-
-    window.mintNFT = async () => {
-      const name = document.getElementById('nft-name')?.value;
-      const desc = document.getElementById('nft-desc')?.value;
-      const img = document.getElementById('nft-img')?.value;
-      const msg = document.getElementById('nft-msg');
-      try {
-        const d = await api('POST', '/api/nfts/mint', { name, description: desc, image_url: img });
-        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`✓ Minted ${d.token_id}`; }
-        await refreshBalances();
-        nftTab = 'mine';
-        await load();
-      } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
-    };
+    const params = new URLSearchParams({ limit: PAGE, offset });
+    if (search) params.set('search', search);
+    if (collection) params.set('collection', collection);
+    if (rarity) params.set('rarity', rarity);
+    if (sort) params.set('sort', sort);
+    if (listed) params.set('listed', 'true');
+    const { nfts } = await api('GET', `/api/nfts?${params}`).catch(() => ({ nfts: [] }));
+    const grid = document.getElementById('nft-explore-grid');
+    if (!grid) return;
+    grid.innerHTML = nfts.length
+      ? nfts.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')
+      : '<p class="text-[#4e5872] text-sm col-span-full py-8 text-center">No NFTs found</p>';
+    const prevBtn = document.getElementById('nft-prev');
+    const nextBtn = document.getElementById('nft-next');
+    if (prevBtn) prevBtn.disabled = offset === 0;
+    if (nextBtn) nextBtn.disabled = nfts.length < PAGE;
   }
-  window.load = load;
+
+  sec.innerHTML = nftTopBar('explore', 'window._nftNav') + `
+    <div class="flex flex-wrap gap-2 mb-4">
+      <input id="nft-search" class="inp flex-1 min-w-[160px]" placeholder="Search NFTs…" value="${esc(search)}">
+      <select id="nft-rarity-sel" class="inp text-sm">
+        <option value="">All Rarities</option>
+        ${['common','uncommon','rare','epic','legendary'].map(r => `<option value="${r}" ${rarity===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
+      </select>
+      <select id="nft-sort-sel" class="inp text-sm">
+        <option value="">Newest</option>
+        <option value="oldest" ${sort==='oldest'?'selected':''}>Oldest</option>
+        <option value="price_asc" ${sort==='price_asc'?'selected':''}>Price ↑</option>
+        <option value="price_desc" ${sort==='price_desc'?'selected':''}>Price ↓</option>
+      </select>
+      <label class="flex items-center gap-1 text-sm text-[#8b95ab] cursor-pointer">
+        <input type="checkbox" id="nft-listed-chk" ${listed?'checked':''} class="accent-[#7c5cfc]"> For Sale
+      </label>
+    </div>
+    <div id="nft-explore-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-4"></div>
+    <div class="flex gap-2 justify-center">
+      <button id="nft-prev" class="btn-z text-sm px-3 py-1 rounded" disabled onclick="nftExpPage(-1)">← Prev</button>
+      <button id="nft-next" class="btn-z text-sm px-3 py-1 rounded" onclick="nftExpPage(1)">Next →</button>
+    </div>
+  `;
+
+  window.nftExpPage = (dir) => { offset = Math.max(0, offset + dir * PAGE); load(); };
+  document.getElementById('nft-search')?.addEventListener('input', e => { search = e.target.value; offset = 0; load(); });
+  document.getElementById('nft-rarity-sel')?.addEventListener('change', e => { rarity = e.target.value; offset = 0; load(); });
+  document.getElementById('nft-sort-sel')?.addEventListener('change', e => { sort = e.target.value; offset = 0; load(); });
+  document.getElementById('nft-listed-chk')?.addEventListener('change', e => { listed = e.target.checked; offset = 0; load(); });
   await load();
+}
+
+async function renderNFTDetail(sec, nftId) {
+  if (!nftId) return renderNFTLanding(sec);
+  const { nft, bids, transfers, favorited } = await api('GET', `/api/nfts/${nftId}`).catch(() => ({ nft: null, bids: [], transfers: [], favorited: false }));
+  if (!nft) { sec.innerHTML = `<p class="text-red-400">NFT not found.</p>`; return; }
+
+  const isOwner = S.user && S.user.user_id === nft.owner_user_id;
+  const priceHistory = transfers.filter(t => t.price_usdc).map(t => t.price_usdc);
+  const rarityColor = { legendary: 'text-amber-400', epic: 'text-purple-400', rare: 'text-blue-400', uncommon: 'text-green-400', common: 'text-[#8b95ab]' };
+  const rc = rarityColor[nft.rarity] || 'text-[#8b95ab]';
+
+  sec.innerHTML = nftTopBar('detail', 'window._nftNav') + `
+    <button class="text-xs text-[#8b95ab] hover:text-[#e8eaf0] mb-4" onclick="window._nftNav('explore')">← Back to Explore</button>
+    <div class="flex flex-col md:flex-row gap-6">
+      <!-- Left: Image -->
+      <div class="md:w-1/2 flex-shrink-0">
+        <div class="aspect-square rounded-xl overflow-hidden bg-[#0f1117]">
+          <img src="${esc(nft.image_url)}" class="w-full h-full object-cover">
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button id="nft-fav-btn" class="btn-z flex-1 text-sm" onclick="nftToggleFav(${nft.id})">
+            ${favorited ? '♥ Unfavorite' : '♡ Favorite'}
+          </button>
+          ${isOwner ? `<button class="btn-z flex-1 text-sm" onclick="showNFTTransferModal(${nft.id})">↗ Transfer</button>` : ''}
+        </div>
+      </div>
+      <!-- Right: Details -->
+      <div class="md:w-1/2 space-y-4">
+        <div>
+          <p class="text-xs text-[#8b95ab]">${esc(nft.collection||'BloomMoney Genesis')}</p>
+          <h2 class="text-2xl font-bold">${esc(nft.name)}</h2>
+          <div class="flex gap-2 mt-1">
+            <span class="text-xs ${rc} capitalize font-medium">${esc(nft.rarity||'common')}</span>
+            <span class="text-xs text-[#8b95ab] font-mono">${esc(nft.token_id)}</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-[#8b95ab]">Owner</span>
+            <span class="font-medium">@${esc(nft.owner_username)}</span>
+          </div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-[#8b95ab]">Creator</span>
+            <span class="font-medium">@${esc(nft.creator_username||nft.owner_username)}</span>
+          </div>
+          <div class="flex justify-between text-sm">
+            <span class="text-[#8b95ab]">Royalty</span>
+            <span class="font-medium">${((nft.royalty_bps||0)/100).toFixed(1)}%</span>
+          </div>
+        </div>
+        ${nft.description ? `<p class="text-sm text-[#8b95ab]">${esc(nft.description)}</p>` : ''}
+        ${priceHistory.length >= 2 ? `<div class="card">
+          <p class="text-xs text-[#8b95ab] mb-1">Price History</p>
+          ${renderSparkline(priceHistory.map(p => Number(p)/1e6), 200, 48)}
+        </div>` : ''}
+
+        <!-- Listing / Buy panel -->
+        <div id="nft-trade-panel" class="card space-y-2">
+          ${nft.listing_id ? `
+            <div class="flex items-center justify-between">
+              <span class="text-[#8b95ab] text-sm">Listed for</span>
+              <span class="text-emerald-400 font-bold text-lg">${(Number(nft.price_usdc)/1e6).toFixed(2)} USDC</span>
+            </div>
+            ${!isOwner ? `<button class="btn-v w-full" onclick="nftBuy(${nft.id})">Buy Now</button>` : `<button class="btn-z w-full text-sm" onclick="nftDelist(${nft.id})">Cancel Listing</button>`}
+          ` : isOwner ? `
+            <p class="text-sm text-[#8b95ab]">Not listed</p>
+            <div class="flex gap-2">
+              <input id="nft-list-price" class="inp flex-1" placeholder="Price (USDC micro-units)">
+              <button class="btn-v text-sm px-3" onclick="nftList(${nft.id})">List</button>
+            </div>
+          ` : `<p class="text-sm text-[#8b95ab]">Not for sale</p>`}
+        </div>
+
+        <!-- Bids panel -->
+        ${bids.length || !isOwner ? `<div class="card space-y-2">
+          <div class="flex items-center justify-between mb-1">
+            <h4 class="font-semibold text-sm">Bids (${bids.length})</h4>
+            ${!isOwner ? `<button class="text-xs text-[#7c5cfc] hover:underline" onclick="showNFTBidModal(${nft.id})">Place Bid</button>` : ''}
+          </div>
+          ${bids.length ? bids.map(b => `
+            <div class="flex items-center gap-2 text-sm">
+              <span class="font-medium">${(Number(b.price_usdc)/1e6).toFixed(2)} USDC</span>
+              <span class="text-[#8b95ab]">by @${esc(b.bidder_username)}</span>
+              <span class="text-xs text-[#4e5872] ml-auto">${tsAgo(b.created_at)}</span>
+              ${isOwner ? `<button class="text-xs text-emerald-400 hover:underline" onclick="nftAcceptBid(${nft.id},${b.id})">Accept</button>` : ''}
+              ${S.user && S.user.user_id === b.bidder_user_id ? `<button class="text-xs text-red-400 hover:underline" onclick="nftWithdrawBid(${b.id})">Withdraw</button>` : ''}
+            </div>`).join('') : '<p class="text-[#4e5872] text-xs">No bids yet</p>'}
+        </div>` : ''}
+
+        <!-- Transfer history -->
+        ${transfers.length ? `<div class="card space-y-1">
+          <h4 class="font-semibold text-sm mb-2">History</h4>
+          ${transfers.map(t => {
+            const el = { mint:'✦ Minted', sale:'⇄ Sale', transfer:'→ Transfer' }[t.event_type] || t.event_type;
+            return `<div class="flex items-center gap-2 text-xs text-[#8b95ab]">
+              <span class="text-[#e8eaf0]">${el}</span>
+              <span>${t.to_username ? `to @${esc(t.to_username)}` : ''}</span>
+              ${t.price_usdc ? `<span class="text-emerald-400">${(Number(t.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
+              <span class="ml-auto">${tsAgo(t.created_at)}</span>
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+      </div>
+    </div>
+    <!-- Bid Modal -->
+    <div id="nft-bid-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="card w-full max-w-sm space-y-3 mx-4">
+        <h3 class="font-semibold">Place Bid</h3>
+        <input id="nft-bid-price" class="inp" placeholder="Bid amount (USDC micro-units)">
+        <input id="nft-bid-days" class="inp" placeholder="Expires in days (1-30)">
+        <div class="flex gap-2">
+          <button class="btn-v flex-1" onclick="nftSubmitBid(${nft.id})">Submit Bid</button>
+          <button class="btn-z flex-1" onclick="document.getElementById('nft-bid-modal').classList.add('hidden')">Cancel</button>
+        </div>
+        <p id="nft-bid-msg" class="text-sm"></p>
+      </div>
+    </div>
+    <!-- Transfer Modal -->
+    <div id="nft-transfer-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="card w-full max-w-sm space-y-3 mx-4">
+        <h3 class="font-semibold">Transfer NFT</h3>
+        <p class="text-xs text-[#8b95ab]">Costs 0.5 BLOOM gas fee</p>
+        <input id="nft-transfer-to" class="inp" placeholder="Recipient username">
+        <div id="nft-transfer-step2" class="hidden text-sm text-[#8b95ab]"></div>
+        <div class="flex gap-2">
+          <button class="btn-v flex-1" onclick="nftSubmitTransfer(${nft.id})">Send</button>
+          <button class="btn-z flex-1" onclick="document.getElementById('nft-transfer-modal').classList.add('hidden')">Cancel</button>
+        </div>
+        <p id="nft-transfer-msg" class="text-sm"></p>
+      </div>
+    </div>
+    <!-- Receive Modal -->
+    <div id="nft-receive-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="card w-full max-w-sm space-y-3 mx-4 text-center">
+        <h3 class="font-semibold">Receive NFT</h3>
+        <p class="text-xs text-[#8b95ab]">Share your username to receive NFTs</p>
+        <div id="nft-qr-container" class="flex justify-center py-2"></div>
+        <p class="font-mono text-sm text-[#7c5cfc]">${S.user ? '@'+esc(S.user.username) : ''}</p>
+        <button class="btn-z w-full" onclick="document.getElementById('nft-receive-modal').classList.add('hidden')">Close</button>
+      </div>
+    </div>
+  `;
+
+  window.nftToggleFav = async (id) => {
+    try {
+      const d = await api('POST', `/api/nfts/${id}/favorite`);
+      const btn = document.getElementById('nft-fav-btn');
+      if (btn) btn.textContent = d.favorited ? '♥ Unfavorite' : '♡ Favorite';
+    } catch (e) { alert(e.message); }
+  };
+  window.nftBuy = async (id) => {
+    if (!confirm('Buy this NFT?')) return;
+    try { await api('POST', `/api/nfts/${id}/buy`); await refreshBalances(); window._nftNav('detail', id); }
+    catch (e) { alert(e.message); }
+  };
+  window.nftList = async (id) => {
+    const price = parseInt(document.getElementById('nft-list-price')?.value);
+    if (!price) return alert('Enter a price in USDC micro-units (1 USDC = 1000000)');
+    try { await api('POST', `/api/nfts/${id}/list`, { price_usdc: price }); window._nftNav('detail', id); }
+    catch (e) { alert(e.message); }
+  };
+  window.nftDelist = async (id) => {
+    try { await api('DELETE', `/api/nfts/${id}/list`); window._nftNav('detail', id); }
+    catch (e) { alert(e.message); }
+  };
+  window.nftAcceptBid = async (nftId, bidId) => {
+    if (!confirm('Accept this bid?')) return;
+    try { await api('POST', `/api/nfts/${nftId}/accept-bid/${bidId}`); await refreshBalances(); window._nftNav('detail', nftId); }
+    catch (e) { alert(e.message); }
+  };
+  window.nftWithdrawBid = async (bidId) => {
+    try { await api('DELETE', `/api/nfts/bids/${bidId}`); window._nftNav('detail', nft.id); }
+    catch (e) { alert(e.message); }
+  };
+  window.showNFTBidModal = () => document.getElementById('nft-bid-modal')?.classList.remove('hidden');
+  window.nftSubmitBid = async (id) => {
+    const price = parseInt(document.getElementById('nft-bid-price')?.value);
+    const days = parseInt(document.getElementById('nft-bid-days')?.value) || 7;
+    const msg = document.getElementById('nft-bid-msg');
+    try {
+      await api('POST', `/api/nfts/${id}/bid`, { price_usdc: price, expires_days: days });
+      document.getElementById('nft-bid-modal')?.classList.add('hidden');
+      window._nftNav('detail', id);
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.showNFTTransferModal = () => document.getElementById('nft-transfer-modal')?.classList.remove('hidden');
+  window.nftSubmitTransfer = async (id) => {
+    const to = document.getElementById('nft-transfer-to')?.value?.trim();
+    const msg = document.getElementById('nft-transfer-msg');
+    if (!to) return;
+    try {
+      await api('POST', `/api/nfts/${id}/transfer`, { to_username: to });
+      document.getElementById('nft-transfer-modal')?.classList.add('hidden');
+      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Transferred!'; }
+      setTimeout(() => window._nftNav('portfolio'), 1200);
+    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  };
+  window.showNFTReceiveModal = async () => {
+    const modal = document.getElementById('nft-receive-modal');
+    modal?.classList.remove('hidden');
+    const container = document.getElementById('nft-qr-container');
+    if (!container || !S.user) return;
+    try {
+      if (!window.QRCode) {
+        await new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+          s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+      }
+      container.innerHTML = '<canvas id="nft-qr-canvas"></canvas>';
+      await QRCode.toCanvas(document.getElementById('nft-qr-canvas'), S.user.username, { width: 160, color: { dark: '#e8eaf0', light: '#131620' } });
+    } catch (_) { container.innerHTML = `<p class="text-sm font-mono text-[#7c5cfc]">${esc(S.user.username)}</p>`; }
+  };
+}
+
+async function renderNFTMint(sec) {
+  let step = 1;
+  const form = { name: '', description: '', image_url: '', collection: 'BloomMoney Genesis', royalty_bps: 500, rarity: 'common', properties: '' };
+
+  function renderStep() {
+    sec.innerHTML = nftTopBar('mint', 'window._nftNav') + `
+      <h2 class="text-xl font-bold mb-1">Mint NFT</h2>
+      <p class="text-[#8b95ab] text-sm mb-4">Costs 10.5 BLOOM • Balance: ${getBal('BLOOM')} BLOOM</p>
+      <div class="flex gap-2 mb-6">
+        ${['Artwork','Properties','Confirm'].map((l,i) => `
+          <div class="flex items-center gap-1 ${i>0?'ml-2':''}">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step===i+1?'bg-[#7c5cfc] text-white':step>i+1?'bg-emerald-500 text-white':'bg-[#1c2236] text-[#8b95ab]'}">${step>i+1?'✓':i+1}</div>
+            <span class="text-xs ${step===i+1?'text-[#e8eaf0]':'text-[#4e5872]'}">${l}</span>
+            ${i<2?'<span class="text-[#4e5872] ml-2">—</span>':''}
+          </div>`).join('')}
+      </div>
+      ${step === 1 ? `
+        <div class="card space-y-3">
+          <input id="mint-name" class="inp" placeholder="NFT Name *" value="${esc(form.name)}">
+          <textarea id="mint-desc" class="inp resize-none" rows="3" placeholder="Description (optional)">${esc(form.description)}</textarea>
+          <input id="mint-img" class="inp" placeholder="Image URL (https://…) *" value="${esc(form.image_url)}">
+          ${form.image_url ? `<div class="h-32 rounded-lg overflow-hidden bg-[#0f1117]"><img src="${esc(form.image_url)}" class="h-full object-cover" onerror="this.style.display='none'"></div>` : ''}
+          <button class="btn-v w-full" onclick="mintStep1Next()">Next →</button>
+        </div>` : step === 2 ? `
+        <div class="card space-y-3">
+          <div>
+            <label class="text-xs text-[#8b95ab] mb-1 block">Collection</label>
+            <input id="mint-collection" class="inp" value="${esc(form.collection)}">
+          </div>
+          <div>
+            <label class="text-xs text-[#8b95ab] mb-1 block">Rarity</label>
+            <select id="mint-rarity" class="inp">
+              ${['common','uncommon','rare','epic','legendary'].map(r => `<option value="${r}" ${form.rarity===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-[#8b95ab] mb-1 block">Royalty % (0–20)</label>
+            <input id="mint-royalty" class="inp" type="number" min="0" max="20" step="0.5" value="${(form.royalty_bps/100).toFixed(1)}">
+          </div>
+          <div>
+            <label class="text-xs text-[#8b95ab] mb-1 block">Properties (JSON, optional)</label>
+            <textarea id="mint-props" class="inp font-mono text-xs resize-none" rows="3" placeholder='{"trait":"value"}'>${esc(form.properties)}</textarea>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn-z flex-1" onclick="mintStepBack()">← Back</button>
+            <button class="btn-v flex-1" onclick="mintStep2Next()">Review →</button>
+          </div>
+        </div>` : `
+        <div class="card space-y-3">
+          <div class="aspect-square w-32 rounded-lg overflow-hidden bg-[#0f1117] mx-auto">
+            <img src="${esc(form.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'">
+          </div>
+          <h3 class="text-lg font-bold text-center">${esc(form.name)}</h3>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="text-[#8b95ab]">Collection</div><div>${esc(form.collection)}</div>
+            <div class="text-[#8b95ab]">Rarity</div><div class="capitalize">${esc(form.rarity)}</div>
+            <div class="text-[#8b95ab]">Royalty</div><div>${(form.royalty_bps/100).toFixed(1)}%</div>
+            <div class="text-[#8b95ab]">Mint Cost</div><div class="text-amber-400">10.5 BLOOM</div>
+          </div>
+          <p id="mint-msg" class="text-sm text-center"></p>
+          <div class="flex gap-2">
+            <button class="btn-z flex-1" onclick="mintStepBack()">← Back</button>
+            <button id="mint-confirm-btn" class="btn-v flex-1" onclick="mintConfirm()">Mint NFT</button>
+          </div>
+        </div>`}
+    `;
+  }
+
+  window.mintStep1Next = () => {
+    form.name = document.getElementById('mint-name')?.value?.trim() || '';
+    form.description = document.getElementById('mint-desc')?.value?.trim() || '';
+    form.image_url = document.getElementById('mint-img')?.value?.trim() || '';
+    if (!form.name) return alert('Name is required');
+    if (!form.image_url || !/^https?:\/\//.test(form.image_url)) return alert('Valid image URL required');
+    step = 2; renderStep();
+  };
+  window.mintStep2Next = () => {
+    form.collection = document.getElementById('mint-collection')?.value?.trim() || 'BloomMoney Genesis';
+    form.rarity = document.getElementById('mint-rarity')?.value || 'common';
+    form.royalty_bps = Math.round((parseFloat(document.getElementById('mint-royalty')?.value)||5) * 100);
+    form.properties = document.getElementById('mint-props')?.value?.trim() || '';
+    step = 3; renderStep();
+  };
+  window.mintStepBack = () => { step = Math.max(1, step - 1); renderStep(); };
+  window.mintConfirm = async () => {
+    const btn = document.getElementById('mint-confirm-btn');
+    const msg = document.getElementById('mint-msg');
+    if (btn) { btn.disabled = true; btn.textContent = 'Minting…'; }
+    try {
+      const d = await api('POST', '/api/nfts/mint', {
+        name: form.name, description: form.description, image_url: form.image_url,
+        collection: form.collection, rarity: form.rarity, royalty_bps: form.royalty_bps,
+        properties: form.properties || undefined
+      });
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = `✓ Minted ${d.token_id}`; }
+      await refreshBalances();
+      setTimeout(() => window._nftNav('detail', d.nft_id), 1500);
+    } catch (e) {
+      if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Mint NFT'; }
+    }
+  };
+
+  renderStep();
+}
+
+async function renderNFTPortfolio(sec, activeTab) {
+  activeTab = activeTab || 'owned';
+  const tabs = ['owned','created','listed','favorites','activity'];
+
+  async function loadTab() {
+    const panel = document.getElementById('nft-portfolio-panel');
+    if (!panel) return;
+    panel.innerHTML = `<div class="flex items-center justify-center py-8"><div class="spinner"></div></div>`;
+    try {
+      if (activeTab === 'owned') {
+        const { nfts } = await api('GET', `/api/nfts?owner=${encodeURIComponent(S.user.username)}`);
+        panel.innerHTML = nfts.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${nfts.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs owned yet</p>';
+      } else if (activeTab === 'created') {
+        const { nfts } = await api('GET', `/api/nfts?creator=${encodeURIComponent(S.user.username)}`);
+        panel.innerHTML = nfts.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${nfts.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs created yet</p>';
+      } else if (activeTab === 'listed') {
+        const { nfts } = await api('GET', `/api/nfts?owner=${encodeURIComponent(S.user.username)}&listed=true`);
+        panel.innerHTML = nfts.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${nfts.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No active listings</p>';
+      } else if (activeTab === 'favorites') {
+        const { nfts } = await api('GET', '/api/nfts/favorites');
+        panel.innerHTML = nfts.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${nfts.map(n => nftCard(n, { onclick: `window._nftNav('detail',${n.id})` })).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No favorites yet</p>';
+      } else if (activeTab === 'activity') {
+        const { events } = await api('GET', '/api/nft-activity');
+        if (!events.length) { panel.innerHTML = '<p class="text-[#4e5872] text-sm">No activity yet</p>'; return; }
+        panel.innerHTML = `<div class="space-y-2">${events.map(e => {
+          const typeLabel = { mint:'Minted', sale:'Sold', transfer:'Transferred' }[e.event_type] || e.event_type;
+          const typeColor = { mint:'text-[#7c5cfc]', sale:'text-emerald-400', transfer:'text-[#4e9af1]' }[e.event_type] || 'text-[#8b95ab]';
+          return `<div class="card flex items-center gap-3">
+            <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium truncate">${esc(e.nft_name||'')}</p>
+              <p class="text-xs"><span class="${typeColor}">${typeLabel}</span>${e.to_username ? ` to @${esc(e.to_username)}` : ''}</p>
+            </div>
+            ${e.price_usdc ? `<span class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
+            <span class="text-xs text-[#4e5872]">${tsAgo(e.created_at)}</span>
+          </div>`;
+        }).join('')}</div>`;
+      }
+    } catch (e) { panel.innerHTML = `<p class="text-red-400 text-sm">${esc(e.message)}</p>`; }
+  }
+
+  sec.innerHTML = nftTopBar('portfolio', 'window._nftNav') + `
+    <h2 class="text-xl font-bold mb-4">My Portfolio</h2>
+    <div class="flex gap-2 mb-4 flex-wrap">
+      ${tabs.map(t => `<button class="pill-${activeTab===t?'active':'inactive'} text-sm capitalize" onclick="nftPortTab('${t}')">${t}</button>`).join('')}
+    </div>
+    <div id="nft-portfolio-panel"></div>
+  `;
+  window.nftPortTab = (t) => { activeTab = t; loadTab(); sec.querySelectorAll('.pill-active,.pill-inactive').forEach((el,i) => { el.className = `pill-${tabs[i]===t?'active':'inactive'} text-sm capitalize`; }); };
+  await loadTab();
+}
+
+async function renderNFTActivity(sec) {
+  const { events } = await api('GET', '/api/nft-activity').catch(() => ({ events: [] }));
+  sec.innerHTML = nftTopBar('activity', 'window._nftNav') + `
+    <h2 class="text-xl font-bold mb-4">NFT Activity</h2>
+    ${events.length ? `<div class="space-y-2">${events.map(e => {
+      const typeLabel = { mint:'Minted', sale:'Sold', transfer:'Transferred' }[e.event_type] || e.event_type;
+      const typeColor = { mint:'text-[#7c5cfc]', sale:'text-emerald-400', transfer:'text-[#4e9af1]' }[e.event_type] || 'text-[#8b95ab]';
+      const isSent = S.user && e.from_user_id === S.user.user_id;
+      return `<div class="card flex items-center gap-3">
+        <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-medium truncate cursor-pointer hover:text-[#7c5cfc]" onclick="window._nftNav('detail',${e.nft_id})">${esc(e.nft_name||'')}</p>
+          <p class="text-xs text-[#8b95ab]">
+            <span class="${typeColor}">${typeLabel}</span>
+            ${isSent ? ` to @${esc(e.to_username||'')}` : e.from_username ? ` from @${esc(e.from_username)}` : ''}
+          </p>
+        </div>
+        ${e.price_usdc ? `<div class="text-right"><p class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</p></div>` : ''}
+        <span class="text-xs text-[#4e5872] flex-shrink-0">${tsAgo(e.created_at)}</span>
+      </div>`;
+    }).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFT activity yet</p>'}
+  `;
 }
 
 // ── Verify (three-tier self-service) ────────────────────────────────────────────

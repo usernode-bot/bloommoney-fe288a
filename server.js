@@ -135,7 +135,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -258,7 +258,7 @@ async function withinBasicDailyCap(userId, tier) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM transactions
      WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
-       AND type IN ('swap','futures_open','market_trade','ico_invest')`,
+       AND type IN ('swap','futures_open','market_trade','ico_invest','nft_buy')`,
     [userId]
   );
   return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
@@ -1747,43 +1747,377 @@ app.delete('/api/journal/:id', async (req, res) => {
 
 app.get('/api/nfts', async (req, res) => {
   try {
-    let q = 'SELECT * FROM nfts WHERE burned=false';
     const params = [];
-    if (req.query.owner) { q += ` AND owner_username=$${params.push(req.query.owner)}`; }
-    q += ' ORDER BY id DESC LIMIT 50';
+    let where = 'n.burned=false';
+    if (req.query.owner) { where += ` AND n.owner_username=$${params.push(req.query.owner)}`; }
+    if (req.query.creator) { where += ` AND n.creator_username=$${params.push(req.query.creator)}`; }
+    if (req.query.collection) { where += ` AND n.collection=$${params.push(req.query.collection)}`; }
+    if (req.query.rarity) { where += ` AND n.rarity=$${params.push(req.query.rarity)}`; }
+    if (req.query.listed === 'true') { where += ' AND nl.status=\'active\''; }
+    if (req.query.search) { where += ` AND (n.name ILIKE $${params.push('%' + req.query.search + '%')} OR n.collection ILIKE $${params.length})`; }
+    const sort = req.query.sort === 'price_asc' ? 'nl.price_usdc ASC NULLS LAST'
+               : req.query.sort === 'price_desc' ? 'nl.price_usdc DESC NULLS LAST'
+               : req.query.sort === 'oldest' ? 'n.id ASC'
+               : 'n.id DESC';
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const q = `SELECT n.*, nl.price_usdc, nl.id AS listing_id, nl.expires_at
+               FROM nfts n LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+               WHERE ${where} ORDER BY ${sort} LIMIT $${params.push(limit)} OFFSET $${params.push(offset)}`;
     const { rows } = await pool.query(q, params);
     res.json({ nfts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nfts/favorites', async (req, res) => {
+  if (!req.user) return res.json({ nfts: [] });
+  try {
+    const { rows } = await pool.query(
+      `SELECT n.*, nl.price_usdc, nl.id AS listing_id
+       FROM nft_favorites f
+       JOIN nfts n ON n.id=f.nft_id
+       LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+       WHERE f.user_id=$1 AND n.burned=false ORDER BY f.created_at DESC`,
+      [req.user.id]
+    );
+    res.json({ nfts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nfts/:id', async (req, res) => {
+  try {
+    const { rows: [nft] } = await pool.query(
+      `SELECT n.*, nl.price_usdc, nl.id AS listing_id, nl.expires_at
+       FROM nfts n LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+       WHERE n.id=$1 AND n.burned=false`,
+      [req.params.id]
+    );
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    const { rows: bids } = await pool.query(
+      `SELECT * FROM nft_bids WHERE nft_id=$1 AND status='open' ORDER BY price_usdc DESC`,
+      [nft.id]
+    );
+    const { rows: transfers } = await pool.query(
+      `SELECT * FROM nft_transfers WHERE nft_id=$1 ORDER BY created_at DESC LIMIT 20`,
+      [nft.id]
+    );
+    let favorited = false;
+    if (req.user) {
+      const { rows } = await pool.query('SELECT 1 FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+      favorited = rows.length > 0;
+    }
+    res.json({ nft, bids, transfers, favorited });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nft-collections', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.name, c.description, c.banner_url, c.creator_username,
+             COUNT(n.id)::int AS item_count,
+             COALESCE(MIN(nl.price_usdc),0) AS floor_price,
+             COALESCE(SUM(nt.price_usdc) FILTER (WHERE nt.event_type='sale'),0) AS volume_usdc
+      FROM nft_collections c
+      LEFT JOIN nfts n ON n.collection=c.name AND n.burned=false
+      LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+      LEFT JOIN nft_transfers nt ON nt.nft_id=n.id
+      GROUP BY c.id ORDER BY volume_usdc DESC
+    `);
+    res.json({ collections: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nft-activity', async (req, res) => {
+  if (!req.user) return res.json({ events: [] });
+  try {
+    const { rows } = await pool.query(
+      `SELECT nt.*, n.name AS nft_name, n.image_url AS nft_image, n.token_id
+       FROM nft_transfers nt
+       JOIN nfts n ON n.id=nt.nft_id
+       WHERE nt.to_user_id=$1 OR nt.from_user_id=$1
+       ORDER BY nt.created_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json({ events: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/nfts/mint', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { name, description, image_url } = req.body;
+    const { name, description, image_url, royalty_bps, rarity, properties, collection } = req.body;
     if (!validStr(name, 100)) return res.status(400).json({ error: 'Invalid name' });
     if (!validStr(image_url, 1000) || !HTTP_URL_RE.test(image_url))
       return res.status(400).json({ error: 'image_url must be an http(s) URL' });
     if (description != null && String(description).length > 500)
       return res.status(400).json({ error: 'Description too long' });
-    const MINT_COST = 10 * UNITS;
+    const rbps = Math.max(0, Math.min(parseInt(royalty_bps) || 500, 2000));
+    const rarityVal = ['common','uncommon','rare','epic','legendary'].includes(rarity) ? rarity : 'common';
+    const collectionVal = validStr(collection, 100) ? collection : 'BloomMoney Genesis';
+    let propsJson = null;
+    if (properties) {
+      try { propsJson = JSON.stringify(typeof properties === 'string' ? JSON.parse(properties) : properties); } catch (_) {}
+    }
+    const MINT_COST = 10.5 * UNITS;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
-    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient BLOOM (need 10)');
-    await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [MINT_COST, req.user.id]);
+    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient BLOOM (need 10.5)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [MINT_COST, req.user.id]);
     const { rows: [nft] } = await client.query(
-      "INSERT INTO nfts(owner_user_id,owner_username,name,description,image_url,token_id) VALUES($1,$2,$3,$4,$5,'TEMP') RETURNING id",
-      [req.user.id, req.user.username, name, description || '', image_url]
+      `INSERT INTO nfts(owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity,properties)
+       VALUES($1,$2,$1,$2,$3,$4,$5,'TEMP',$6,$7,$8,$9) RETURNING id`,
+      [req.user.id, req.user.username, name, description || '', image_url, collectionVal, rbps, rarityVal, propsJson]
     );
     const tokenId = 'BLOOM-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
     await client.query('UPDATE nfts SET token_id=$1 WHERE id=$2', [tokenId, nft.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
+       VALUES($1,NULL,NULL,$2,$3,'mint','BLOOM-TX-' || LPAD(TO_HEX($1),8,'0'))`,
+      [nft.id, req.user.id, req.user.username]
+    );
+    await client.query(
+      `INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_gas','BLOOM',$2,$3)`,
+      [req.user.id, -MINT_COST, `Mint NFT: ${name}`]
+    );
     await client.query('COMMIT');
-    res.json({ ok: true, token_id: tokenId });
+    res.json({ ok: true, token_id: tokenId, nft_id: nft.id });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/list', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { price_usdc, expires_days } = req.body;
+    const price = parseInt(price_usdc);
+    if (!price || price < 1) return res.status(400).json({ error: 'price_usdc required (min 1 micro-unit)' });
+    const days = Math.max(1, Math.min(parseInt(expires_days) || 30, 90));
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    if (nft.owner_user_id !== req.user.id) return res.status(403).json({ error: 'Not your NFT' });
+    await client.query(
+      `INSERT INTO nft_listings(nft_id,seller_user_id,seller_username,price_usdc,expires_at)
+       VALUES($1,$2,$3,$4,NOW()+$5*interval '1 day')
+       ON CONFLICT DO NOTHING`,
+      [nft.id, req.user.id, req.user.username, price, days]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/nfts/:id/list', requireWallet, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      "UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND seller_user_id=$2 AND status='active'",
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'No active listing found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/nfts/:id/buy', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query(
+      'SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]
+    );
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id === req.user.id) throw new Error('Cannot buy your own NFT');
+    const { rows: [listing] } = await client.query(
+      "SELECT * FROM nft_listings WHERE nft_id=$1 AND status='active' AND expires_at > NOW() FOR UPDATE", [nft.id]
+    );
+    if (!listing) throw new Error('No active listing for this NFT');
+
+    const tier = await userTier(req.user.id);
+    if (!await withinBasicDailyCap(req.user.id, tier)) throw new Error('Daily trade cap reached for Basic tier');
+
+    const price = listing.price_usdc;
+    const royalty = Math.floor(price * (nft.royalty_bps || 0) / 10000);
+    const gasFee = Math.floor(price * 0.025); // 2.5% platform fee
+    const sellerReceives = price - royalty - gasFee;
+
+    // Deduct from buyer
+    const { rows: [buyerBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!buyerBal || Number(buyerBal.balance) < price) throw new Error('Insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [price, req.user.id]);
+
+    // Pay seller
+    await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.owner_user_id, sellerReceives]);
+
+    // Royalty to creator
+    if (royalty > 0 && nft.creator_user_id && nft.creator_user_id !== nft.owner_user_id) {
+      await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.creator_user_id, royalty]);
+      await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name} sold to @${req.user.username}`]);
+    }
+
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
+    // Transfer ownership
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [req.user.id, req.user.username, nft.id]);
+    await client.query("UPDATE nft_listings SET status='sold' WHERE id=$1", [listing.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'sale',$6,$7)`,
+      [nft.id, nft.owner_user_id, nft.owner_username, req.user.id, req.user.username, price, txHash]
+    );
+    // Transactions
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_buy','USDC',$2,$3)", [req.user.id, -price, `Buy NFT: ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_sale','USDC',$2,$3)", [nft.owner_user_id, sellerReceives, `Sale NFT: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/bid', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { price_usdc, expires_days } = req.body;
+    const price = parseInt(price_usdc);
+    if (!price || price < 1) return res.status(400).json({ error: 'price_usdc required' });
+    const days = Math.max(1, Math.min(parseInt(expires_days) || 7, 30));
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id === req.user.id) throw new Error('Cannot bid on own NFT');
+    const { rows: [bal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!bal || Number(bal.balance) < price) throw new Error('Insufficient USDC');
+    await client.query(
+      `INSERT INTO nft_bids(nft_id,bidder_user_id,bidder_username,price_usdc,expires_at)
+       VALUES($1,$2,$3,$4,NOW()+$5*interval '1 day')`,
+      [nft.id, req.user.id, req.user.username, price, days]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/nfts/bids/:bidId', requireWallet, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      "UPDATE nft_bids SET status='withdrawn' WHERE id=$1 AND bidder_user_id=$2 AND status='open'",
+      [req.params.bidId, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Bid not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/nfts/:id/accept-bid/:bidId', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id !== req.user.id) throw new Error('Not your NFT');
+    const { rows: [bid] } = await client.query(
+      "SELECT * FROM nft_bids WHERE id=$1 AND nft_id=$2 AND status='open' AND expires_at > NOW() FOR UPDATE",
+      [req.params.bidId, nft.id]
+    );
+    if (!bid) throw new Error('Bid not found or expired');
+
+    const price = bid.price_usdc;
+    const royalty = Math.floor(price * (nft.royalty_bps || 0) / 10000);
+    const gasFee = Math.floor(price * 0.025);
+    const sellerReceives = price - royalty - gasFee;
+
+    const { rows: [buyerBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [bid.bidder_user_id]
+    );
+    if (!buyerBal || Number(buyerBal.balance) < price) throw new Error('Bidder has insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [price, bid.bidder_user_id]);
+    await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [req.user.id, sellerReceives]);
+    if (royalty > 0 && nft.creator_user_id && nft.creator_user_id !== req.user.id) {
+      await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.creator_user_id, royalty]);
+      await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name}`]);
+    }
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'B';
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [bid.bidder_user_id, bid.bidder_username, nft.id]);
+    await client.query("UPDATE nft_bids SET status='accepted' WHERE id=$1", [bid.id]);
+    await client.query("UPDATE nft_bids SET status='outbid' WHERE nft_id=$1 AND id!=$2 AND status='open'", [nft.id, bid.id]);
+    await client.query("UPDATE nft_listings SET status='sold' WHERE nft_id=$1 AND status='active'", [nft.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'sale',$6,$7)`,
+      [nft.id, req.user.id, req.user.username, bid.bidder_user_id, bid.bidder_username, price, txHash]
+    );
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_buy','USDC',$2,$3)", [bid.bidder_user_id, -price, `Buy NFT (bid): ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_sale','USDC',$2,$3)", [req.user.id, sellerReceives, `Sale NFT: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/transfer', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_username } = req.body;
+    if (!validStr(to_username, 255)) return res.status(400).json({ error: 'to_username required' });
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id !== req.user.id) throw new Error('Not your NFT');
+    if (nft.owner_username === to_username) throw new Error('Cannot transfer to yourself');
+    const { rows: [recipient] } = await client.query('SELECT user_id,username FROM users WHERE username=$1', [to_username]);
+    if (!recipient) throw new Error('Recipient not found');
+    const GAS = Math.floor(0.5 * UNITS);
+    const { rows: [bloomBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomBal || Number(bloomBal.balance) < GAS) throw new Error('Insufficient BLOOM (need 0.5 for gas)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [GAS, req.user.id]);
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [recipient.user_id, recipient.username, nft.id]);
+    await client.query("UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND status='active'", [nft.id]);
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T';
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'transfer',$6)`,
+      [nft.id, req.user.id, req.user.username, recipient.user_id, recipient.username, txHash]
+    );
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_transfer_gas','BLOOM',$2,$3)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/favorite', requireWallet, async (req, res) => {
+  try {
+    const { rows: [nft] } = await pool.query('SELECT id FROM nfts WHERE id=$1 AND burned=false', [req.params.id]);
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    const { rows: [existing] } = await pool.query('SELECT 1 FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+    if (existing) {
+      await pool.query('DELETE FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+      res.json({ ok: true, favorited: false });
+    } else {
+      await pool.query('INSERT INTO nft_favorites(user_id,nft_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.user.id, nft.id]);
+      res.json({ ok: true, favorited: true });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── KYC ───────────────────────────────────────────────────────────────────────
@@ -3402,6 +3736,58 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       burned BOOLEAN DEFAULT FALSE
     );
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS creator_user_id INTEGER;
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS creator_username VARCHAR(255);
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS royalty_bps INTEGER NOT NULL DEFAULT 500;
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS rarity VARCHAR(20) NOT NULL DEFAULT 'common';
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS properties JSONB;
+    CREATE TABLE IF NOT EXISTS nft_collections (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) UNIQUE NOT NULL,
+      description TEXT,
+      banner_url TEXT,
+      creator_username VARCHAR(255),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_listings (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      seller_user_id INTEGER NOT NULL,
+      seller_username VARCHAR(255) NOT NULL,
+      price_usdc BIGINT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS nft_listings_active_unique ON nft_listings(nft_id) WHERE status='active';
+    CREATE TABLE IF NOT EXISTS nft_bids (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      bidder_user_id INTEGER NOT NULL,
+      bidder_username VARCHAR(255) NOT NULL,
+      price_usdc BIGINT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open',
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_transfers (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      from_user_id INTEGER,
+      from_username VARCHAR(255),
+      to_user_id INTEGER,
+      to_username VARCHAR(255),
+      event_type VARCHAR(20) NOT NULL DEFAULT 'transfer',
+      price_usdc BIGINT,
+      tx_hash VARCHAR(64),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_favorites (
+      user_id INTEGER NOT NULL,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id, nft_id)
+    );
     CREATE TABLE IF NOT EXISTS kyc_verifications (
       id SERIAL PRIMARY KEY,
       user_id INTEGER UNIQUE NOT NULL,
@@ -3616,6 +4002,10 @@ async function start() {
     COMMENT ON TABLE conversations IS 'staging:private';
     COMMENT ON TABLE conversation_members IS 'staging:private';
     COMMENT ON TABLE messages IS 'staging:private';
+    COMMENT ON TABLE nft_favorites IS 'staging:private';
+    COMMENT ON TABLE nft_listings IS 'staging:private';
+    COMMENT ON TABLE nft_bids IS 'staging:private';
+    COMMENT ON TABLE nft_transfers IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -3797,13 +4187,57 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
+    // Seed NFT collections
+    await pool.query(`
+      INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES
+        (9001,'BloomMoney Genesis','Staging demo collection — The original BloomMoney genesis collection.','https://placehold.co/1200x300/0052ff/ffffff?text=BloomMoney+Genesis','staging-alice'),
+        (9002,'Bloom Rares','Staging demo collection — Hand-picked rare Bloom artifacts.','https://placehold.co/1200x300/7c3aed/ffffff?text=Bloom+Rares','staging-carol'),
+        (9003,'Bull Runners','Staging demo collection — Commemorative bull run series.','https://placehold.co/1200x300/dc2626/ffffff?text=Bull+Runners','staging-dave')
+      ON CONFLICT(id) DO NOTHING
+    `);
     // Seed NFTs
     await pool.query(`
-      INSERT INTO nfts(id,owner_user_id,owner_username,name,description,image_url,token_id) VALUES
-        (9001,9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=BLOOM+NFT+1','BLOOM-00002329'),
-        (9002,9002,'staging-bob','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A'),
-        (9003,9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B'),
-        (9004,9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C')
+      INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES
+        (9001,9001,'staging-alice',9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=BLOOM+NFT+1','BLOOM-00002329','BloomMoney Genesis',500,'rare'),
+        (9002,9002,'staging-bob',9001,'staging-alice','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A','BloomMoney Genesis',500,'common'),
+        (9003,9003,'staging-carol',9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B','Bloom Rares',750,'epic'),
+        (9004,9004,'staging-dave',9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C','Bull Runners',300,'uncommon'),
+        (9005,9001,'staging-alice',9001,'staging-alice','Staging Diamond Hands','Staging demo NFT — For holders who never sold.','https://placehold.co/400x400/06b6d4/ffffff?text=DIAMOND+HANDS','BLOOM-0000232D','BloomMoney Genesis',500,'legendary'),
+        (9006,9002,'staging-bob',9003,'staging-carol','Staging Moon Mission','Staging demo NFT — 100x or bust.','https://placehold.co/400x400/f59e0b/000000?text=MOON+MISSION','BLOOM-0000232E','Bloom Rares',750,'rare'),
+        (9007,9005,'staging-eve',9004,'staging-dave','Staging Degen #1','Staging demo NFT — Staging degen trader badge.','https://placehold.co/400x400/ef4444/ffffff?text=DEGEN+1','BLOOM-0000232F','Bull Runners',300,'common'),
+        (9008,9003,'staging-carol',9003,'staging-carol','Staging Aurora','Staging demo NFT — Northern lights edition.','https://placehold.co/400x400/10b981/ffffff?text=AURORA','BLOOM-00002330','Bloom Rares',750,'epic')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT listings (active marketplace listings)
+    await pool.query(`
+      INSERT INTO nft_listings(id,nft_id,seller_user_id,seller_username,price_usdc,status,expires_at) VALUES
+        (9001,9002,9002,'staging-bob',150000000,'active',NOW()+INTERVAL '30 days'),
+        (9002,9004,9004,'staging-dave',75000000,'active',NOW()+INTERVAL '14 days'),
+        (9003,9006,9002,'staging-bob',220000000,'active',NOW()+INTERVAL '21 days'),
+        (9004,9007,9005,'staging-eve',40000000,'active',NOW()+INTERVAL '7 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT bids
+    await pool.query(`
+      INSERT INTO nft_bids(id,nft_id,bidder_user_id,bidder_username,price_usdc,status,expires_at) VALUES
+        (9001,9002,9003,'staging-carol',120000000,'open',NOW()+INTERVAL '5 days'),
+        (9002,9002,9005,'staging-eve',130000000,'open',NOW()+INTERVAL '3 days'),
+        (9003,9004,9001,'staging-alice',60000000,'open',NOW()+INTERVAL '6 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT transfer history (mints + sales)
+    await pool.query(`
+      INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES
+        (9001,9001,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-00002329'),
+        (9002,9002,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232A'),
+        (9003,9002,9001,'staging-alice',9002,'staging-bob','sale',100000000,'BLOOM-TX-0000232B'),
+        (9004,9003,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232C'),
+        (9005,9004,NULL,NULL,9004,'staging-dave','mint',NULL,'BLOOM-TX-0000232D'),
+        (9006,9005,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232E'),
+        (9007,9006,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232F'),
+        (9008,9006,9003,'staging-carol',9002,'staging-bob','sale',180000000,'BLOOM-TX-00002330'),
+        (9009,9007,NULL,NULL,9005,'staging-eve','mint',NULL,'BLOOM-TX-00002331'),
+        (9010,9008,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-00002332')
       ON CONFLICT(id) DO NOTHING
     `);
 
