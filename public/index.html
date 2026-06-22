@@ -114,6 +114,9 @@
     </div>
     <div class="hidden sm:flex items-center gap-2 text-xs">
       <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
+        <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+      </button>
       <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
       <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
       <!-- Mobile: single compact chip showing both balances -->
@@ -154,6 +157,10 @@
       <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
+      <button class="nav-item flex items-center justify-between" data-view="messages">
+        <span>💬 Messages</span>
+        <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
+      </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
@@ -210,6 +217,9 @@
       <!-- Futures -->
       <section id="section-futures" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
+      <!-- Trade Journal -->
+      <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
+
       <!-- NFTs -->
       <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
@@ -227,6 +237,9 @@
 
       <!-- Admin -->
       <section id="section-admin" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
+      <!-- Messages -->
+      <section id="section-messages" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
     </main>
   </div>
@@ -331,6 +344,8 @@ const S = {
   futuresMarket: null,
   social_accounts: [],
   points: 0,
+  msgOpenConv: null,
+  totalUnread: 0,
 };
 
 // ── Token refresh via bridge postMessage ───────────────────────────────────────
@@ -464,6 +479,7 @@ const VIEW_SECTION = {
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
+  messages: 'section-messages',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
@@ -507,6 +523,7 @@ async function loadView(view) {
       case 'trade': case 'swap': await renderSwap(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
+      case 'messages': await renderMessages(sec); break;
       case 'futures': await renderFutures(sec); break;
       case 'journal': await renderJournal(sec); break;
       case 'nfts': await renderNFTs(sec); break;
@@ -577,7 +594,29 @@ function showApp() {
     adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
     adminLink.classList.remove('hidden');
   }
+  refreshUnreadBadge();
+  clearInterval(_unreadInterval);
+  _unreadInterval = setInterval(refreshUnreadBadge, 20000);
   navigate(S.view);
+}
+
+// ── Messaging unread badge ─────────────────────────────────────────────────────
+const MSG_DEMO = new URLSearchParams(location.search).get('demo') === '1';
+let _unreadInterval = null;
+function setUnreadBadge(total) {
+  S.totalUnread = total;
+  for (const id of ['hdr-unread-badge', 'nav-unread-badge']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (total > 0) { el.textContent = total > 99 ? '99+' : String(total); el.classList.remove('hidden'); }
+    else el.classList.add('hidden');
+  }
+}
+async function refreshUnreadBadge() {
+  try {
+    const d = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : ''));
+    setUnreadBadge(Number(d.total_unread) || 0);
+  } catch (_) { /* non-fatal */ }
 }
 
 function updateHeader() {
@@ -671,6 +710,17 @@ document.getElementById('connect-wallet-btn').addEventListener('click', connectW
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
   let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+
+  const MILESTONE_LABELS = {
+    debt_free:        'Paid off debt 💳',
+    savings_goal:     'Hit my savings goal 🎯',
+    investment_win:   'Investment win 📈',
+    income_milestone: 'Income milestone 💼',
+    emergency_fund:   'Emergency fund complete 🛡️',
+    net_worth:        'Net worth milestone 💰',
+    other_win:        'Other win 🏆',
+  };
+
   // AI Trade Helper composer badge state (lives across re-renders).
   const tickerCache = {};        // TICKER -> price (number) or 'err'
   let tickerDebounce = null;     // pending debounce timer
@@ -743,7 +793,8 @@ async function renderFeed(sec) {
   }
 
   function postCard(p) {
-    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
+    const isMilestone = !!p.milestone_type;
+    const cheerCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
     const body = isLockedForMe
       ? `<div class="relative rounded-lg overflow-hidden">
@@ -754,6 +805,12 @@ async function renderFeed(sec) {
            </div>
          </div>`
       : `<p class="text-sm text-[#8b95ab] leading-relaxed">${esc(p.content)}</p>`;
+    const milestoneBanner = isMilestone
+      ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
+      : '';
+    const likeBtn = isMilestone
+      ? `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">🎉 ${p.like_count}</button>`
+      : `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
@@ -766,9 +823,10 @@ async function renderFeed(sec) {
           </div>
         </div>
       </div>
+      ${milestoneBanner}
       ${body}
       <div class="flex items-center gap-4">
-        <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
+        ${likeBtn}
         <button class="text-[#4e5872] hover:text-[#8b95ab] flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
@@ -798,6 +856,16 @@ async function renderFeed(sec) {
       <div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
+        <select id="compose-milestone" class="inp text-xs py-1">
+          <option value="">— Just posting —</option>
+          <option value="debt_free">Paid off debt 💳</option>
+          <option value="savings_goal">Hit my savings goal 🎯</option>
+          <option value="investment_win">Investment win 📈</option>
+          <option value="income_milestone">Income milestone 💼</option>
+          <option value="emergency_fund">Emergency fund complete 🛡️</option>
+          <option value="net_worth">Net worth milestone 💰</option>
+          <option value="other_win">Other win 🏆</option>
+        </select>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-3">
             <span id="compose-count" class="text-xs text-[#4e5872]">0/280</span>
@@ -812,6 +880,7 @@ async function renderFeed(sec) {
       <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='wins'?'pill-active':'pill-inactive'}" onclick="switchTab('wins')">Wins 🏆</button>
       </div>
       <div id="feed-list" class="space-y-3">
         ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
@@ -835,9 +904,14 @@ async function renderFeed(sec) {
     const content = box?.value.trim();
     if (!content) return;
     const locked = !!document.getElementById('compose-lock')?.checked;
+    const milestoneEl = document.getElementById('compose-milestone');
+    const milestone_type = milestoneEl?.value || undefined;
     try {
-      const res = await api('POST', '/api/posts', { content, locked });
+      const body = { content, locked };
+      if (milestone_type) body.milestone_type = milestone_type;
+      const res = await api('POST', '/api/posts', body);
       box.value = '';
+      if (milestoneEl) milestoneEl.value = '';
       resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();
@@ -1178,7 +1252,8 @@ async function renderProfile(sec) {
               </div>
               <div class="flex gap-2">
                 ${isMe ? `<button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
-                  `<button class="btn btn-v text-xs" onclick="openCopyTradeModal('${esc(username)}')">Copy Trade</button>
+                  `<button class="btn btn-z text-xs" onclick="messageUser('${esc(username)}')">💬 Message</button>
+                   <button class="btn btn-v text-xs" onclick="openCopyTradeModal('${esc(username)}')">Copy Trade</button>
                    <button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
               </div>
             </div>
@@ -2388,6 +2463,561 @@ async function renderMarketDetail(sec) {
   await load();
   _activeInterval = setInterval(load, 10000);
 }
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+async function renderJournal(sec) {
+  let filterType = 'all', filterDir = 'all', filterStatus = 'all';
+  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+
+  function entryPnl(e) {
+    if (e.exit_price == null) return null;
+    return (parseFloat(e.exit_price) - parseFloat(e.entry_price)) * parseFloat(e.quantity) * (e.direction === 'long' ? 1 : -1);
+  }
+
+  async function load() {
+    const { entries } = await api('GET', '/api/journal');
+
+    const closed = entries.filter(e => e.exit_price != null);
+    const open = entries.filter(e => e.exit_price == null);
+    const totalPnl = closed.reduce((s, e) => s + (entryPnl(e) || 0), 0);
+    const wins = closed.filter(e => (entryPnl(e) || 0) > 0);
+    const winRate = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null;
+
+    let filtered = entries;
+    if (filterType !== 'all') filtered = filtered.filter(e => e.asset_type === filterType);
+    if (filterDir !== 'all') filtered = filtered.filter(e => e.direction === filterDir);
+    if (filterStatus === 'open') filtered = filtered.filter(e => e.exit_price == null);
+    if (filterStatus === 'closed') filtered = filtered.filter(e => e.exit_price != null);
+
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">&#x1f4d3; Trade Journal</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Total Trades</div>
+          <div class="text-2xl font-bold">${entries.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Open</div>
+          <div class="text-2xl font-bold">${open.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Win Rate</div>
+          <div class="text-2xl font-bold">${winRate !== null ? winRate + '%' : '&#x2014;'}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Realised P&amp;L</div>
+          <div class="text-2xl font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-4 items-center">
+        <select id="jf-type" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('type',this.value)">
+          <option value="all">All types</option>
+          <option value="crypto">Crypto</option>
+          <option value="stock">Stock</option>
+          <option value="etf">ETF</option>
+        </select>
+        <select id="jf-dir" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('dir',this.value)">
+          <option value="all">All directions</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+        <select id="jf-status" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('status',this.value)">
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+        <button class="btn btn-z text-sm px-3 py-1" onclick="jResetFilters()">Reset</button>
+        <button class="btn btn-v text-sm px-3 py-1 ml-auto" onclick="openLogTradeModal()">+ Log Trade</button>
+      </div>
+      ${filtered.length === 0
+        ? `<div class="card text-center py-8 text-[#8b95ab] text-sm">No trades yet. Click <strong>+ Log Trade</strong> to get started.</div>`
+        : `<div class="space-y-2">${filtered.map(e => {
+            const pnl = entryPnl(e);
+            const isOpen = e.exit_price == null;
+            const qty = parseFloat(e.quantity);
+            return `<div class="card flex flex-wrap gap-3 items-center text-sm">
+              <div class="shrink-0 min-w-[3.5rem]">
+                <div class="font-bold text-[#e8eaf0]">${esc(e.ticker)}</div>
+                <div class="text-xs text-[#8b95ab]">${esc(e.asset_type)}</div>
+              </div>
+              <span class="text-xs font-semibold px-1.5 py-0.5 rounded shrink-0 ${e.direction === 'long' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/40 text-red-400'}">${e.direction.toUpperCase()}</span>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">&times;${qty < 1 ? qty.toFixed(4) : qty.toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">qty</div>
+              </div>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.entry_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">entry</div>
+              </div>
+              ${!isOpen ? `<div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.exit_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">exit</div>
+              </div>` : ''}
+              ${pnl !== null ? `<div class="shrink-0">
+                <div class="font-mono text-xs font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">P&amp;L</div>
+              </div>` : ''}
+              <div class="ml-auto flex items-center gap-2 shrink-0">
+                <span class="text-xs ${isOpen ? 'text-amber-400' : 'text-[#4e5872]'}">${isOpen ? 'open' : 'closed'}</span>
+                ${isOpen ? `<button class="btn btn-z text-xs px-2 py-0.5" onclick="openEditTradeModal(${e.id},${parseFloat(e.entry_price)})">Edit</button>` : ''}
+                <button class="btn text-xs px-2 py-0.5 border-red-900/40 hover:border-red-500/40 text-red-400" onclick="deleteTradeEntry(${e.id})">&#x2715;</button>
+              </div>
+            </div>`;
+          }).join('')}</div>`
+      }`;
+
+    const selType = document.getElementById('jf-type');
+    const selDir = document.getElementById('jf-dir');
+    const selStatus = document.getElementById('jf-status');
+    if (selType) selType.value = filterType;
+    if (selDir) selDir.value = filterDir;
+    if (selStatus) selStatus.value = filterStatus;
+
+    window.jSetFilter = (key, val) => {
+      if (key === 'type') filterType = val;
+      else if (key === 'dir') filterDir = val;
+      else if (key === 'status') filterStatus = val;
+      load();
+    };
+    window.jResetFilters = () => { filterType = 'all'; filterDir = 'all'; filterStatus = 'all'; load(); };
+    window.deleteTradeEntry = async (id) => {
+      if (!confirm('Delete this trade entry?')) return;
+      try { await api('DELETE', `/api/journal/${id}`); load(); } catch (e) { alert(e.message); }
+    };
+  }
+
+  window.openLogTradeModal = () => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3 max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Log Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Asset Type</label>
+          <select id="jt-type" class="inp w-full" onchange="jClearLivePrice()">
+            <option value="crypto">Crypto</option>
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Ticker</label>
+          <input id="jt-ticker" type="text" class="inp w-full" placeholder="e.g. BTC, ETH, AAPL" autocomplete="off">
+          <span id="journal-live-price" style="font-size:0.85em;color:#aaa;" class="mt-0.5 block min-h-[1.2em]"></span>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Direction</label>
+          <select id="jt-direction" class="inp w-full">
+            <option value="long">Long &#x25b2;</option>
+            <option value="short">Short &#x25bc;</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Quantity</label>
+          <input id="jt-qty" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Entry Price ($)</label>
+          <input id="jt-entry" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Date</label>
+          <input id="jt-date" type="date" class="inp w-full" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="jt-notes" class="inp w-full" rows="2" placeholder="Strategy, reasoning…" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitLogTrade()">Log trade</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="jt-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    let _jpDebounce = null;
+    const tickerInput = document.getElementById('jt-ticker');
+    const typeSelect = document.getElementById('jt-type');
+    const liveLabel = document.getElementById('journal-live-price');
+    const entryInput = document.getElementById('jt-entry');
+
+    window.jClearLivePrice = () => { if (liveLabel) liveLabel.textContent = ''; };
+
+    function lookupLivePrice() {
+      clearTimeout(_jpDebounce);
+      _jpDebounce = setTimeout(async () => {
+        const ticker = tickerInput.value.trim().toUpperCase();
+        if (!ticker || typeSelect.value !== 'crypto' || !JOURNAL_LIVE_TICKERS.has(ticker)) {
+          if (liveLabel) liveLabel.textContent = '';
+          return;
+        }
+        try {
+          const { prices } = await api('GET', `/api/ticker-prices?symbols=${ticker}`);
+          const p = prices[ticker];
+          if (p != null) {
+            if (liveLabel) liveLabel.textContent = `Live: $${p >= 1 ? p.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : p.toFixed(4)}`;
+            if (entryInput && !entryInput.value) entryInput.value = p.toString();
+          } else {
+            if (liveLabel) liveLabel.textContent = '';
+          }
+        } catch { if (liveLabel) liveLabel.textContent = ''; }
+      }, 500);
+    }
+
+    if (tickerInput) tickerInput.addEventListener('input', lookupLivePrice);
+
+    window.submitLogTrade = async () => {
+      const msg = document.getElementById('jt-msg');
+      try {
+        await api('POST', '/api/journal', {
+          asset_type: typeSelect.value,
+          ticker: tickerInput.value.trim().toUpperCase(),
+          direction: document.getElementById('jt-direction').value,
+          quantity: document.getElementById('jt-qty').value,
+          entry_price: document.getElementById('jt-entry').value,
+          trade_date: document.getElementById('jt-date').value,
+          notes: document.getElementById('jt-notes').value,
+        });
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  window.openEditTradeModal = (id, entryPrice) => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Close Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <p class="text-sm text-[#8b95ab]">Entry price: <span class="font-mono text-[#e8eaf0]">$${parseFloat(entryPrice).toFixed(2)}</span></p>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Exit Price ($)</label>
+          <input id="je-exit" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="je-notes" class="inp w-full" rows="2" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitEditTrade(${id})">Save</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="je-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    window.submitEditTrade = async (tid) => {
+      const msg = document.getElementById('je-msg');
+      try {
+        const exitVal = document.getElementById('je-exit')?.value;
+        const notesVal = document.getElementById('je-notes')?.value;
+        const body = {};
+        if (exitVal) body.exit_price = exitVal;
+        if (notesVal) body.notes = notesVal;
+        await api('PATCH', `/api/journal/${tid}`, body);
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  await load();
+}
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+// Inbox + thread live in one section; S.msgOpenConv decides which renders.
+// Thread polling reuses the shared _activeInterval (navigate clears it).
+async function renderMessages(sec) {
+  const openId = S.msgOpenConv; S.msgOpenConv = null;
+  if (openId) { await openThread(sec, openId); }
+  else { await renderInbox(sec); }
+}
+
+async function renderInbox(sec) {
+  clearInterval(_activeInterval); _activeInterval = null;
+  sec.innerHTML = spin();
+  let data;
+  try { data = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : '')); }
+  catch (e) { sec.innerHTML = err(e.message); return; }
+  setUnreadBadge(Number(data.total_unread) || 0);
+  const convos = data.conversations || [];
+  const row = (c) => {
+    const isGroup = c.type === 'group';
+    const title = isGroup ? (c.title || 'Group') : ('@' + (c.other_username || 'unknown'));
+    const avatarName = isGroup ? (c.title || 'Group') : (c.other_username || '?');
+    const preview = c.last_message
+      ? (isGroup ? esc(c.last_message.sender_username) + ': ' : '') + esc(c.last_message.content)
+      : '<span class="italic text-zinc-600">No messages yet</span>';
+    const when = c.last_message ? tsAgo(c.last_message.created_at) : '';
+    const unread = c.unread > 0;
+    return `<button class="card w-full text-left flex items-center gap-3 hover:border-zinc-600 ${unread ? 'border-violet-500/40 bg-violet-600/5' : ''}" onclick="openConversation(${c.id})">
+      ${avatarImg(avatarName, 'w-10 h-10')}
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span class="font-medium truncate ${unread ? 'text-white' : 'text-zinc-200'}">${esc(title)}</span>
+          ${isGroup ? `<span class="text-xs text-zinc-500 shrink-0">👥 ${c.member_count}</span>` : ''}
+          <span class="ml-auto text-xs text-zinc-500 shrink-0">${when}</span>
+        </div>
+        <div class="flex items-center gap-2 mt-0.5">
+          <span class="text-sm truncate ${unread ? 'text-zinc-200' : 'text-zinc-500'}">${preview}</span>
+          ${unread ? `<span class="ml-auto shrink-0 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">${c.unread}</span>` : ''}
+        </div>
+      </div>
+    </button>`;
+  };
+  sec.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold">💬 Messages</h2>
+      <div class="flex gap-2">
+        <button class="btn btn-z text-xs" onclick="openNewGroupModal()">New group</button>
+        <button class="btn btn-v text-xs" onclick="openNewMessageModal()">New message</button>
+      </div>
+    </div>
+    ${convos.length ? `<div class="space-y-2">${convos.map(row).join('')}</div>`
+      : `<div class="card text-center py-10 text-zinc-500">
+           <div class="text-3xl mb-2">✉️</div>
+           <p class="mb-3">No conversations yet</p>
+           <button class="btn btn-v text-xs" onclick="openNewMessageModal()">Start a conversation</button>
+         </div>`}
+  `;
+}
+
+async function openThread(sec, convId) {
+  clearInterval(_activeInterval); _activeInterval = null;
+  sec.innerHTML = spin();
+  let data;
+  try { data = await api('GET', `/api/conversations/${convId}/messages`); }
+  catch (e) { sec.innerHTML = err(e.message); return; }
+  refreshUnreadBadge(); // server marked this thread read
+  const conv = data.conversation;
+  const isGroup = conv.type === 'group';
+  const title = isGroup ? (conv.title || 'Group') : ('@' + (conv.other_username || 'unknown'));
+  const myId = S.user && S.user.user_id;
+
+  const paint = (msgs) => {
+    const box = sec.querySelector('#msg-scroll');
+    if (!box) return;
+    box.innerHTML = (msgs || []).map(m => {
+      const mine = m.sender_user_id === myId;
+      if (mine) {
+        return `<div class="flex justify-end"><div class="max-w-[75%]">
+          <div class="bg-violet-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words whitespace-pre-wrap">${esc(m.content)}</div>
+          <div class="text-[0.65rem] text-zinc-500 text-right mt-0.5">${tsAgo(m.created_at)}</div>
+        </div></div>`;
+      }
+      return `<div class="flex gap-2">
+        ${avatarImg(m.sender_username, 'w-7 h-7')}
+        <div class="max-w-[75%]">
+          ${isGroup ? `<div class="text-xs text-zinc-500 mb-0.5">@${esc(m.sender_username)}</div>` : ''}
+          <div class="bg-zinc-800 rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words whitespace-pre-wrap">${esc(m.content)}</div>
+          <div class="text-[0.65rem] text-zinc-500 mt-0.5">${tsAgo(m.created_at)}</div>
+        </div>
+      </div>`;
+    }).join('') || '<p class="text-zinc-600 text-sm text-center py-6">No messages yet — say hi!</p>';
+    box.scrollTop = box.scrollHeight;
+  };
+
+  sec.innerHTML = `
+    <div class="flex items-center gap-2 mb-3">
+      <button class="text-lg text-zinc-400 hover:text-white px-1" onclick="backToInbox()" title="Back">←</button>
+      ${avatarImg(isGroup ? (conv.title || 'Group') : (conv.other_username || '?'), 'w-8 h-8')}
+      <div class="min-w-0">
+        <div class="font-semibold truncate">${esc(title)}</div>
+        ${isGroup ? `<div class="text-xs text-zinc-500">${conv.member_count} members</div>` : ''}
+      </div>
+      ${isGroup ? `<button class="btn btn-z text-xs ml-auto" onclick="openAddPeopleModal(${conv.id})">Add people</button>` : ''}
+    </div>
+    <div id="msg-scroll" class="space-y-2 mb-3 h-[60vh] overflow-y-auto pr-1"></div>
+    <form id="msg-form" class="flex gap-2">
+      <input id="msg-input" class="inp flex-1" placeholder="Type a message…" autocomplete="off" maxlength="4000">
+      <button class="btn btn-v shrink-0" type="submit">Send</button>
+    </form>
+  `;
+  paint(data.messages);
+
+  const form = sec.querySelector('#msg-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = sec.querySelector('#msg-input');
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = '';
+    try {
+      await api('POST', `/api/conversations/${convId}/messages`, { content });
+      const d = await api('GET', `/api/conversations/${convId}/messages`);
+      paint(d.messages);
+    } catch (e2) { alert(e2.message); input.value = content; }
+  });
+  sec.querySelector('#msg-input')?.focus();
+
+  // Live refresh while the thread is open.
+  _activeInterval = setInterval(async () => {
+    try { const d = await api('GET', `/api/conversations/${convId}/messages`); paint(d.messages); }
+    catch (_) {}
+  }, 4000);
+}
+
+window.openConversation = (id) => navigate('messages', { msgOpenConv: id });
+window.backToInbox = () => navigate('messages');
+
+// ── Messaging: recipient picker + modals ────────────────────────────────────────
+// Removes any existing messaging modal first so re-opens don't stack.
+function _closeMsgModal() { document.getElementById('msg-modal')?.remove(); }
+
+// Builds a search-and-select control inside the modal. `multi` toggles between
+// single-pick (direct) and multi-pick (group / add people). Returns nothing —
+// selection state lives in the modal's dataset via _msgSelected.
+let _msgSelected = [];
+function _renderSelected() {
+  const wrap = document.getElementById('msg-selected');
+  if (!wrap) return;
+  wrap.innerHTML = _msgSelected.map(u =>
+    `<span class="tag-basic inline-flex items-center gap-1">@${esc(u)}
+       <button class="text-zinc-400 hover:text-white" onclick="msgRemovePick('${esc(u)}')">✕</button></span>`
+  ).join('');
+}
+window.msgRemovePick = (u) => { _msgSelected = _msgSelected.filter(x => x !== u); _renderSelected(); };
+
+async function _msgSearch(q, multi) {
+  const results = document.getElementById('msg-results');
+  if (!results) return;
+  if (!q.trim()) { results.innerHTML = ''; return; }
+  let users = [];
+  try { users = (await api('GET', '/api/users/search?q=' + encodeURIComponent(q.trim()))).users || []; }
+  catch (_) {}
+  if (!users.length) { results.innerHTML = '<p class="text-zinc-600 text-sm py-2">No users found</p>'; return; }
+  results.innerHTML = users.map(u => `
+    <button class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800" onclick="msgPick('${esc(u.username)}', ${multi})">
+      ${avatarImg(u.username, 'w-7 h-7')}
+      <span class="text-sm">@${esc(u.username)}${u.display_name ? ` <span class="text-zinc-500">· ${esc(u.display_name)}</span>` : ''}</span>
+    </button>`).join('');
+}
+
+window.msgPick = async (username, multi) => {
+  if (multi) {
+    if (!_msgSelected.includes(username)) _msgSelected.push(username);
+    _renderSelected();
+    const inp = document.getElementById('msg-search'); if (inp) { inp.value = ''; inp.focus(); }
+    document.getElementById('msg-results').innerHTML = '';
+  } else {
+    // Direct: create-or-find immediately, then open the thread.
+    try {
+      const d = await api('POST', '/api/conversations', { type: 'direct', username });
+      _closeMsgModal();
+      navigate('messages', { msgOpenConv: d.id });
+    } catch (e) { alert(e.message); }
+  }
+};
+
+function _openMsgModal(innerHtml) {
+  _closeMsgModal();
+  const modal = document.createElement('div');
+  modal.id = 'msg-modal';
+  modal.className = 'fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4';
+  modal.onclick = (e) => { if (e.target.id === 'msg-modal') _closeMsgModal(); };
+  modal.innerHTML = `<div class="card w-full max-w-md max-h-[80vh] overflow-y-auto" onclick="event.stopPropagation()">${innerHtml}</div>`;
+  document.body.appendChild(modal);
+}
+
+window.openNewMessageModal = () => {
+  _msgSelected = [];
+  _openMsgModal(`
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold">New message</h2>
+      <button class="text-zinc-400 hover:text-white text-xl" onclick="_closeMsgModal()">✕</button>
+    </div>
+    <input id="msg-search" class="inp w-full mb-2" placeholder="Search people by name…" autocomplete="off" oninput="_msgSearch(this.value, false)">
+    <div id="msg-results" class="space-y-0.5"></div>
+  `);
+  document.getElementById('msg-search')?.focus();
+};
+
+window.openNewGroupModal = () => {
+  _msgSelected = [];
+  _openMsgModal(`
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold">New group</h2>
+      <button class="text-zinc-400 hover:text-white text-xl" onclick="_closeMsgModal()">✕</button>
+    </div>
+    <label class="text-sm text-zinc-400 block mb-1">Group name</label>
+    <input id="msg-group-name" class="inp w-full mb-3" placeholder="e.g. BLOOM Whales" maxlength="255" autocomplete="off">
+    <label class="text-sm text-zinc-400 block mb-1">Add members</label>
+    <div id="msg-selected" class="flex flex-wrap gap-1 mb-2"></div>
+    <input id="msg-search" class="inp w-full mb-2" placeholder="Search people…" autocomplete="off" oninput="_msgSearch(this.value, true)">
+    <div id="msg-results" class="space-y-0.5 mb-3"></div>
+    <div id="msg-modal-error" class="text-red-400 text-sm mb-2 hidden"></div>
+    <div class="flex gap-2 justify-end">
+      <button class="btn btn-z" onclick="_closeMsgModal()">Cancel</button>
+      <button class="btn btn-v" onclick="msgCreateGroup()">Create group</button>
+    </div>
+  `);
+  document.getElementById('msg-group-name')?.focus();
+};
+
+window.msgCreateGroup = async () => {
+  const errEl = document.getElementById('msg-modal-error');
+  const title = (document.getElementById('msg-group-name')?.value || '').trim();
+  if (!title) { errEl.textContent = 'Enter a group name'; errEl.classList.remove('hidden'); return; }
+  if (_msgSelected.length < 1) { errEl.textContent = 'Pick at least one member'; errEl.classList.remove('hidden'); return; }
+  try {
+    const d = await api('POST', '/api/conversations', { type: 'group', title, usernames: _msgSelected });
+    _closeMsgModal();
+    navigate('messages', { msgOpenConv: d.id });
+  } catch (e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+};
+
+window.openAddPeopleModal = (convId) => {
+  _msgSelected = [];
+  _openMsgModal(`
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold">Add people</h2>
+      <button class="text-zinc-400 hover:text-white text-xl" onclick="_closeMsgModal()">✕</button>
+    </div>
+    <div id="msg-selected" class="flex flex-wrap gap-1 mb-2"></div>
+    <input id="msg-search" class="inp w-full mb-2" placeholder="Search people…" autocomplete="off" oninput="_msgSearch(this.value, true)">
+    <div id="msg-results" class="space-y-0.5 mb-3"></div>
+    <div id="msg-modal-error" class="text-red-400 text-sm mb-2 hidden"></div>
+    <div class="flex gap-2 justify-end">
+      <button class="btn btn-z" onclick="_closeMsgModal()">Cancel</button>
+      <button class="btn btn-v" onclick="msgAddPeople(${convId})">Add</button>
+    </div>
+  `);
+  document.getElementById('msg-search')?.focus();
+};
+
+window.msgAddPeople = async (convId) => {
+  const errEl = document.getElementById('msg-modal-error');
+  if (_msgSelected.length < 1) { errEl.textContent = 'Pick at least one person'; errEl.classList.remove('hidden'); return; }
+  try {
+    await api('POST', `/api/conversations/${convId}/members`, { usernames: _msgSelected });
+    _closeMsgModal();
+    navigate('messages', { msgOpenConv: convId });
+  } catch (e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+};
+
+// Profile → start a direct chat with that user.
+window.messageUser = async (username) => {
+  try {
+    const d = await api('POST', '/api/conversations', { type: 'direct', username });
+    navigate('messages', { msgOpenConv: d.id });
+  } catch (e) { alert(e.message); }
+};
 
 // ── Futures ───────────────────────────────────────────────────────────────────
 async function renderFutures(sec) {

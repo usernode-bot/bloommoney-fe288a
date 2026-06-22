@@ -166,8 +166,15 @@
     { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
     { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
     { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" },
-    { "name": "Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
+    { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
+    { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" },
+    { "name": "Trade Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
     { "name": "Journal API returns JSON", "path": "/api/journal", "expectSelector": "body" },
-    { "name": "Journal summary API returns JSON", "path": "/api/journal/summary", "expectSelector": "body" }
+    { "name": "Journal summary API returns JSON", "path": "/api/journal/summary", "expectSelector": "body" },
+    { "name": "Messages section in DOM", "path": "/?demo=1", "expectSelector": "#section-messages" },
+    { "name": "Messages nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"messages\"]" },
+    { "name": "Messages envelope in top bar", "path": "/?demo=1", "expectSelector": "#hdr-messages" },
+    { "name": "Conversations API returns seeded demo inbox", "path": "/api/conversations?demo=1", "expectText": "BLOOM Whales" },
+    { "name": "User search API returns JSON", "path": "/api/users/search?q=staging", "expectSelector": "body" }
   ]
 }
