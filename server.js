@@ -2274,6 +2274,399 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
   } finally { client.release(); }
 });
 
+// ── Messaging (direct & group chats) ────────────────────────────────────────────
+// Private feature: conversations/conversation_members/messages are all
+// staging:private. No requireWallet — messaging is social, not financial.
+
+const MESSAGE_MAX_LEN = 4000;
+const GROUP_MAX_MEMBERS = 50;
+
+// Membership check shared by every conversation-scoped route. Returns the
+// conversation row when the user belongs to it, otherwise null.
+async function loadMemberConversation(conversationId, userId) {
+  const { rows } = await pool.query(
+    `SELECT c.* FROM conversations c
+     JOIN conversation_members m ON m.conversation_id = c.id
+     WHERE c.id = $1 AND m.user_id = $2`,
+    [conversationId, userId]
+  );
+  return rows[0] || null;
+}
+
+// Resolve a list of usernames to existing, non-banned user rows. Skips the
+// caller (added separately) and de-dupes. Throws on an unknown username.
+async function resolveUsernames(usernames, callerId) {
+  const out = [];
+  const seen = new Set([callerId]);
+  for (const raw of usernames) {
+    if (!validStr(raw, 255)) continue;
+    const { rows } = await pool.query(
+      'SELECT user_id, username, is_banned FROM users WHERE username=$1', [raw]
+    );
+    const u = rows[0];
+    if (!u) throw new Error(`Unknown user: ${raw}`);
+    if (u.is_banned) throw new Error(`User unavailable: ${raw}`);
+    if (seen.has(u.user_id)) continue;
+    seen.add(u.user_id);
+    out.push(u);
+  }
+  return out;
+}
+
+// GET /api/conversations — the caller's inbox, newest activity first.
+app.get('/api/conversations', async (req, res) => {
+  try {
+    // Staging-only demo injection: guarantee the tester sees a populated inbox
+    // without referencing real users in the boot seed.
+    if (IS_STAGING && req.query.demo === '1') {
+      await injectDemoConversations(req.user).catch(() => {});
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        c.id, c.type, c.title, c.created_by_user_id, c.last_message_at,
+        me.last_read_at,
+        (SELECT COUNT(*)::int FROM conversation_members cm WHERE cm.conversation_id = c.id) AS member_count,
+        (SELECT COUNT(*)::int FROM messages msg
+           WHERE msg.conversation_id = c.id
+             AND msg.created_at > me.last_read_at
+             AND msg.sender_user_id <> $1) AS unread,
+        lm.content       AS last_content,
+        lm.sender_username AS last_sender,
+        lm.created_at    AS last_at
+      FROM conversation_members me
+      JOIN conversations c ON c.id = me.conversation_id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_username, created_at
+        FROM messages WHERE conversation_id = c.id
+        ORDER BY created_at DESC LIMIT 1
+      ) lm ON TRUE
+      WHERE me.user_id = $1
+      ORDER BY c.last_message_at DESC
+    `, [req.user.id]);
+
+    // For direct conversations, attach the counterpart's identity for the title.
+    const directIds = rows.filter(r => r.type === 'direct').map(r => r.id);
+    const others = {};
+    if (directIds.length) {
+      const { rows: mems } = await pool.query(`
+        SELECT cm.conversation_id, cm.username, u.display_name
+        FROM conversation_members cm
+        LEFT JOIN users u ON u.user_id = cm.user_id
+        WHERE cm.conversation_id = ANY($1) AND cm.user_id <> $2
+      `, [directIds, req.user.id]);
+      mems.forEach(m => { if (!others[m.conversation_id]) others[m.conversation_id] = m; });
+    }
+
+    let total_unread = 0;
+    const conversations = rows.map(r => {
+      total_unread += Number(r.unread) || 0;
+      const counterpart = others[r.id];
+      return {
+        id: r.id,
+        type: r.type,
+        title: r.title,
+        member_count: r.member_count,
+        unread: Number(r.unread) || 0,
+        last_message: r.last_content ? {
+          content: r.last_content, sender_username: r.last_sender, created_at: r.last_at,
+        } : null,
+        last_message_at: r.last_message_at,
+        other_username: counterpart ? counterpart.username : null,
+        other_display_name: counterpart ? counterpart.display_name : null,
+      };
+    });
+    res.json({ conversations, total_unread });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations — create a direct (find-or-create) or group chat.
+app.post('/api/conversations', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { type } = req.body || {};
+    if (type === 'direct') {
+      const { username } = req.body || {};
+      if (!validStr(username, 255)) return res.status(400).json({ error: 'username required' });
+      const [target] = await resolveUsernames([username], req.user.id);
+      if (!target) return res.status(400).json({ error: 'Cannot message yourself' });
+
+      // Find an existing direct conversation with exactly these two members.
+      const { rows: existing } = await client.query(`
+        SELECT c.id FROM conversations c
+        JOIN conversation_members a ON a.conversation_id = c.id AND a.user_id = $1
+        JOIN conversation_members b ON b.conversation_id = c.id AND b.user_id = $2
+        WHERE c.type = 'direct'
+          AND (SELECT COUNT(*) FROM conversation_members m WHERE m.conversation_id = c.id) = 2
+        LIMIT 1
+      `, [req.user.id, target.user_id]);
+      if (existing.length) return res.json({ id: existing[0].id, type: 'direct', created: false });
+
+      await client.query('BEGIN');
+      const { rows: [conv] } = await client.query(
+        `INSERT INTO conversations(type, created_by_user_id) VALUES('direct', $1) RETURNING id`,
+        [req.user.id]
+      );
+      await client.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3),($1,$4,$5)`,
+        [conv.id, req.user.id, req.user.username, target.user_id, target.username]
+      );
+      await client.query('COMMIT');
+      return res.json({ id: conv.id, type: 'direct', created: true });
+    }
+
+    if (type === 'group') {
+      const { title, usernames } = req.body || {};
+      if (!validStr(title, 255)) return res.status(400).json({ error: 'Group name required' });
+      if (!Array.isArray(usernames) || usernames.length < 1) {
+        return res.status(400).json({ error: 'Pick at least one member' });
+      }
+      const members = await resolveUsernames(usernames, req.user.id);
+      if (!members.length) return res.status(400).json({ error: 'Pick at least one valid member' });
+      if (members.length + 1 > GROUP_MAX_MEMBERS) return res.status(400).json({ error: 'Too many members' });
+
+      await client.query('BEGIN');
+      const { rows: [conv] } = await client.query(
+        `INSERT INTO conversations(type, title, created_by_user_id) VALUES('group', $1, $2) RETURNING id`,
+        [title, req.user.id]
+      );
+      await client.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)`,
+        [conv.id, req.user.id, req.user.username]
+      );
+      for (const m of members) {
+        await client.query(
+          `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)
+           ON CONFLICT DO NOTHING`,
+          [conv.id, m.user_id, m.username]
+        );
+      }
+      await client.query('COMMIT');
+      return res.json({ id: conv.id, type: 'group', created: true });
+    }
+
+    return res.status(400).json({ error: 'Invalid conversation type' });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// GET /api/conversations/:id/messages — thread history; marks the thread read.
+app.get('/api/conversations/:id/messages', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const { rows: members } = await pool.query(
+      `SELECT cm.user_id, cm.username, u.display_name
+       FROM conversation_members cm
+       LEFT JOIN users u ON u.user_id = cm.user_id
+       WHERE cm.conversation_id = $1`, [convId]
+    );
+    const { rows: msgs } = await pool.query(
+      `SELECT id, sender_user_id, sender_username, content, created_at
+       FROM messages WHERE conversation_id = $1
+       ORDER BY created_at ASC LIMIT 200`, [convId]
+    );
+
+    // Opening the thread marks it read.
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+
+    const other = conv.type === 'direct' ? members.find(m => m.user_id !== req.user.id) : null;
+    res.json({
+      conversation: {
+        id: conv.id, type: conv.type, title: conv.title,
+        created_by_user_id: conv.created_by_user_id,
+        member_count: members.length,
+        other_username: other ? other.username : null,
+        other_display_name: other ? other.display_name : null,
+      },
+      members,
+      messages: msgs,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/messages — send a message.
+app.post('/api/conversations/:id/messages', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const content = (req.body && typeof req.body.content === 'string') ? req.body.content.trim() : '';
+    if (!content) return res.status(400).json({ error: 'Message cannot be empty' });
+    if (content.length > MESSAGE_MAX_LEN) return res.status(400).json({ error: 'Message too long' });
+
+    const { rows: [msg] } = await pool.query(
+      `INSERT INTO messages(conversation_id, sender_user_id, sender_username, content)
+       VALUES($1,$2,$3,$4)
+       RETURNING id, sender_user_id, sender_username, content, created_at`,
+      [convId, req.user.id, req.user.username, content]
+    );
+    await pool.query(`UPDATE conversations SET last_message_at = NOW() WHERE id = $1`, [convId]);
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+    res.json({ message: msg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/members — invite users to a group.
+app.post('/api/conversations/:id/members', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    if (conv.type !== 'group') return res.status(400).json({ error: 'Can only add people to a group' });
+
+    const { usernames } = req.body || {};
+    if (!Array.isArray(usernames) || !usernames.length) return res.status(400).json({ error: 'No users provided' });
+    const members = await resolveUsernames(usernames, req.user.id);
+    const { rows: [{ n }] } = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM conversation_members WHERE conversation_id=$1', [convId]
+    );
+    if (n + members.length > GROUP_MAX_MEMBERS) return res.status(400).json({ error: 'Too many members' });
+
+    let added = 0;
+    for (const m of members) {
+      const r = await pool.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)
+         ON CONFLICT DO NOTHING`,
+        [convId, m.user_id, m.username]
+      );
+      added += r.rowCount;
+    }
+    res.json({ ok: true, added });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/read — mark a conversation read.
+app.post('/api/conversations/:id/read', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/users/search?q= — recipient lookup for starting chats / adding people.
+app.get('/api/users/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (q.length < 1) return res.json({ users: [] });
+    const { rows } = await pool.query(`
+      SELECT username, display_name FROM users
+      WHERE user_id <> $1 AND is_banned = false
+        AND (username ILIKE $2 OR display_name ILIKE $2)
+      ORDER BY username ASC
+      LIMIT 10
+    `, [req.user.id, '%' + q + '%']);
+    res.json({ users: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Boot-time messaging seed (staging only). Creates the two demo conversations
+// (direct alice↔bob + the "BLOOM Whales" group) with a handful of messages.
+// Idempotent via explicit high ids + ON CONFLICT DO NOTHING. Safe to call
+// repeatedly (boot seed and request-time demo injection both call it).
+async function ensureMessagingSeed() {
+  if (!IS_STAGING) return;
+  // Direct: staging-alice (9001) ↔ staging-bob (9002), conversation id 9902.
+  await pool.query(
+    `INSERT INTO conversations(id,type,created_by_user_id,last_message_at)
+     VALUES (9902,'direct',9001,NOW()-INTERVAL '8 minutes') ON CONFLICT(id) DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id,user_id,username) VALUES
+       (9902,9001,'staging-alice'),(9902,9002,'staging-bob')
+     ON CONFLICT DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
+       (990001,9902,9001,'staging-alice','Staging demo — hey Bob, did you see BLOOM pumped today? 🌸',NOW()-INTERVAL '20 minutes'),
+       (990002,9902,9002,'staging-bob','Staging demo — yeah! Staked another 500 this morning.',NOW()-INTERVAL '16 minutes'),
+       (990003,9902,9001,'staging-alice','Staging demo — nice. Want to copy-trade my ETH-PERP long?',NOW()-INTERVAL '12 minutes'),
+       (990004,9902,9002,'staging-bob','Staging demo — for sure, send me the link 🚀',NOW()-INTERVAL '8 minutes')
+     ON CONFLICT(id) DO NOTHING`
+  );
+  // Group: "Staging demo — BLOOM Whales", conversation id 9901, members
+  // alice/bob/carol/eve (9001/9002/9003/9005).
+  await pool.query(
+    `INSERT INTO conversations(id,type,title,created_by_user_id,last_message_at)
+     VALUES (9901,'group','Staging demo — BLOOM Whales',9001,NOW()-INTERVAL '3 minutes') ON CONFLICT(id) DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id,user_id,username) VALUES
+       (9901,9001,'staging-alice'),(9901,9002,'staging-bob'),
+       (9901,9003,'staging-carol'),(9901,9005,'staging-eve')
+     ON CONFLICT DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
+       (990011,9901,9001,'staging-alice','Staging demo — welcome to the BLOOM Whales group! 🐳',NOW()-INTERVAL '30 minutes'),
+       (990012,9901,9003,'staging-carol','Staging demo — gm whales. Opinion markets are heating up.',NOW()-INTERVAL '22 minutes'),
+       (990013,9901,9005,'staging-eve','Staging demo — staking rewards just hit my wallet 🌱',NOW()-INTERVAL '14 minutes'),
+       (990014,9901,9002,'staging-bob','Staging demo — who is aping the new ICO?',NOW()-INTERVAL '7 minutes'),
+       (990015,9901,9001,'staging-alice','Staging demo — I am in for a small bag. DYOR though!',NOW()-INTERVAL '3 minutes')
+     ON CONFLICT(id) DO NOTHING`
+  );
+}
+
+// Staging demo: idempotently ensure the current tester has a populated inbox.
+// Adds them to the seeded demo group and gives them a direct welcome thread.
+async function injectDemoConversations(user) {
+  // Ensure the demo users + the two boot-seeded conversations exist (the boot
+  // seed already creates them, but request-time injection must be self-standing
+  // so the ?demo=1 route works even against a freshly migrated test DB).
+  await ensureMessagingSeed();
+  // (a) add the tester to the demo group "Staging demo — BLOOM Whales" (id 9901).
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id, user_id, username)
+     VALUES (9901, $1, $2) ON CONFLICT DO NOTHING`,
+    [user.id, user.username]
+  );
+  // (b) ensure a direct conversation between the tester and staging-alice (9001).
+  const { rows: existing } = await pool.query(`
+    SELECT c.id FROM conversations c
+    JOIN conversation_members a ON a.conversation_id = c.id AND a.user_id = $1
+    JOIN conversation_members b ON b.conversation_id = c.id AND b.user_id = 9001
+    WHERE c.type = 'direct'
+      AND (SELECT COUNT(*) FROM conversation_members m WHERE m.conversation_id = c.id) = 2
+    LIMIT 1
+  `, [user.id]);
+  if (!existing.length) {
+    const { rows: [conv] } = await pool.query(
+      `INSERT INTO conversations(type, created_by_user_id, last_message_at)
+       VALUES('direct', 9001, NOW()) RETURNING id`
+    );
+    await pool.query(
+      `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,9001,'staging-alice'),($1,$2,$3)`,
+      [conv.id, user.id, user.username]
+    );
+    await pool.query(
+      `INSERT INTO messages(conversation_id, sender_user_id, sender_username, content)
+       VALUES($1, 9001, 'staging-alice', 'Staging demo — Welcome to BloomMoney messages! 🌸')`,
+      [conv.id]
+    );
+  }
+}
+
 // ── Server-rendered Admin console (Phase 5) ─────────────────────────────────────
 // Standalone HTML pages at /admin pathnames. They pass the GET branch of the
 // auth gate, so each handler re-checks admin explicitly and renders a "not
@@ -2941,6 +3334,32 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS conversations (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(10) NOT NULL DEFAULT 'direct',
+      title VARCHAR(255),
+      created_by_user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_message_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS conversation_members (
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      user_id INTEGER NOT NULL,
+      username VARCHAR(255) NOT NULL,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      last_read_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (conversation_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS conversation_members_user_idx ON conversation_members (user_id);
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      sender_user_id INTEGER NOT NULL,
+      sender_username VARCHAR(255) NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at DESC);
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -3015,6 +3434,9 @@ async function start() {
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
+    COMMENT ON TABLE conversations IS 'staging:private';
+    COMMENT ON TABLE conversation_members IS 'staging:private';
+    COMMENT ON TABLE messages IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -3431,6 +3853,9 @@ async function start() {
         await pool.query(`INSERT INTO opinion_market_snapshots(market_id,yes_pct,created_at) VALUES ${dailySeeds.join(',')}`);
       }
     }
+
+    // Seed demo conversations + messages (private tables → empty in staging).
+    await ensureMessagingSeed();
   }
 
   // ── Boot-time daily market creation (all environments) ──────────────────────
