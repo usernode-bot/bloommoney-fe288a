@@ -205,6 +205,9 @@
       <!-- ICO -->
       <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
+      <!-- Trade Journal -->
+      <section id="section-journal" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
       <!-- Earn (composite: stake / liquidity / ico) -->
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
@@ -3646,6 +3649,313 @@ async function renderAdmin(sec) {
     try { await api('POST', `/api/admin/nfts/${id}/burn`); fullRender(); } catch (e) { alert(e.message); }
   };
   await fullRender();
+}
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+let journalEntries = [];
+let journalFilters = { asset_type: '', direction: '', status: '' };
+
+function calcPnl(entry) {
+  const ep = parseFloat(entry.entry_price);
+  const xp = entry.exit_price != null ? parseFloat(entry.exit_price) : null;
+  const qty = parseFloat(entry.quantity);
+  if (xp == null) return null;
+  const pnl = entry.direction === 'buy' ? (xp - ep) * qty : (ep - xp) * qty;
+  const pct = ep > 0 ? (pnl / (ep * qty)) * 100 : 0;
+  return { pnl, pct };
+}
+
+function fmtQty(q) {
+  const n = parseFloat(q);
+  if (n < 1) return n.toFixed(6);
+  if (n < 10) return n.toFixed(4);
+  return n.toFixed(2);
+}
+
+function fmtPrice(p) {
+  const n = parseFloat(p);
+  if (n < 1) return n.toFixed(4);
+  return n.toFixed(2);
+}
+
+function journalAssetPill(at) {
+  if (at === 'stock') return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-900/40 text-blue-300">Stock</span>';
+  if (at === 'etf')   return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300">ETF</span>';
+  return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-900/40 text-amber-300">Crypto</span>';
+}
+
+function renderJournalList() {
+  const filtered = journalEntries.filter(e => {
+    if (journalFilters.asset_type && e.asset_type !== journalFilters.asset_type) return false;
+    if (journalFilters.direction && e.direction !== journalFilters.direction) return false;
+    if (journalFilters.status === 'open' && e.exit_price != null) return false;
+    if (journalFilters.status === 'closed' && e.exit_price == null) return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    return `<div class="card text-center py-8 text-zinc-500 text-sm">No trades match these filters.</div>`;
+  }
+
+  return filtered.map(e => {
+    const p = calcPnl(e);
+    const dirLabel = e.direction === 'buy'
+      ? '<span class="text-emerald-400 font-semibold">Buy ↑</span>'
+      : '<span class="text-red-400 font-semibold">Sell ↓</span>';
+    const statusBadge = e.exit_price == null
+      ? '<span class="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-300">Open</span>'
+      : '';
+    const pnlHtml = p != null
+      ? `<span class="${p.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'} font-mono text-sm">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)} (${p.pnl >= 0 ? '+' : ''}${p.pct.toFixed(1)}%)</span>`
+      : '';
+    const notesHtml = e.notes ? `<div class="mt-2 text-xs text-zinc-400 italic border-t border-zinc-800 pt-2">${esc(e.notes)}</div>` : '';
+    return `
+      <div class="card space-y-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap">
+            ${journalAssetPill(e.asset_type)}
+            <span class="font-semibold font-mono text-sm">${esc(e.ticker)}</span>
+            ${dirLabel}
+            ${statusBadge}
+          </div>
+          <div class="flex items-center gap-2">
+            ${pnlHtml}
+            <button class="text-zinc-500 hover:text-zinc-200 text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+              onclick="openTradeModal(${e.id})">Edit</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div><div class="text-zinc-500">Qty</div><div class="font-mono">${fmtQty(e.quantity)}</div></div>
+          <div><div class="text-zinc-500">Entry</div><div class="font-mono">$${fmtPrice(e.entry_price)}</div></div>
+          <div><div class="text-zinc-500">Exit</div><div class="font-mono">${e.exit_price != null ? '$'+fmtPrice(e.exit_price) : '<span class="text-zinc-600">—</span>'}</div></div>
+          <div><div class="text-zinc-500">Date</div><div class="font-mono">${String(e.trade_date).slice(0,10)}</div></div>
+        </div>
+        ${notesHtml}
+      </div>`;
+  }).join('');
+}
+
+window.applyJournalFilters = function() {
+  journalFilters.asset_type = document.getElementById('jf-asset')?.value || '';
+  journalFilters.direction  = document.getElementById('jf-dir')?.value || '';
+  journalFilters.status     = document.getElementById('jf-status')?.value || '';
+  const list = document.getElementById('journal-list');
+  if (list) list.innerHTML = renderJournalList();
+};
+
+window.resetJournalFilters = function() {
+  journalFilters = { asset_type: '', direction: '', status: '' };
+  const fa = document.getElementById('jf-asset');   if (fa) fa.value = '';
+  const fd = document.getElementById('jf-dir');     if (fd) fd.value = '';
+  const fs = document.getElementById('jf-status');  if (fs) fs.value = '';
+  const list = document.getElementById('journal-list');
+  if (list) list.innerHTML = renderJournalList();
+};
+
+window.openTradeModal = function(idOrNull) {
+  const existing = typeof idOrNull === 'number' ? journalEntries.find(e => e.id === idOrNull) : null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const modal = document.createElement('div');
+  modal.id = 'trade-journal-modal';
+  modal.className = 'fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4';
+  modal.onclick = (ev) => { if (ev.target === modal) modal.remove(); };
+
+  const title = existing ? 'Edit Trade' : 'Log a Trade';
+  const deleteBtn = existing
+    ? `<button class="btn btn-r text-sm" onclick="deleteTradeEntry(${existing.id})">Delete</button>`
+    : '';
+
+  modal.innerHTML = `
+    <div class="bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-full max-w-lg space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold">${title}</h2>
+        <button onclick="document.getElementById('trade-journal-modal')?.remove()" class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div id="trade-modal-err" class="hidden text-red-400 text-sm"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Asset type</label>
+          <select id="tm-asset" class="inp">
+            <option value="stock" ${existing?.asset_type==='stock'?'selected':''}>Stock</option>
+            <option value="etf"   ${existing?.asset_type==='etf'  ?'selected':''}>ETF</option>
+            <option value="crypto"${existing?.asset_type==='crypto'?'selected':''}>Crypto</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Direction</label>
+          <select id="tm-direction" class="inp">
+            <option value="buy"  ${existing?.direction==='buy' ?'selected':''}>Buy</option>
+            <option value="sell" ${existing?.direction==='sell'?'selected':''}>Sell</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Ticker / Symbol</label>
+        <input id="tm-ticker" class="inp" placeholder="e.g. BTC, AAPL, SPY" maxlength="20"
+          value="${esc(existing?.ticker||'')}" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Quantity</label>
+          <input id="tm-qty" type="number" step="any" min="0" class="inp" placeholder="0.00"
+            value="${existing ? parseFloat(existing.quantity) : ''}">
+        </div>
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Entry price (USD)</label>
+          <input id="tm-entry" type="number" step="any" min="0" class="inp" placeholder="0.00"
+            value="${existing ? parseFloat(existing.entry_price) : ''}">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Trade date</label>
+        <input id="tm-date" type="date" class="inp" value="${existing ? String(existing.trade_date).slice(0,10) : today}">
+      </div>
+      <div class="border-t border-zinc-800 pt-3">
+        <div class="text-xs text-zinc-500 mb-2">Close trade (optional)</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-zinc-400 block mb-1">Exit price (USD)</label>
+            <input id="tm-exit" type="number" step="any" min="0" class="inp" placeholder="leave blank if open"
+              value="${existing?.exit_price != null ? parseFloat(existing.exit_price) : ''}">
+          </div>
+          <div>
+            <label class="text-xs text-zinc-400 block mb-1">Exit date</label>
+            <input id="tm-exitdate" type="date" class="inp"
+              value="${existing?.exit_date ? String(existing.exit_date).slice(0,10) : ''}">
+          </div>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Notes (optional)</label>
+        <textarea id="tm-notes" class="inp" rows="2" maxlength="500" placeholder="Trade rationale, lessons…">${esc(existing?.notes||'')}</textarea>
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button class="btn btn-v flex-1 text-sm" onclick="saveTradeEntry(${existing ? existing.id : 'null'})">
+          ${existing ? 'Save changes' : 'Log trade'}
+        </button>
+        ${deleteBtn}
+        <button class="btn btn-z text-sm" onclick="document.getElementById('trade-journal-modal')?.remove()">Cancel</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+};
+
+window.saveTradeEntry = async function(idOrNull) {
+  const errEl = document.getElementById('trade-modal-err');
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  const payload = {
+    asset_type:  document.getElementById('tm-asset')?.value,
+    ticker:      document.getElementById('tm-ticker')?.value.trim(),
+    direction:   document.getElementById('tm-direction')?.value,
+    quantity:    document.getElementById('tm-qty')?.value,
+    entry_price: document.getElementById('tm-entry')?.value,
+    trade_date:  document.getElementById('tm-date')?.value,
+    exit_price:  document.getElementById('tm-exit')?.value || null,
+    exit_date:   document.getElementById('tm-exitdate')?.value || null,
+    notes:       document.getElementById('tm-notes')?.value || null,
+  };
+  try {
+    if (idOrNull) {
+      await api('PATCH', `/api/journal/${idOrNull}`, payload);
+    } else {
+      await api('POST', '/api/journal', payload);
+    }
+    document.getElementById('trade-journal-modal')?.remove();
+    const sec = document.getElementById('section-journal');
+    if (sec) await renderJournal(sec);
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+    else alert(e.message);
+  }
+};
+
+window.deleteTradeEntry = async function(id) {
+  if (!confirm('Delete this trade entry? This cannot be undone.')) return;
+  try {
+    await api('DELETE', `/api/journal/${id}`);
+    document.getElementById('trade-journal-modal')?.remove();
+    const sec = document.getElementById('section-journal');
+    if (sec) await renderJournal(sec);
+  } catch (e) { alert(e.message); }
+};
+
+async function renderJournal(sec) {
+  sec.innerHTML = spin();
+  try {
+    const [summaryData, listData] = await Promise.all([
+      api('GET', '/api/journal/summary'),
+      api('GET', '/api/journal'),
+    ]);
+    journalEntries = listData.entries || [];
+    const s = summaryData;
+    const pnlCls = s.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+    const pnlSign = s.realized_pnl >= 0 ? '+' : '';
+    const winRate = s.closed_count > 0
+      ? `${s.profitable_count} of ${s.closed_count} (${Math.round(s.profitable_count/s.closed_count*100)}%)`
+      : '—';
+
+    sec.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h1 class="text-xl font-bold">Trade Journal</h1>
+          <button class="btn btn-v text-sm" onclick="openTradeModal(null)">+ Log Trade</button>
+        </div>
+
+        <!-- Summary dashboard -->
+        <div class="card grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Realised P&amp;L</div>
+            <div class="text-lg font-bold font-mono ${pnlCls}">${pnlSign}$${Math.abs(s.realized_pnl).toFixed(2)}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Win rate</div>
+            <div class="text-lg font-bold text-zinc-100">${winRate}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Open positions</div>
+            <div class="text-lg font-bold text-zinc-100">${s.open_count}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Total trades</div>
+            <div class="text-lg font-bold text-zinc-100">${s.total_count}</div>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card flex flex-wrap items-center gap-3">
+          <select id="jf-asset" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All types</option>
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+            <option value="crypto">Crypto</option>
+          </select>
+          <select id="jf-dir" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All directions</option>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+          <select id="jf-status" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <button class="text-xs text-zinc-500 hover:text-zinc-300 underline" onclick="resetJournalFilters()">Reset</button>
+        </div>
+
+        <!-- Trade list -->
+        <div id="journal-list" class="space-y-3">
+          ${renderJournalList()}
+        </div>
+        ${journalEntries.length === 0 ? `
+          <div class="card text-center py-10 space-y-3">
+            <div class="text-zinc-500 text-sm">No trades logged yet.</div>
+            <button class="btn btn-v text-sm" onclick="openTradeModal(null)">Log your first trade</button>
+          </div>` : ''}
+      </div>`;
+  } catch (e) { sec.innerHTML = err(e.message); }
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
