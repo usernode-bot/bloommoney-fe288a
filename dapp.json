@@ -176,6 +176,12 @@
     { "name": "Messages envelope in top bar", "path": "/?demo=1", "expectSelector": "#hdr-messages" },
     { "name": "Conversations API returns seeded demo inbox", "path": "/api/conversations?demo=1", "expectText": "BLOOM Whales" },
     { "name": "User search API returns JSON", "path": "/api/users/search?q=staging", "expectSelector": "body" },
+    { "name": "NFT section in DOM", "path": "/?demo=1", "expectSelector": "#section-nfts" },
+    { "name": "NFT nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"nfts\"]" },
+    { "name": "NFTs API returns seeded NFTs", "path": "/api/nfts", "expectSelector": "body" },
+    { "name": "NFT collections API returns JSON", "path": "/api/nft-collections", "expectSelector": "body" },
+    { "name": "NFT detail API returns JSON", "path": "/api/nfts/9001", "expectSelector": "body" },
+    { "name": "NFT activity API returns JSON", "path": "/api/nft-activity", "expectSelector": "body" },
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
     { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" }
