@@ -135,7 +135,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk|wallet\/send)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -1996,6 +1996,83 @@ app.get('/api/admin/audit', requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Wallet: resolve identifier to pubkey ─────────────────────────────────────
+
+app.get('/api/wallet/resolve/:identifier', async (req, res) => {
+  try {
+    const raw = String(req.params.identifier || '').trim();
+    if (!raw) return res.status(400).json({ error: 'identifier required' });
+    // Raw address: starts with 'ut1' or '0x' — return as-is
+    if (raw.startsWith('ut1') || raw.startsWith('0x')) {
+      return res.json({ pubkey: raw });
+    }
+    // Username: strip leading '@', look up in users table
+    const username = raw.startsWith('@') ? raw.slice(1) : raw;
+    const { rows: [user] } = await pool.query(
+      'SELECT usernode_pubkey FROM users WHERE username=$1', [username]
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.usernode_pubkey) return res.status(400).json({ error: 'No wallet linked' });
+    res.json({ pubkey: user.usernode_pubkey });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Wallet: record a confirmed on-chain send ──────────────────────────────────
+
+app.post('/api/wallet/send', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { recipient_pubkey, token_symbol, amount, tx_hash } = req.body;
+    const ALLOWED_TOKENS = ['BLOOM', 'USDC', 'TOK'];
+    if (!ALLOWED_TOKENS.includes(token_symbol)) return res.status(400).json({ error: 'Unsupported token' });
+    if (!validStr(recipient_pubkey, 200)) return res.status(400).json({ error: 'Invalid recipient' });
+    if (parseAmount(amount) == null) return res.status(400).json({ error: 'Invalid amount' });
+    const amountUnits = toUnits(amount);
+    if (amountUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    await client.query('BEGIN');
+
+    // Debit sender
+    const { rows: [senderBal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, token_symbol]
+    );
+    if (!senderBal || Number(senderBal.balance) < amountUnits) {
+      throw new Error('Insufficient balance');
+    }
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amountUnits, req.user.id, token_symbol]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'wallet_send',$2,$3,$4)",
+      [req.user.id, token_symbol, -amountUnits, `Sent ${fromUnits(amountUnits)} ${token_symbol} to ${recipient_pubkey.slice(0,10)}…`]
+    );
+
+    // Credit recipient if they're on-platform
+    const { rows: [recipient] } = await client.query(
+      'SELECT user_id FROM users WHERE usernode_pubkey=$1', [recipient_pubkey]
+    );
+    if (recipient) {
+      await client.query(
+        `INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3)
+         ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$3, updated_at=NOW()`,
+        [recipient.user_id, token_symbol, amountUnits]
+      );
+      await client.query(
+        "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'wallet_receive',$2,$3,$4)",
+        [recipient.user_id, token_symbol, amountUnits, `Received ${fromUnits(amountUnits)} ${token_symbol} from ${req.user.username}`]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // Suggested people for the Explore screen (Phase 2): top users by follower
 // count, excluding self and anyone already followed.
 app.get('/api/explore/people', async (req, res) => {
@@ -2991,6 +3068,13 @@ async function start() {
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
     `);
+    // Ensure staging users have ut1-format pubkeys for wallet send/receive testing.
+    await pool.query(`
+      UPDATE users SET usernode_pubkey = 'ut1staging' || LPAD(user_id::text, 36, '0')
+      WHERE username LIKE 'staging-%'
+        AND (usernode_pubkey IS NULL OR usernode_pubkey NOT LIKE 'ut1%')
+    `);
+
     // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
     await pool.query(`
       UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL

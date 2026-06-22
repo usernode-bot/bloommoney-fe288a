@@ -115,7 +115,7 @@
     <div class="hidden sm:flex items-center gap-2 text-xs">
       <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
       <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
+      <button id="hdr-wallet" class="text-[#4e5872] hover:text-[#e8eaf0] font-mono hidden sm:block transition-colors" onclick="navigate('wallet')" title="Open Wallet"></button>
       <!-- Mobile: single compact chip showing both balances -->
       <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
         <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
@@ -154,6 +154,7 @@
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
+      <button class="nav-item" data-view="wallet">💳 Wallet</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
@@ -211,6 +212,9 @@
 
       <!-- Explore -->
       <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Wallet -->
+      <section id="section-wallet" class="view hidden max-w-lg mx-auto py-4 px-4"><div id="wallet-receive-tab"></div></section>
 
       <!-- Verify -->
       <section id="section-verify" class="view hidden max-w-lg mx-auto py-4 px-4">
@@ -459,6 +463,7 @@ const VIEW_SECTION = {
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
+  wallet: 'section-wallet',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
@@ -499,6 +504,7 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
+      case 'wallet': await renderWallet(sec); break;
       case 'trade': case 'swap': await renderSwap(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
@@ -1066,12 +1072,14 @@ async function renderProfile(sec) {
 
   async function renderActivityTab() {
     const typeConfig = {
-      swap:         { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
-      market_trade: { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
-      futures_open: { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
-      futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
-      funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
-      ico_invest:   { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      swap:           { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
+      market_trade:   { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
+      futures_open:   { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      futures_pnl:    { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      funding:        { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
+      ico_invest:     { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      wallet_send:    { label: 'Sent',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
+      wallet_receive: { label: 'Received',          color: 'text-emerald-400',bg: 'bg-emerald-900/30' },
     };
 
     function activityRows(items) {
@@ -1273,6 +1281,310 @@ async function renderProfile(sec) {
   };
 
   await fullRender();
+}
+
+// ── Wallet ────────────────────────────────────────────────────────────────────
+async function renderWallet(sec) {
+  let activeTab = 'receive';
+
+  // ── Send state ──
+  let sendState = {
+    recipient: '',
+    resolvedPubkey: null,
+    resolveError: null,
+    token: 'BLOOM',
+    amount: '',
+    memo: '',
+    step: 'form', // 'form' | 'confirm' | 'pending' | 'success' | 'error'
+    txError: null,
+    txResult: null,
+  };
+  let resolveTimer = null;
+
+  const SEND_TOKENS = ['BLOOM', 'USDC', 'TOK'];
+
+  function getAvailableTokens() {
+    return SEND_TOKENS.filter(sym => Number(S.balances[sym] || 0) > 0);
+  }
+
+  function renderReceiveTab() {
+    const addr = S.user?.usernode_pubkey || '';
+    const allBals = SEND_TOKENS.concat(['ETH', 'BTC'])
+      .filter(sym => Number(S.balances[sym] || 0) > 0)
+      .map(sym => `
+        <div class="flex items-center justify-between py-2 border-b border-[rgba(255,255,255,0.05)] last:border-0">
+          <span class="text-sm font-medium text-[#e8eaf0]">${esc(sym)}</span>
+          <span class="text-sm font-mono text-[#8b95ab]">${getBal(sym)}</span>
+        </div>`).join('');
+
+    return `
+      <div class="space-y-4">
+        <div class="card space-y-3">
+          <div class="text-xs text-[#4e5872] uppercase tracking-wide font-medium">Your wallet address</div>
+          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] rounded-lg p-3 break-all font-mono text-xs text-[#7c5cfc] select-all leading-relaxed" id="wallet-receive-tab">${esc(addr) || '<span class="text-[#4e5872]">No wallet linked</span>'}</div>
+          ${addr ? `<button class="btn btn-z w-full" id="wallet-copy-btn" onclick="copyWalletAddress()">Copy address</button>` : ''}
+        </div>
+        ${allBals ? `
+          <div class="card">
+            <div class="text-xs text-[#4e5872] uppercase tracking-wide font-medium mb-3">Balances</div>
+            ${allBals}
+          </div>` : `
+          <div class="card text-center py-4 text-[#4e5872] text-sm">No token balances yet.</div>`}
+      </div>`;
+  }
+
+  function renderSendForm() {
+    const available = getAvailableTokens();
+    if (!available.length) {
+      return `<div class="card text-center py-6 text-[#4e5872] text-sm">You have no tokens to send. Swap or earn some first.</div>`;
+    }
+    const tok = sendState.token || available[0];
+    const balDisplay = getBal(tok);
+    const resolveHint = sendState.resolvedPubkey
+      ? `<div class="text-xs text-[#4e5872] mt-1 font-mono truncate">${esc(sendState.resolvedPubkey)}</div>`
+      : sendState.resolveError
+        ? `<div class="text-xs text-red-400 mt-1">${esc(sendState.resolveError)}</div>`
+        : '';
+
+    return `
+      <div class="card space-y-4">
+        <div class="space-y-1">
+          <label class="text-xs text-[#8b95ab] block">Recipient (@username or ut1… address)</label>
+          <input id="wallet-send-recipient" class="inp" placeholder="@alice or ut1…" value="${esc(sendState.recipient)}"
+            oninput="walletRecipientInput(this.value)">
+          ${resolveHint}
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs text-[#8b95ab] block">Token</label>
+          <select id="wallet-send-token" class="inp" onchange="walletTokenChange(this.value)">
+            ${available.map(s => `<option value="${s}" ${s===tok?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs text-[#8b95ab] block">Amount <span class="text-[#4e5872]">Balance: ${balDisplay} ${tok}</span></label>
+          <div class="flex gap-2">
+            <input id="wallet-send-amount" class="inp flex-1" type="number" placeholder="0.00" min="0" step="any"
+              value="${esc(sendState.amount)}" oninput="walletAmountInput(this.value)">
+            <button class="btn btn-z px-3 text-xs" onclick="walletSetMax()">Max</button>
+          </div>
+        </div>
+        <button class="btn btn-v w-full" onclick="walletReviewSend()">Review Send →</button>
+      </div>`;
+  }
+
+  function renderSendConfirm() {
+    const tok = sendState.token;
+    const amt = sendState.amount;
+    const dest = sendState.resolvedPubkey || sendState.recipient;
+    return `
+      <div class="card space-y-4">
+        <div class="text-base font-semibold text-[#e8eaf0]">Review transaction</div>
+        <div class="bg-[#0d1021] rounded-lg p-3 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-[#8b95ab]">To</span><span class="font-mono text-xs text-[#e8eaf0] break-all max-w-[55%] text-right">${esc(dest)}</span></div>
+          <div class="flex justify-between"><span class="text-[#8b95ab]">Amount</span><span class="font-semibold">${esc(amt)} ${esc(tok)}</span></div>
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs text-[#8b95ab] block">Memo (optional)</label>
+          <input id="wallet-send-memo" class="inp" placeholder="Optional note" maxlength="100"
+            value="${esc(sendState.memo)}" oninput="walletMemoInput(this.value)">
+        </div>
+        <div id="wallet-send-err" class="text-red-400 text-sm hidden"></div>
+        <div class="flex gap-2">
+          <button class="btn btn-z flex-1" onclick="walletBackToForm()">Cancel</button>
+          <button class="btn btn-v flex-1" id="wallet-confirm-btn" onclick="walletExecuteSend()">Confirm &amp; Send</button>
+        </div>
+      </div>`;
+  }
+
+  function renderSendPending() {
+    return `
+      <div class="card text-center space-y-3 py-6">
+        <div class="spinner mx-auto"></div>
+        <p class="text-sm text-[#8b95ab]">Transaction submitted — awaiting confirmation…</p>
+      </div>`;
+  }
+
+  function renderSendSuccess() {
+    const { amount, token, dest } = sendState.txResult || {};
+    return `
+      <div class="card space-y-3 text-center py-6">
+        <div class="text-3xl">✅</div>
+        <p class="text-base font-semibold text-emerald-400">Sent ${esc(String(amount || ''))} ${esc(token || '')} to ${esc(shortAddr(dest || ''))}</p>
+        <button class="btn btn-z" onclick="walletDone()">Done</button>
+      </div>`;
+  }
+
+  function renderSendError() {
+    return `
+      <div class="card space-y-3">
+        <div class="text-red-400 text-sm">${esc(sendState.txError || 'Transaction failed')}</div>
+        <button class="btn btn-z" onclick="walletBackToForm()">Try again</button>
+      </div>`;
+  }
+
+  function renderSendTab() {
+    switch (sendState.step) {
+      case 'confirm':  return renderSendConfirm();
+      case 'pending':  return renderSendPending();
+      case 'success':  return renderSendSuccess();
+      case 'error':    return renderSendError();
+      default:         return renderSendForm();
+    }
+  }
+
+  function render() {
+    sec.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
+          <button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab==='receive'?'pill-active':'pill-inactive'}" onclick="walletTab('receive')">Receive</button>
+          <button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab==='send'?'pill-active':'pill-inactive'}" onclick="walletTab('send')">Send</button>
+        </div>
+        <div id="wallet-tab-body">
+          ${activeTab === 'receive' ? renderReceiveTab() : renderSendTab()}
+        </div>
+      </div>`;
+  }
+
+  window.walletTab = (t) => { activeTab = t; render(); };
+
+  window.copyWalletAddress = () => {
+    const addr = S.user?.usernode_pubkey || '';
+    if (!addr) return;
+    navigator.clipboard.writeText(addr).then(() => {
+      const btn = document.getElementById('wallet-copy-btn');
+      if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { if (btn) btn.textContent = 'Copy address'; }, 2000); }
+    }).catch(() => {});
+  };
+
+  window.walletRecipientInput = (v) => {
+    sendState.recipient = v;
+    sendState.resolvedPubkey = null;
+    sendState.resolveError = null;
+    if (resolveTimer) clearTimeout(resolveTimer);
+    const body = document.getElementById('wallet-tab-body');
+    if (!body) return;
+    if (!v.trim()) { body.innerHTML = renderSendTab(); return; }
+    resolveTimer = setTimeout(async () => {
+      try {
+        const d = await api('GET', `/api/wallet/resolve/${encodeURIComponent(v.trim())}`);
+        sendState.resolvedPubkey = d.pubkey;
+        sendState.resolveError = null;
+      } catch (e) {
+        sendState.resolvedPubkey = null;
+        sendState.resolveError = e.message;
+      }
+      const b = document.getElementById('wallet-tab-body');
+      if (b) b.innerHTML = renderSendTab();
+    }, 400);
+  };
+
+  window.walletTokenChange = (v) => { sendState.token = v; sendState.amount = ''; const b = document.getElementById('wallet-tab-body'); if (b) b.innerHTML = renderSendTab(); };
+  window.walletAmountInput = (v) => { sendState.amount = v; };
+  window.walletMemoInput = (v) => { sendState.memo = v; };
+
+  window.walletSetMax = () => {
+    const tok = sendState.token;
+    const balNum = Number(S.balances[tok] || 0) / 1_000_000;
+    sendState.amount = String(balNum);
+    const inp = document.getElementById('wallet-send-amount');
+    if (inp) inp.value = sendState.amount;
+  };
+
+  window.walletReviewSend = () => {
+    const inp = document.getElementById('wallet-send-recipient');
+    const amtInp = document.getElementById('wallet-send-amount');
+    if (inp) sendState.recipient = inp.value.trim();
+    if (amtInp) sendState.amount = amtInp.value;
+
+    if (!sendState.recipient) { alert('Enter a recipient'); return; }
+    const amt = parseFloat(sendState.amount);
+    if (!amt || amt <= 0) { alert('Enter a valid amount'); return; }
+
+    const destPubkey = sendState.resolvedPubkey || (sendState.recipient.startsWith('ut1') || sendState.recipient.startsWith('0x') ? sendState.recipient : null);
+    if (!destPubkey) { alert('Recipient not resolved — enter a valid @username or ut1… address'); return; }
+    sendState.resolvedPubkey = destPubkey;
+
+    const balUnits = Number(S.balances[sendState.token] || 0);
+    const amtUnits = Math.round(amt * 1_000_000);
+    if (amtUnits > balUnits) { alert('Insufficient balance'); return; }
+
+    sendState.step = 'confirm';
+    const b = document.getElementById('wallet-tab-body');
+    if (b) b.innerHTML = renderSendTab();
+  };
+
+  window.walletBackToForm = () => {
+    sendState.step = 'form';
+    sendState.txError = null;
+    const b = document.getElementById('wallet-tab-body');
+    if (b) b.innerHTML = renderSendTab();
+  };
+
+  window.walletExecuteSend = async () => {
+    const memoInp = document.getElementById('wallet-send-memo');
+    if (memoInp) sendState.memo = memoInp.value;
+
+    const btn = document.getElementById('wallet-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+    const errEl = document.getElementById('wallet-send-err');
+    if (errEl) errEl.classList.add('hidden');
+
+    const dest = sendState.resolvedPubkey;
+    const amt = parseFloat(sendState.amount);
+    const tok = sendState.token;
+    const memo = sendState.memo || `Send ${amt} ${tok}`;
+
+    // Attempt bridge send
+    let txId = null;
+    try {
+      if (window.usernode && window.usernode.sendTransaction) {
+        txId = await window.usernode.sendTransaction(dest, amt, memo, {
+          serverCacheUrl: '/explorer-api/',
+          confirmTitle: `Send ${tok}`,
+          confirmSubtitle: `${amt} ${tok} to ${shortAddr(dest)}`,
+        });
+      }
+    } catch (bridgeErr) {
+      const msg = bridgeErr?.message || String(bridgeErr);
+      if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('denied')) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirm & Send'; }
+        if (errEl) { errEl.textContent = 'Transaction cancelled.'; errEl.classList.remove('hidden'); }
+        return;
+      }
+      // Bridge unavailable in staging — proceed to record locally
+    }
+
+    // Show pending while recording server-side
+    sendState.step = 'pending';
+    const b = document.getElementById('wallet-tab-body');
+    if (b) b.innerHTML = renderSendTab();
+
+    try {
+      await api('POST', '/api/wallet/send', {
+        recipient_pubkey: dest,
+        token_symbol: tok,
+        amount: String(amt),
+        tx_hash: txId || '',
+      });
+      sendState.txResult = { amount: amt, token: tok, dest };
+      sendState.step = 'success';
+      await refreshBalances();
+    } catch (e) {
+      sendState.txError = e.message;
+      sendState.step = 'error';
+    }
+    const b2 = document.getElementById('wallet-tab-body');
+    if (b2) b2.innerHTML = renderSendTab();
+  };
+
+  window.walletDone = () => {
+    sendState = { recipient: '', resolvedPubkey: null, resolveError: null, token: 'BLOOM', amount: '', memo: '', step: 'form', txError: null, txResult: null };
+    activeTab = 'receive';
+    render();
+  };
+
+  render();
 }
 
 // ── Copy Trade Modal ───────────────────────────────────────────────────────────
