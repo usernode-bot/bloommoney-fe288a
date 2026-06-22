@@ -13,6 +13,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
+const SWAP_GAS = 1 * UNITS;      // 1 BLOOM gas fee per swap
+const FUTURES_GAS = 1 * UNITS;   // 1 BLOOM gas fee per futures open/close
 // Post-to-Earn: points credited for each successful top-level post to the feed.
 const POST_REWARD_POINTS = 5;
 
@@ -264,7 +266,7 @@ async function withinBasicDailyCap(userId, tier) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM transactions
      WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
-       AND type IN ('swap','futures_open','market_trade','ico_invest','nft_buy')`,
+       AND type IN ('swap','swap_gas','futures_open','futures_gas','market_trade','ico_invest','nft_buy')`,
     [userId]
   );
   return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
@@ -797,22 +799,22 @@ app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
 
     await client.query('BEGIN');
     const { rows: [senderBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='TOK' FOR UPDATE",
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
       [req.user.id]
     );
     if (!senderBal || Number(senderBal.balance) < amount)
-      throw new Error('Insufficient TOK balance');
+      throw new Error('Insufficient BLOOM balance');
 
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='TOK'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
       [amount, req.user.id]
     );
     await client.query(
-      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'TOK',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
+      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'BLOOM',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
       [post.user_id, amount]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','TOK',$2,$3)",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','BLOOM',$2,$3)",
       [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`]
     );
     await client.query('COMMIT');
@@ -1278,12 +1280,27 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     const toUnitsAmt = Math.floor(fromUnitsAmt * rate * 0.997);
 
     await client.query('BEGIN');
-    const { rows: [fromBal] } = await client.query(
-      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
-      [req.user.id, from_token]
+
+    // Lock BLOOM row first for the gas fee (must be atomic with the swap).
+    // When swapping BLOOM→X, bloomRequired covers both the swap amount and gas.
+    const { rows: [bloomGasBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
+      [req.user.id]
     );
-    if (!fromBal || Number(fromBal.balance) < fromUnitsAmt)
-      throw new Error('Insufficient balance');
+    const bloomAvail = Number(bloomGasBal?.balance || 0);
+    const bloomRequired = from_token === 'BLOOM' ? fromUnitsAmt + SWAP_GAS : SWAP_GAS;
+    if (bloomAvail < bloomRequired)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+
+    // For non-BLOOM source tokens, also lock and verify the source row.
+    if (from_token !== 'BLOOM') {
+      const { rows: [fromBal] } = await client.query(
+        'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+        [req.user.id, from_token]
+      );
+      if (!fromBal || Number(fromBal.balance) < fromUnitsAmt)
+        throw new Error('Insufficient balance');
+    }
 
     await client.query(
       'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
@@ -1293,6 +1310,11 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [toUnitsAmt, req.user.id, to_token]
     );
+    // Deduct BLOOM gas fee
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [SWAP_GAS, req.user.id]
+    );
     await client.query(
       'INSERT INTO defi_swaps(user_id,from_token,to_token,from_amount,to_amount,rate) VALUES($1,$2,$3,$4,$5,$6)',
       [req.user.id, from_token, to_token, fromUnitsAmt, toUnitsAmt, rate]
@@ -1300,6 +1322,10 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap',$2,$3,$4)",
       [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap_gas','BLOOM',$2,'Swap gas fee')",
+      [req.user.id, -SWAP_GAS]
     );
     await client.query('COMMIT');
     res.json({ ok: true, to_amount: fromUnits(toUnitsAmt), to_token });
@@ -1757,6 +1783,13 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const marginUnits = Math.ceil(qty * markPrice * UNITS / lev);
     const liqPrice = side === 'long' ? markPrice * (1 - 0.9 / lev) : markPrice * (1 + 0.9 / lev);
 
+    // BLOOM gas fee check — applies to both live and paper modes.
+    const { rows: [bloomOpenBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomOpenBal || Number(bloomOpenBal.balance) < FUTURES_GAS)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+
     if (mode === 'live') {
       const { rows: [bal] } = await client.query(
         "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
@@ -1769,6 +1802,12 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
     }
 
+    // Deduct BLOOM gas fee
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [FUTURES_GAS, req.user.id]
+    );
+
     const { rows: [pos] } = await client.query(`
       INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
@@ -1777,6 +1816,10 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
       [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures open gas fee')",
+      [req.user.id, -FUTURES_GAS]
     );
     await client.query('COMMIT');
     res.json({ position: pos });
@@ -1797,6 +1840,18 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     if (!pos) throw new Error('Position not found');
     const pnl = Math.round((pos.mark_price - parseFloat(pos.entry_price)) * parseFloat(pos.quantity) * (pos.side === 'long' ? 1 : -1) * UNITS);
     const returnAmt = Math.max(0, Number(pos.margin) + pnl);
+
+    // BLOOM gas fee for closing (applies to both live and paper modes).
+    const { rows: [bloomCloseBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomCloseBal || Number(bloomCloseBal.balance) < FUTURES_GAS)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [FUTURES_GAS, req.user.id]
+    );
+
     await client.query("UPDATE futures_positions SET status='closed', realized_pnl=$1, closed_at=NOW() WHERE id=$2", [pnl, pos.id]);
     if (pos.mode === 'live') {
       await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
@@ -1804,6 +1859,10 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance+$1 WHERE user_id=$2', [returnAmt, req.user.id]);
     }
     await client.query('UPDATE futures_markets SET open_interest=GREATEST(0, open_interest-$1) WHERE id=$2', [pos.margin, pos.market_id]);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
+      [req.user.id, -FUTURES_GAS]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, pnl: fromUnits(pnl), returned: fromUnits(returnAmt) });
   } catch (e) {
@@ -4422,6 +4481,70 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
+    // Seed 17 additional NFT collections (ids 9004-9020) so there are 20 total,
+    // each with 2-3 NFTs, one active listing, mint history, and (on ~half) a
+    // sale, so /api/nft-collections renders item_count, floor_price, and volume.
+    // Deterministic ids keep the block idempotent across container rebuilds.
+    const demoCollections = [
+      { id: 9004, name: 'Pixel Pioneers',        hex: 'ec4899', creator: 'staging-alice', blurb: 'Retro pixel-art trailblazers of the chain.' },
+      { id: 9005, name: 'Neon Degens',           hex: '22d3ee', creator: 'staging-bob',   blurb: 'High-octane neon traders who never sleep.' },
+      { id: 9006, name: 'Moon Apes',             hex: 'a3e635', creator: 'staging-carol', blurb: 'Apes bound for the moon, one banana at a time.' },
+      { id: 9007, name: 'Diamond Hands Club',    hex: '38bdf8', creator: 'staging-dave',  blurb: 'For holders who never let go.' },
+      { id: 9008, name: 'Crypto Kitties Reborn', hex: 'f472b6', creator: 'staging-eve',   blurb: 'The classic collectible cats, reimagined.' },
+      { id: 9009, name: 'DeFi Legends',          hex: '34d399', creator: 'staging-alice', blurb: 'Portraits of the protocols that built DeFi.' },
+      { id: 9010, name: 'Bloom Botanica',        hex: '10b981', creator: 'staging-carol', blurb: 'Rare on-chain flora from the Bloom garden.' },
+      { id: 9011, name: 'Genesis Whales',        hex: '6366f1', creator: 'staging-bob',   blurb: 'The biggest bags from the genesis era.' },
+      { id: 9012, name: 'Cyber Samurai',         hex: 'ef4444', creator: 'staging-dave',  blurb: 'Blade-wielding warriors of the metaverse.' },
+      { id: 9013, name: 'Vapor Dreams',          hex: '8b5cf6', creator: 'staging-eve',   blurb: 'Vaporwave aesthetics minted forever.' },
+      { id: 9014, name: 'Golden Bulls',          hex: 'f59e0b', creator: 'staging-alice', blurb: 'Gilded bulls commemorating every green candle.' },
+      { id: 9015, name: 'Frosty Penguins',       hex: '60a5fa', creator: 'staging-bob',   blurb: 'Chill penguins waddling across the blockchain.' },
+      { id: 9016, name: 'Solar Flares',          hex: 'fb923c', creator: 'staging-carol', blurb: 'Radiant bursts of cosmic energy.' },
+      { id: 9017, name: 'Phantom Hackers',       hex: '14b8a6', creator: 'staging-dave',  blurb: 'Shadowy coders of the dark forest.' },
+      { id: 9018, name: 'Retro Arcade',          hex: 'e879f9', creator: 'staging-eve',   blurb: 'Coin-op nostalgia, tokenized.' },
+      { id: 9019, name: 'Astro Voyagers',        hex: '818cf8', creator: 'staging-alice', blurb: 'Explorers charting the interstellar mainnet.' },
+      { id: 9020, name: 'Emerald Enclave',       hex: '059669', creator: 'staging-carol', blurb: 'A secret society of jade-clad collectors.' },
+    ];
+    const demoOwners = [
+      { id: 9001, username: 'staging-alice' },
+      { id: 9002, username: 'staging-bob' },
+      { id: 9003, username: 'staging-carol' },
+      { id: 9004, username: 'staging-dave' },
+      { id: 9005, username: 'staging-eve' },
+    ];
+    const demoRarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+    const colRows = [], nftRows = [], listingRows = [], transferRows = [];
+    let demoNftId = 9100, demoListingId = 9100, demoMintTxId = 9200, demoSaleTxId = 9400;
+    demoCollections.forEach((c, ci) => {
+      const slug = c.name.replace(/ /g, '+');
+      const banner = `https://placehold.co/1200x300/${c.hex}/ffffff?text=${slug}`;
+      colRows.push(`(${c.id},'${c.name}','Staging demo collection — ${c.blurb}','${banner}','${c.creator}')`);
+      const count = 2 + (ci % 2); // 2 or 3 NFTs per collection
+      const creator = demoOwners[ci % demoOwners.length];
+      let firstNftId = null;
+      for (let j = 0; j < count; j++) {
+        const id = demoNftId++;
+        if (firstNftId === null) firstNftId = id;
+        const owner = demoOwners[(ci + j) % demoOwners.length];
+        const rarity = demoRarities[(ci + j) % demoRarities.length];
+        const royalty = 300 + ((ci + j) % 5) * 100;
+        const img = `https://placehold.co/400x400/${c.hex}/ffffff?text=${c.name.split(' ')[0]}+${j + 1}`;
+        nftRows.push(`(${id},${owner.id},'${owner.username}',${creator.id},'${creator.username}','${c.name} #${j + 1}','Staging demo NFT — ${c.blurb}','${img}','BLOOM-S${id}','${c.name}',${royalty},'${rarity}')`);
+        transferRows.push(`(${demoMintTxId++},${id},NULL,NULL,${owner.id},'${owner.username}','mint',NULL,'BLOOM-TX-S${id}')`);
+      }
+      const seller = demoOwners[ci % demoOwners.length];
+      const price = (25 + ci * 7) * 1000000; // USDC, 6 decimals
+      listingRows.push(`(${demoListingId++},${firstNftId},${seller.id},'${seller.username}',${price},'active',NOW()+INTERVAL '14 days')`);
+      if (ci % 2 === 0) { // sale history on half the collections so volume_usdc > 0
+        const buyer = demoOwners[(ci + 2) % demoOwners.length];
+        const salePrice = (40 + ci * 9) * 1000000;
+        transferRows.push(`(${demoSaleTxId++},${firstNftId},${seller.id},'${seller.username}',${buyer.id},'${buyer.username}','sale',${salePrice},'BLOOM-TX-SALE-${firstNftId}')`);
+      }
+    });
+    await pool.query(`INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES ${colRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES ${nftRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_listings(id,nft_id,seller_user_id,seller_username,price_usdc,status,expires_at) VALUES ${listingRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES ${transferRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+
     // Seed auto-generated crypto portfolios for staging users (8-coin pool only)
     await pool.query(`
       INSERT INTO investment_holdings(id,user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES
@@ -4509,17 +4632,23 @@ async function start() {
       if (!exist) {
         await pool.query(`
           INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
-            (900201, 9001, 'swap',         'USDC', -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
-            (900202, 9001, 'swap',         'USDC',  -75000000, 'Staging demo swap — Swap USDC to ETH'),
-            (900203, 9001, 'swap',         'BLOOM', -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
-            (900204, 9001, 'swap',         'USDC', -200000000, 'Staging demo swap — Swap USDC to BTC'),
-            (900205, 9001, 'swap',         'ETH',     -500000, 'Staging demo swap — Swap ETH to USDC'),
-            (900206, 9004, 'futures_open', 'USDC', -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
-            (900207, 9004, 'futures_pnl',  'USDC',  72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
-            (900208, 9004, 'futures_open', 'USDC', -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
-            (900209, 9003, 'market_trade', 'USDC',  -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
-            (900210, 9003, 'market_trade', 'USDC',  -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
-            (900211, 9003, 'ico_invest',   'USDC', -100000000, 'Staging demo ICO — Invested in SDC ICO')
+            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
+            (900202, 9001, 'swap',         'USDC',   -75000000, 'Staging demo swap — Swap USDC to ETH'),
+            (900203, 9001, 'swap',         'BLOOM',  -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
+            (900204, 9001, 'swap',         'USDC',  -200000000, 'Staging demo swap — Swap USDC to BTC'),
+            (900205, 9001, 'swap',         'ETH',      -500000, 'Staging demo swap — Swap ETH to USDC'),
+            (900206, 9004, 'futures_open', 'USDC',  -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
+            (900207, 9004, 'futures_pnl',  'USDC',   72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
+            (900208, 9004, 'futures_open', 'USDC',  -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
+            (900209, 9003, 'market_trade', 'USDC',   -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
+            (900210, 9003, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
+            (900211, 9003, 'ico_invest',   'USDC',  -100000000, 'Staging demo ICO — Invested in SDC ICO'),
+            (900212, 9001, 'tip',          'BLOOM',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002'),
+            (900213, 9002, 'tip',          'BLOOM',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003'),
+            (900214, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900215, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900216, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures open gas fee'),
+            (900217, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures close gas fee')
           ON CONFLICT(id) DO NOTHING
         `);
       }
