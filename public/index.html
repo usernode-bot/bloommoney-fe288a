@@ -162,6 +162,7 @@
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
+      <button class="nav-item" data-view="wallet">💳 Wallet</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
@@ -240,6 +241,9 @@
 
       <!-- Messages -->
       <section id="section-messages" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Wallet -->
+      <section id="section-wallet" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
     </main>
   </div>
@@ -479,6 +483,7 @@ const VIEW_SECTION = {
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
+  wallet: 'section-wallet',
   messages: 'section-messages',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
@@ -520,6 +525,7 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
+      case 'wallet': await renderWallet(sec); break;
       case 'trade': case 'swap': await renderSwap(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
@@ -598,6 +604,10 @@ function showApp() {
   clearInterval(_unreadInterval);
   _unreadInterval = setInterval(refreshUnreadBadge, 20000);
   navigate(S.view);
+  if (new URLSearchParams(location.search).get('demo') === '1') {
+    const _wSec = document.getElementById('section-wallet');
+    if (_wSec) renderWallet(_wSec).catch(() => {});
+  }
 }
 
 // ── Messaging unread badge ─────────────────────────────────────────────────────
@@ -1048,6 +1058,44 @@ window.submitTip = async () => {
   }
 };
 
+// ── Shared holding-row renderer (used by Profile portfolio tab and Wallet) ─────
+function renderHoldingRows(holdings, prices) {
+  if (!holdings.length) {
+    return `<div class="card text-center py-6 text-[#4e5872] text-sm">Portfolio not yet generated.</div>`;
+  }
+  return `<div class="space-y-3">${holdings.map(h => {
+    const qty = parseFloat(h.quantity);
+    const buyPrice = parseFloat(h.purchase_price);
+    const livePrice = prices[h.ticker?.toUpperCase()] ?? null;
+    const costBasis = qty * buyPrice;
+    let currentValue = null, pnl = null, pnlPct = null;
+    if (livePrice != null) {
+      currentValue = qty * livePrice;
+      pnl = currentValue - costBasis;
+      pnlPct = costBasis > 0 ? (pnl / costBasis * 100) : 0;
+    }
+    const pnlCls = (pnl != null && pnl >= 0) ? 'text-emerald-400' : 'text-red-400';
+    const qtyStr = qty < 1 ? qty.toFixed(6) : qty < 10 ? qty.toFixed(4) : qty.toFixed(2);
+    return `<div class="card space-y-2">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="font-semibold text-sm">${esc(h.asset_name)}</span>
+        ${h.ticker ? `<span class="text-[#8b95ab] font-mono text-xs bg-[#1c2236] px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div><div class="text-[#8b95ab]">Quantity</div><div class="font-mono">${qtyStr}</div></div>
+        <div><div class="text-[#8b95ab]">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
+        <div><div class="text-[#8b95ab]">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-[#4e5872]">—</span>'}</div></div>
+        <div>
+          <div class="text-[#8b95ab]">Value / P&amp;L</div>
+          ${currentValue != null
+            ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
+            : `<div class="text-[#4e5872]">—</div>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 async function renderProfile(sec) {
   const username = S.profileUser || S.user?.username;
@@ -1094,54 +1142,23 @@ async function renderProfile(sec) {
     const prices = data.prices || {};
 
     let totalValue = 0, totalCost = 0;
-    const rows = holdings.map(h => {
+    for (const h of holdings) {
       const qty = parseFloat(h.quantity);
-      const buyPrice = parseFloat(h.purchase_price);
-      const livePrice = prices[h.ticker?.toUpperCase()] ?? null;
-      const costBasis = qty * buyPrice;
-      let currentValue = null, pnl = null, pnlPct = null;
-      if (livePrice != null) {
-        currentValue = qty * livePrice;
-        pnl = currentValue - costBasis;
-        pnlPct = costBasis > 0 ? (pnl / costBasis * 100) : 0;
-        totalValue += currentValue;
-        totalCost += costBasis;
-      }
-      const pnlCls = (pnl != null && pnl >= 0) ? 'text-emerald-400' : 'text-red-400';
-      const qtyStr = qty < 1 ? qty.toFixed(6) : qty < 10 ? qty.toFixed(4) : qty.toFixed(2);
-      return `
-        <div class="card space-y-2">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="font-semibold text-sm">${esc(h.asset_name)}</span>
-            ${h.ticker ? `<span class="text-[#8b95ab] font-mono text-xs bg-[#1c2236] px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
-          </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div><div class="text-[#8b95ab]">Quantity</div><div class="font-mono">${qtyStr}</div></div>
-            <div><div class="text-[#8b95ab]">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
-            <div><div class="text-[#8b95ab]">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-[#4e5872]">—</span>'}</div></div>
-            <div>
-              <div class="text-[#8b95ab]">Value / P&amp;L</div>
-              ${currentValue != null
-                ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
-                : `<div class="text-[#4e5872]">—</div>`}
-            </div>
-          </div>
-        </div>`;
-    });
-
+      const lp = prices[h.ticker?.toUpperCase()] ?? null;
+      if (lp != null) { totalValue += qty * lp; totalCost += qty * parseFloat(h.purchase_price); }
+    }
     const totalPnl = totalValue - totalCost;
     const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
     const totalPnlCls = totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
 
     return `
+      ${isMe ? `<button class="btn btn-z text-xs mb-3" onclick="navigate('wallet')">💳 Open Wallet →</button>` : ''}
       <div class="card bg-[#161b2a]/80 space-y-1">
         <div class="text-xs text-[#8b95ab]">Portfolio value</div>
         <div class="text-2xl font-bold text-[#7c5cfc]">$${totalValue.toFixed(2)}</div>
         ${totalCost > 0 ? `<div class="text-sm ${totalPnlCls} font-mono">${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} (${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%) overall P&L</div>` : ''}
       </div>
-      ${holdings.length
-        ? `<div class="space-y-3">${rows.join('')}</div>`
-        : `<div class="card text-center py-6 text-[#4e5872] text-sm">Portfolio not yet generated.</div>`}`;
+      ${renderHoldingRows(holdings, prices)}`;
   }
 
   async function renderActivityTab() {
@@ -1152,6 +1169,8 @@ async function renderProfile(sec) {
       futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
       funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
       ico_invest:   { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      transfer_out: { label: 'Transfer Out',      color: 'text-red-400',    bg: 'bg-red-900/30' },
+      transfer_in:  { label: 'Transfer In',       color: 'text-emerald-400',bg: 'bg-green-900/30' },
     };
 
     function activityRows(items) {
@@ -2140,6 +2159,244 @@ async function renderICO(sec) {
     } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
   };
   await load();
+}
+
+// ── Wallet ────────────────────────────────────────────────────────────────────
+async function renderWallet(sec) {
+  if (!Object.keys(S.prices).length) {
+    try {
+      const d = await api('GET', '/api/prices');
+      d.prices.forEach(p => { S.prices[p.symbol] = parseFloat(p.price_usd); });
+    } catch {}
+  }
+
+  let walletBals = {}, holdings = [], holdingPrices = {}, activities = [];
+  try {
+    const [balRes, portRes, actRes] = await Promise.all([
+      api('GET', '/api/balances'),
+      api('GET', `/explorer-api/portfolio/${encodeURIComponent(S.user.username)}`),
+      api('GET', '/api/activity?limit=5'),
+    ]);
+    (balRes.balances || []).forEach(b => {
+      walletBals[b.token_symbol] = Number(b.balance);
+      S.balances[b.token_symbol] = b.balance;
+    });
+    holdings = portRes.holdings || [];
+    holdingPrices = portRes.prices || {};
+    Object.assign(S.prices, holdingPrices);
+    activities = actRes.activities || [];
+  } catch (e) { sec.innerHTML = err(e.message); return; }
+
+  const WALLET_TOKENS = ['USDC','BLOOM','ETH','BTC','TOK'];
+  const TOKEN_META = {
+    USDC:  { sym: '$',  color: '#34d399', bg: 'rgba(52,211,153,0.15)'  },
+    BLOOM: { sym: '✿', color: '#a78bfa', bg: 'rgba(167,139,250,0.15)' },
+    ETH:   { sym: 'Ξ',  color: '#38bdf8', bg: 'rgba(56,189,248,0.15)'  },
+    BTC:   { sym: '₿',  color: '#fbbf24', bg: 'rgba(251,191,36,0.15)'  },
+    TOK:   { sym: 'T',  color: '#f472b6', bg: 'rgba(244,114,182,0.15)' },
+  };
+
+  let walletUSD = 0;
+  const tokUnpriced = [];
+  for (const sym of WALLET_TOKENS) {
+    const bal = (walletBals[sym] || 0) / U;
+    const price = S.prices[sym];
+    if (price != null) walletUSD += bal * price;
+    else if (walletBals[sym] > 0) tokUnpriced.push(sym);
+  }
+
+  let holdingsUSD = 0, holdingsCost = 0;
+  for (const h of holdings) {
+    const qty = parseFloat(h.quantity);
+    const lp = holdingPrices[h.ticker?.toUpperCase()];
+    if (lp != null) { holdingsUSD += qty * lp; holdingsCost += qty * parseFloat(h.purchase_price); }
+  }
+  const totalUSD = walletUSD + holdingsUSD;
+  const holdingsPnL = holdingsUSD - holdingsCost;
+  const holdingsPnLPct = holdingsCost > 0 ? (holdingsPnL / holdingsCost * 100) : 0;
+  const pnlCls = holdingsPnL >= 0 ? 'text-emerald-400' : 'text-red-400';
+  const exclNote = tokUnpriced.length ? ` <span class="text-[0.6rem] text-[#4e5872]">(excl. ${tokUnpriced.join(', ')})</span>` : '';
+
+  const balCardsHtml = WALLET_TOKENS.map(sym => {
+    const m = TOKEN_META[sym];
+    const raw = walletBals[sym] || 0;
+    const n = raw / U;
+    const balStr = sym === 'ETH' ? n.toFixed(6) : sym === 'BTC' ? n.toFixed(8) : n.toFixed(2);
+    const price = S.prices[sym];
+    const usdVal = price != null ? `$${(n * price).toFixed(2)}` : '—';
+    return `<div class="wallet-balance-card card text-center py-3 px-2">
+      <div style="width:34px;height:34px;border-radius:50%;background:${m.bg};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:${m.color};margin:0 auto 5px">${m.sym}</div>
+      <div class="text-xs text-[#8b95ab]">${sym}</div>
+      <div class="font-mono font-semibold text-sm mt-0.5">${balStr}</div>
+      <div class="text-xs text-[#4e5872] mt-0.5">${usdVal}</div>
+    </div>`;
+  }).join('');
+
+  const ACT_CFG = {
+    swap:         { label: 'Swap',          color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
+    market_trade: { label: 'Prediction',    color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
+    futures_open: { label: 'Futures',       color: 'text-orange-400', bg: 'bg-orange-900/30' },
+    futures_pnl:  { label: 'Futures Close', color: 'text-orange-400', bg: 'bg-orange-900/30' },
+    funding:      { label: 'Funding',       color: 'text-amber-400',  bg: 'bg-amber-900/30' },
+    ico_invest:   { label: 'ICO',           color: 'text-green-400',  bg: 'bg-green-900/30' },
+    transfer_out: { label: 'Transfer Out',  color: 'text-red-400',    bg: 'bg-red-900/30' },
+    transfer_in:  { label: 'Transfer In',   color: 'text-emerald-400',bg: 'bg-green-900/30' },
+  };
+  const actRowsHtml = activities.slice(0, 5).map(a => {
+    const cfg = ACT_CFG[a.type] || { label: esc(a.type), color: 'text-[#8b95ab]', bg: 'bg-[#1c2236]/60' };
+    const rawAmt = Number(a.amount);
+    const sign = rawAmt >= 0 ? '+' : '-';
+    const amtCls = rawAmt >= 0 ? 'text-emerald-400' : 'text-red-400';
+    return `<div class="flex items-center justify-between gap-2 py-2 border-b border-[rgba(255,255,255,0.04)] last:border-0">
+      <div class="flex items-center gap-2 min-w-0 flex-1">
+        <span class="text-xs font-semibold px-1.5 py-0.5 rounded shrink-0 ${cfg.color} ${cfg.bg}">${cfg.label}</span>
+        <span class="text-xs text-[#8b95ab] truncate">${esc(a.description || '')}</span>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="font-mono text-xs ${amtCls}">${sign}${fmtAmt(a.token_symbol || 'USDC', Math.abs(rawAmt))}</div>
+        <div class="text-[0.65rem] text-[#4e5872]">${tsAgo(a.created_at)} ago</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const overviewHtml = `
+    <div class="card bg-gradient-to-br from-[#161b2a] to-[#1c2236] space-y-1">
+      <div class="text-xs text-[#8b95ab] font-medium uppercase tracking-wide">Total Portfolio Value</div>
+      <div class="text-3xl font-bold text-[#7c5cfc]">$${totalUSD.toFixed(2)}${exclNote}</div>
+      ${holdingsCost > 0 ? `<div class="text-sm ${pnlCls} font-mono">${holdingsPnL >= 0 ? '+' : ''}$${holdingsPnL.toFixed(2)} (${holdingsPnL >= 0 ? '+' : ''}${holdingsPnLPct.toFixed(1)}%) holdings P&amp;L</div>` : ''}
+      <div class="flex gap-2 mt-3 pt-3 border-t border-[rgba(255,255,255,0.06)]">
+        <button class="btn btn-v text-sm px-4 py-1.5" onclick="switchWalletTab('send')">↑ Send</button>
+        <button class="btn btn-z text-sm px-4 py-1.5" onclick="switchWalletTab('receive')">↓ Receive</button>
+      </div>
+    </div>
+    <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">${balCardsHtml}</div>
+    <div>
+      <h3 class="font-semibold text-sm mb-2 text-[#e8eaf0]">Holdings</h3>
+      ${renderHoldingRows(holdings, holdingPrices)}
+    </div>
+    ${activities.length ? `<div class="card">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-semibold text-sm text-[#e8eaf0]">Recent Activity</h3>
+        <button class="text-xs text-[#7c5cfc] hover:underline" onclick="navigate('profile')">See all →</button>
+      </div>
+      ${actRowsHtml}
+    </div>` : ''}`;
+
+  const sendHtml = `
+    <div class="card space-y-4">
+      <h3 class="font-semibold text-[#e8eaf0]">Send Tokens</h3>
+      <form id="wallet-send-form" onsubmit="event.preventDefault();execWalletSend()" class="space-y-3">
+        <div>
+          <label class="text-sm text-[#8b95ab] block mb-1.5">Token</label>
+          <select id="ws-token" class="inp" onchange="updateSendBalanceHint()">
+            ${WALLET_TOKENS.map(t => `<option value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm text-[#8b95ab] block mb-1.5">Recipient username</label>
+          <input id="ws-recipient" class="inp" placeholder="@username" maxlength="80">
+        </div>
+        <div>
+          <label class="text-sm text-[#8b95ab] block mb-1.5">Amount</label>
+          <input id="ws-amount" type="number" class="inp" placeholder="0.00" min="0" step="any" oninput="updateSendBalanceHint()">
+          <div id="ws-balance-hint" class="text-xs text-[#4e5872] mt-1">Balance: —</div>
+        </div>
+        <div id="ws-msg" class="text-sm min-h-[1.25rem]"></div>
+        <button type="submit" class="btn btn-v w-full">Send →</button>
+      </form>
+    </div>`;
+
+  const addr = S.user?.usernode_pubkey || '';
+  const receiveHtml = `
+    <div class="card space-y-4">
+      <h3 class="font-semibold text-[#e8eaf0]">Receive Tokens</h3>
+      <p class="text-sm text-[#8b95ab]">Share your username or wallet address to receive in-app token transfers.</p>
+      <div>
+        <div class="text-xs text-[#8b95ab] mb-1">Your username</div>
+        <div class="bg-[#0d1021] border border-[rgba(255,255,255,0.08)] rounded-lg p-3 font-semibold text-[#e8eaf0] select-all">@${esc(S.user?.username || '')}</div>
+      </div>
+      ${addr
+        ? `<div>
+            <div class="text-xs text-[#8b95ab] mb-1">Wallet address</div>
+            <div id="wallet-receive-addr" class="bg-[#0d1021] border border-[rgba(255,255,255,0.08)] rounded-lg p-3 font-mono text-xs text-[#e8eaf0] break-all select-all">${esc(addr)}</div>
+            <button class="btn btn-z w-full mt-2" id="ws-copy-btn" onclick="copyWalletAddr('${esc(addr)}')">Copy address</button>
+          </div>`
+        : `<div id="wallet-receive-addr" class="text-[#4e5872] text-sm">No wallet connected.</div>`}
+    </div>`;
+
+  sec.innerHTML = `
+    <div class="space-y-4">
+      <div class="flex gap-2">
+        <button id="wt-overview" class="text-sm px-4 py-1 font-medium transition-colors pill-active" onclick="switchWalletTab('overview')">Overview</button>
+        <button id="wt-send" class="text-sm px-4 py-1 font-medium transition-colors pill-inactive" onclick="switchWalletTab('send')">Send</button>
+        <button id="wt-receive" class="text-sm px-4 py-1 font-medium transition-colors pill-inactive" onclick="switchWalletTab('receive')">Receive</button>
+      </div>
+      <div id="wallet-overview-pane" class="space-y-4">${overviewHtml}</div>
+      <div id="wallet-send-pane" class="space-y-4 hidden">${sendHtml}</div>
+      <div id="wallet-receive-pane" class="space-y-4 hidden">${receiveHtml}</div>
+    </div>`;
+
+  window.switchWalletTab = (t) => {
+    ['overview','send','receive'].forEach(tab => {
+      const pane = document.getElementById(`wallet-${tab}-pane`);
+      const btn = document.getElementById(`wt-${tab}`);
+      if (pane) pane.classList.toggle('hidden', tab !== t);
+      if (btn) btn.className = `text-sm px-4 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+    });
+    if (t === 'send') updateSendBalanceHint();
+  };
+
+  window.updateSendBalanceHint = () => {
+    const sym = document.getElementById('ws-token')?.value;
+    const hint = document.getElementById('ws-balance-hint');
+    if (hint && sym) hint.textContent = `Balance: ${getBal(sym)} ${sym}`;
+  };
+
+  window.execWalletSend = async () => {
+    const token = document.getElementById('ws-token')?.value;
+    const recipient = (document.getElementById('ws-recipient')?.value || '').replace(/^@/, '').trim();
+    const amount = document.getElementById('ws-amount')?.value;
+    const msg = document.getElementById('ws-msg');
+    if (!msg) return;
+    msg.textContent = '';
+    msg.className = 'text-sm min-h-[1.25rem]';
+    if (!recipient) { msg.className += ' text-red-400'; msg.textContent = 'Recipient username required.'; return; }
+    if (!amount || parseFloat(amount) <= 0) { msg.className += ' text-red-400'; msg.textContent = 'Enter a valid amount.'; return; }
+    const btn = document.querySelector('#wallet-send-form button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    try {
+      const result = await api('POST', '/api/wallet/transfer', { token, to_username: recipient, amount });
+      msg.className = 'text-sm min-h-[1.25rem] text-emerald-400';
+      msg.textContent = `✓ Sent ${amount} ${token} to @${result.to_username}`;
+      await refreshBalances();
+      document.getElementById('ws-recipient').value = '';
+      document.getElementById('ws-amount').value = '';
+      updateSendBalanceHint();
+      setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
+    } catch (e) {
+      msg.className = 'text-sm min-h-[1.25rem] text-red-400';
+      msg.textContent = e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Send →'; }
+    }
+  };
+
+  window.copyWalletAddr = async (addrArg) => {
+    const btn = document.getElementById('ws-copy-btn');
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(addrArg);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = addrArg; ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      if (btn) { btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = 'Copy address'; }, 2000); }
+    } catch { if (btn) btn.textContent = 'Copy failed'; }
+  };
+
+  updateSendBalanceHint();
 }
 
 // ── Earn (composite: Stake / Liquidity / ICO) ───────────────────────────────────

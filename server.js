@@ -793,6 +793,58 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/wallet/transfer', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { token, to_username, amount: amountStr } = req.body;
+    const VALID_TOKENS = ['USDC','BLOOM','ETH','BTC','TOK'];
+    if (!VALID_TOKENS.includes(token)) return res.status(400).json({ error: 'Invalid token' });
+    if (!validStr(to_username, 80)) return res.status(400).json({ error: 'Invalid recipient username' });
+    if (!parseAmount(amountStr)) return res.status(400).json({ error: 'Invalid amount' });
+    const amountUnits = toUnits(amountStr);
+    if (amountUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const cleanUsername = String(to_username).replace(/^@/, '').trim().toLowerCase();
+    const { rows: [recipient] } = await pool.query(
+      'SELECT user_id, username FROM users WHERE LOWER(username)=$1', [cleanUsername]
+    );
+    if (!recipient) return res.status(404).json({ error: 'Recipient not found' });
+    if (recipient.user_id === req.user.id) return res.status(400).json({ error: 'Cannot send to yourself' });
+
+    await client.query('BEGIN');
+    const { rows: [senderBal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, token]
+    );
+    if (!senderBal || Number(senderBal.balance) < amountUnits)
+      throw new Error('Insufficient balance');
+
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amountUnits, req.user.id, token]
+    );
+    await client.query(
+      `INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3)
+       ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$3,updated_at=NOW()`,
+      [recipient.user_id, token, amountUnits]
+    );
+    const dispAmount = fromUnits(amountUnits);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'transfer_out',$2,$3,$4)",
+      [req.user.id, token, -amountUnits, `Sent ${dispAmount} ${token} to @${recipient.username}`]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'transfer_in',$2,$3,$4)",
+      [recipient.user_id, token, amountUnits, `Received ${dispAmount} ${token} from @${req.user.username}`]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, to_username: recipient.username, token, amount: dispAmount });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // Live ticker prices for the post composer "AI Trade Helper" badge. Resolves
 // only known tickers via COINGECKO_TICKER_MAP; unrecognized symbols are
 // silently dropped so the badge degrades gracefully. Reuses the cached
@@ -3903,6 +3955,23 @@ async function start() {
             (900209, 9003, 'market_trade', 'USDC',  -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
             (900210, 9003, 'market_trade', 'USDC',  -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
             (900211, 9003, 'ico_invest',   'USDC', -100000000, 'Staging demo ICO — Invested in SDC ICO')
+          ON CONFLICT(id) DO NOTHING
+        `);
+      }
+    }
+
+    // Seed transfer transactions
+    {
+      const { rows: [exist] } = await pool.query(
+        `SELECT 1 FROM transactions WHERE description LIKE 'Staging demo transfer%' LIMIT 1`
+      );
+      if (!exist) {
+        await pool.query(`
+          INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
+            (900220, 9001, 'transfer_out', 'USDC',  -50000000, 'Staging demo transfer — Sent 50 USDC to @staging-bob'),
+            (900221, 9002, 'transfer_in',  'USDC',   50000000, 'Staging demo transfer — Received 50 USDC from @staging-alice'),
+            (900222, 9002, 'transfer_out', 'BLOOM', -10000000, 'Staging demo transfer — Sent 10 BLOOM to @staging-carol'),
+            (900223, 9003, 'transfer_in',  'BLOOM',  10000000, 'Staging demo transfer — Received 10 BLOOM from @staging-bob')
           ON CONFLICT(id) DO NOTHING
         `);
       }
