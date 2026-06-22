@@ -1568,6 +1568,70 @@ app.post('/api/nfts/mint', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── Wallet NFTs ───────────────────────────────────────────────────────────────
+
+const walletNftCache = new Map(); // pubkey → { nfts, fetchedAt }
+const WALLET_NFT_TTL = 5 * 60 * 1000; // 5 minutes
+
+const STAGING_WALLET_NFTS = [
+  { tokenId: 'BLOOM-W-0001', name: 'Staging Bloom Crystal #1', collection: 'Staging Demo Collection', image: 'https://placehold.co/400x400/0052ff/ffffff?text=NFT+1' },
+  { tokenId: 'BLOOM-W-0002', name: 'Staging Bloom Crystal #2', collection: 'Staging Demo Collection', image: 'https://placehold.co/400x400/7c3aed/ffffff?text=NFT+2' },
+  { tokenId: 'BLOOM-W-0003', name: 'Staging Pixel Bloom #1',   collection: 'Staging Pixels',         image: 'https://placehold.co/400x400/059669/ffffff?text=NFT+3' },
+  { tokenId: 'BLOOM-W-0004', name: 'Staging Pixel Bloom #2',   collection: 'Staging Pixels',         image: 'https://placehold.co/400x400/dc2626/ffffff?text=NFT+4' },
+];
+
+app.get('/api/wallet/nfts', async (req, res) => {
+  try {
+    const pubkey = req.user.usernode_pubkey;
+    if (!pubkey) return res.json({ wallet: null, nfts: [] });
+
+    const cached = walletNftCache.get(pubkey);
+    if (cached && Date.now() - cached.fetchedAt < WALLET_NFT_TTL) {
+      return res.json({ wallet: pubkey, nfts: cached.nfts });
+    }
+
+    const rpcUrl = process.env.NODE_RPC_URL;
+    let nfts = [];
+    let fetchFailed = false;
+
+    if (rpcUrl) {
+      try {
+        const upstream = await fetch(`${rpcUrl}/v1/accounts/${pubkey}/nfts`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (upstream.ok) {
+          const data = await upstream.json();
+          const raw = Array.isArray(data) ? data : (data.nfts || []);
+          nfts = raw
+            .map(n => ({
+              tokenId:    n.tokenId    || n.token_id    || n.id   || '',
+              name:       n.name       || n.title       || '',
+              image:      n.image      || n.image_url   || n.imageUrl || '',
+              collection: n.collection || n.collectionName || n.collection_name || '',
+            }))
+            .filter(n => n.name || n.image);
+        } else {
+          fetchFailed = true;
+        }
+      } catch {
+        fetchFailed = true;
+      }
+    } else {
+      fetchFailed = true;
+    }
+
+    if (fetchFailed) {
+      if (IS_STAGING) {
+        return res.json({ wallet: pubkey, nfts: STAGING_WALLET_NFTS });
+      }
+      return res.json({ wallet: pubkey, nfts: [], error: 'unavailable' });
+    }
+
+    walletNftCache.set(pubkey, { nfts, fetchedAt: Date.now() });
+    res.json({ wallet: pubkey, nfts });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── KYC ───────────────────────────────────────────────────────────────────────
 
 app.get('/api/kyc', async (req, res) => {
@@ -2991,6 +3055,9 @@ async function start() {
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
     `);
+    // staging-eve has no wallet linked — covers the "no wallet connected" state in Wallet NFTs.
+    await pool.query(`UPDATE users SET usernode_pubkey=NULL WHERE user_id=9005`);
+
     // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
     await pool.query(`
       UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL

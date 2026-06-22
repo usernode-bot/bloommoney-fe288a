@@ -2550,12 +2550,75 @@ async function renderFutures(sec) {
 // ── NFTs ──────────────────────────────────────────────────────────────────────
 async function renderNFTs(sec) {
   let nftTab = 'mine';
+  let walletCache = null; // session-level cache for wallet NFT response
+
+  function resolveNftImage(img) {
+    if (!img) return 'https://placehold.co/400x400/161b2a/8b95ab?text=NFT';
+    if (img.startsWith('ipfs://')) return 'https://ipfs.io/ipfs/' + img.slice(7);
+    return img;
+  }
+
+  function renderWalletGrid(walletData) {
+    if (!walletData.wallet) {
+      return `<div class="text-center py-10">
+        <p class="text-[#8b95ab] mb-3">Connect a Usernode wallet to see your on-chain NFTs.</p>
+        <button class="btn btn-v" onclick="navigate('verify')">Go to Verify</button>
+      </div>`;
+    }
+    if (walletData.error === 'unavailable') {
+      return `<div class="text-center py-10">
+        <p class="text-[#8b95ab] mb-3">Couldn't load your wallet NFTs right now.</p>
+        <button class="btn btn-z" onclick="resetWalletCache()">Retry</button>
+      </div>`;
+    }
+    if (!walletData.nfts.length) {
+      return '<p class="text-[#4e5872] text-sm py-6 text-center">Your wallet doesn\'t hold any NFTs yet.</p>';
+    }
+    return `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="wallet-nft-grid">${walletData.nfts.map(n => {
+      const imgSrc = esc(resolveNftImage(n.image));
+      return `<div class="card space-y-2 overflow-hidden">
+        <div class="aspect-square overflow-hidden rounded-lg bg-[#161b2a]">
+          <img src="${imgSrc}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/161b2a/8b95ab?text=NFT'">
+        </div>
+        <p class="text-sm font-medium truncate">${esc(n.name)}</p>
+        <p class="text-xs text-[#8b95ab] truncate">${esc(n.collection || '')}</p>
+      </div>`;
+    }).join('')}</div>`;
+  }
 
   async function load() {
     await refreshBalances();
     const mine = await api('GET', `/api/nfts?owner=${encodeURIComponent(S.user.username)}`);
     const all = nftTab === 'all' ? await api('GET', '/api/nfts') : { nfts: [] };
     const list = nftTab === 'mine' ? mine.nfts : all.nfts;
+
+    let walletContent = '';
+    if (nftTab === 'wallet') {
+      if (!walletCache) {
+        // Show skeleton while fetching
+        sec.innerHTML = `
+          <h2 class="text-xl font-bold mb-4">NFT Collection</h2>
+          <div class="card space-y-3 mb-4">
+            <h3 class="font-semibold">Mint NFT <span class="text-[#8b95ab] text-sm font-normal">(costs 10 BLOOM)</span></h3>
+            <input id="nft-name" class="inp" placeholder="Name">
+            <input id="nft-desc" class="inp" placeholder="Description (optional)">
+            <input id="nft-img" class="inp" placeholder="Image URL">
+            <button class="btn btn-v" onclick="mintNFT()">Mint for 10 BLOOM</button>
+            <div class="text-xs text-[#8b95ab]">Balance: ${getBal('BLOOM')} BLOOM</div>
+            <p id="nft-msg" class="text-sm"></p>
+          </div>
+          <div class="flex gap-2 mb-3">
+            <button class="btn btn-z" onclick="nftTab='mine';load()">My Collection</button>
+            <button class="btn btn-z" onclick="nftTab='all';load()">Browse All</button>
+            <button class="btn btn-v">Wallet NFTs</button>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${[1,2,3].map(() =>
+            `<div class="card animate-pulse"><div class="aspect-square rounded-lg bg-[#1e2538]"></div><div class="h-3 bg-[#1e2538] rounded mt-2 w-3/4"></div><div class="h-2 bg-[#1e2538] rounded mt-1 w-1/2"></div></div>`
+          ).join('')}</div>`;
+        try { walletCache = await api('GET', '/api/wallet/nfts'); } catch { walletCache = { wallet: null, nfts: [], error: 'unavailable' }; }
+      }
+      walletContent = renderWalletGrid(walletCache);
+    }
 
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">NFT Collection</h2>
@@ -2571,8 +2634,12 @@ async function renderNFTs(sec) {
       <div class="flex gap-2 mb-3">
         <button class="btn ${nftTab==='mine'?'btn-v':'btn-z'}" onclick="nftTab='mine';load()">My Collection</button>
         <button class="btn ${nftTab==='all'?'btn-v':'btn-z'}" onclick="nftTab='all';load()">Browse All</button>
+        <button class="btn ${nftTab==='wallet'?'btn-v':'btn-z'}" onclick="nftTab='wallet';load()">Wallet NFTs</button>
       </div>
-      ${list.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${list.map(n => `
+      ${nftTab === 'wallet'
+        ? walletContent
+        : (list.length
+            ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${list.map(n => `
         <div class="card space-y-2 overflow-hidden">
           <div class="aspect-square overflow-hidden rounded-lg bg-[#161b2a]">
             <img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'">
@@ -2580,7 +2647,10 @@ async function renderNFTs(sec) {
           <p class="text-sm font-medium truncate">${esc(n.name)}</p>
           <p class="text-xs text-[#8b95ab] font-mono truncate">${esc(n.token_id)}</p>
           ${nftTab==='all' ? `<p class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</p>` : ''}
-        </div>`).join('')}</div>` : `<p class="text-[#4e5872] text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`}`;
+        </div>`).join('')}</div>`
+            : `<p class="text-[#4e5872] text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`
+          )
+      }`;
 
     window.mintNFT = async () => {
       const name = document.getElementById('nft-name')?.value;
@@ -2597,6 +2667,7 @@ async function renderNFTs(sec) {
     };
   }
   window.load = load;
+  window.resetWalletCache = () => { walletCache = null; load(); };
   await load();
 }
 
