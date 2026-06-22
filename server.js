@@ -546,6 +546,15 @@ app.get('/api/feed', async (req, res) => {
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
       `, params));
+    } else if (tab === 'wins') {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
     } else {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
@@ -575,18 +584,22 @@ app.get('/api/feed', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const MILESTONE_TYPES = new Set(['debt_free','savings_goal','investment_win','income_milestone','emergency_fund','net_worth','other_win']);
+
 app.post('/api/posts', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { content, parent_id, locked } = req.body;
+    const { content, parent_id, locked, milestone_type } = req.body;
     if (!content || content.length > 280) return res.status(400).json({ error: 'Invalid content' });
     const isTopLevel = !parent_id;
     // Only top-level posts can be locked; replies are never lockable.
     const isLocked = !!locked && !parent_id;
+    // Only top-level posts can be milestones; replies cannot.
+    const milestoneType = isTopLevel && milestone_type && MILESTONE_TYPES.has(milestone_type) ? milestone_type : null;
     await client.query('BEGIN');
     const { rows: [post] } = await client.query(`
-      INSERT INTO posts (user_id, username, content, parent_id, locked) VALUES ($1,$2,$3,$4,$5) RETURNING *
-    `, [req.user.id, req.user.username, content, parent_id || null, isLocked]);
+      INSERT INTO posts (user_id, username, content, parent_id, locked, milestone_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [req.user.id, req.user.username, content, parent_id || null, isLocked, milestoneType]);
     if (parent_id) {
       await client.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
     }
@@ -2628,6 +2641,7 @@ async function start() {
       UNIQUE(post_id, user_id)
     );
     ALTER TABLE posts ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS milestone_type VARCHAR(50);
     CREATE TABLE IF NOT EXISTS post_unlocks (
       id SERIAL PRIMARY KEY,
       post_id INTEGER NOT NULL REFERENCES posts(id),
@@ -3050,6 +3064,17 @@ async function start() {
         (900016,9005,'staging-eve','Staging demo alpha — the secret BLOOM entry I''m not unblurring for free 🌸',TRUE)
       ON CONFLICT(id) DO NOTHING`
     );
+
+    // Seed milestone posts for the Wins 🏆 tab.
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,milestone_type) VALUES
+        (900017,9001,'staging-alice','Staging demo win — Just paid off my student loan after 4 years! Freedom! 🎉','debt_free'),
+        (900018,9002,'staging-bob','Staging demo win — Finally hit my $10k emergency fund goal. Took 18 months but we made it.','emergency_fund'),
+        (900019,9003,'staging-carol','Staging demo win — My ETH position is up 40% since last year. Best investment I''ve made.','investment_win'),
+        (900020,9004,'staging-dave','Staging demo win — Got a 25% raise at my new job. Time to max out the savings rate!','income_milestone'),
+        (900021,9005,'staging-eve','Staging demo win — Hit $50k net worth at 28. Slow and steady wins the race. 💰','net_worth')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed follows
     await pool.query(`

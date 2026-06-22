@@ -639,6 +639,17 @@ document.getElementById('connect-wallet-btn').addEventListener('click', connectW
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
   let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+
+  const MILESTONE_LABELS = {
+    debt_free:        'Paid off debt 💳',
+    savings_goal:     'Hit my savings goal 🎯',
+    investment_win:   'Investment win 📈',
+    income_milestone: 'Income milestone 💼',
+    emergency_fund:   'Emergency fund complete 🛡️',
+    net_worth:        'Net worth milestone 💰',
+    other_win:        'Other win 🏆',
+  };
+
   // AI Trade Helper composer badge state (lives across re-renders).
   const tickerCache = {};        // TICKER -> price (number) or 'err'
   let tickerDebounce = null;     // pending debounce timer
@@ -711,7 +722,8 @@ async function renderFeed(sec) {
   }
 
   function postCard(p) {
-    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
+    const isMilestone = !!p.milestone_type;
+    const cheerCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
     const body = isLockedForMe
       ? `<div class="relative rounded-lg overflow-hidden">
@@ -722,6 +734,12 @@ async function renderFeed(sec) {
            </div>
          </div>`
       : `<p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>`;
+    const milestoneBanner = isMilestone
+      ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
+      : '';
+    const likeBtn = isMilestone
+      ? `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">🎉 ${p.like_count}</button>`
+      : `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
@@ -734,9 +752,10 @@ async function renderFeed(sec) {
           </div>
         </div>
       </div>
+      ${milestoneBanner}
       ${body}
       <div class="flex items-center gap-4">
-        <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
+        ${likeBtn}
         <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
@@ -766,6 +785,16 @@ async function renderFeed(sec) {
       <div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
+        <select id="compose-milestone" class="inp text-xs py-1">
+          <option value="">— Just posting —</option>
+          <option value="debt_free">Paid off debt 💳</option>
+          <option value="savings_goal">Hit my savings goal 🎯</option>
+          <option value="investment_win">Investment win 📈</option>
+          <option value="income_milestone">Income milestone 💼</option>
+          <option value="emergency_fund">Emergency fund complete 🛡️</option>
+          <option value="net_worth">Net worth milestone 💰</option>
+          <option value="other_win">Other win 🏆</option>
+        </select>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-3">
             <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
@@ -780,6 +809,7 @@ async function renderFeed(sec) {
       <div class="flex gap-2 border-b border-zinc-800 pb-2">
         <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='global'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('global')">Global</button>
         <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='following'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('following')">Following</button>
+        <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='wins'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('wins')">Wins 🏆</button>
       </div>
       <div id="feed-list" class="space-y-3">
         ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-zinc-600 text-sm text-center py-4">No posts yet</p>'}
@@ -803,9 +833,14 @@ async function renderFeed(sec) {
     const content = box?.value.trim();
     if (!content) return;
     const locked = !!document.getElementById('compose-lock')?.checked;
+    const milestoneEl = document.getElementById('compose-milestone');
+    const milestone_type = milestoneEl?.value || undefined;
     try {
-      const res = await api('POST', '/api/posts', { content, locked });
+      const body = { content, locked };
+      if (milestone_type) body.milestone_type = milestone_type;
+      const res = await api('POST', '/api/posts', body);
       box.value = '';
+      if (milestoneEl) milestoneEl.value = '';
       resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();

@@ -164,6 +164,8 @@
     { "name": "Ticker prices API returns JSON", "path": "/api/ticker-prices?symbols=BTC,ETH", "expectSelector": "body" },
     { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
     { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
-    { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" }
+    { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" },
+    { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
+    { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" }
   ]
 }
