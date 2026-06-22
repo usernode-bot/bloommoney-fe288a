@@ -61,7 +61,7 @@ const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
 // Per-day caps applied to Basic-tier users (security layer, Phase 4).
 const BASIC_DAILY_TRADE_COUNT = 25;
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '64kb' }));
@@ -135,7 +135,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|vault|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -1180,6 +1180,90 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
     );
     await client.query('COMMIT');
     res.json({ ok: true, tokens_received: fromUnits(tokens), symbol: ico.token_symbol });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// ── Vault ─────────────────────────────────────────────────────────────────────
+
+app.get('/api/vault/strategies', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM vault_strategies WHERE is_active=true ORDER BY id');
+    res.json({ strategies: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/vault/positions', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT vp.*, vs.name AS strategy_name, vs.target_apy,
+        FLOOR(vp.amount * vs.target_apy / 100.0 * EXTRACT(EPOCH FROM (NOW() - vp.deposited_at)) / 31536000)::bigint AS accrued_yield
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.user_id = $1
+      ORDER BY vp.deposited_at DESC
+    `, [req.user.id]);
+    res.json({ positions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/vault/deposit', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { strategy_id, token, amount } = req.body;
+    const amtUnits = toUnits(amount);
+    if (!strategy_id || !token || amtUnits <= 0) return res.status(400).json({ error: 'Invalid parameters' });
+    const sym = String(token).toUpperCase().slice(0, 20);
+    await client.query('BEGIN');
+    const { rows: [strategy] } = await client.query(
+      'SELECT * FROM vault_strategies WHERE id=$1 AND is_active=true', [strategy_id]
+    );
+    if (!strategy) throw new Error('Strategy not found');
+    if (!strategy.supported_tokens.includes(sym)) throw new Error(`${sym} not supported by this strategy`);
+    const { rows: [bal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    if (!bal || Number(bal.balance) < amtUnits) throw new Error(`Insufficient ${sym}`);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amtUnits, req.user.id, sym]
+    );
+    const { rows: [pos] } = await client.query(
+      'INSERT INTO vault_positions(user_id,username,strategy_id,token,amount) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [req.user.id, req.user.username, strategy_id, sym, amtUnits]
+    );
+    await client.query('COMMIT');
+    res.json({ position: pos });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/vault/positions/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [pos] } = await client.query(`
+      SELECT vp.*, vs.target_apy
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.id=$1 AND vp.user_id=$2 FOR UPDATE
+    `, [req.params.id, req.user.id]);
+    if (!pos) throw new Error('Position not found');
+    const elapsed = (Date.now() - new Date(pos.deposited_at).getTime()) / 1000;
+    const accruedYield = Math.floor(Number(pos.amount) * Number(pos.target_apy) / 100 * elapsed / 31536000);
+    const total = Number(pos.amount) + accruedYield;
+    await client.query('DELETE FROM vault_positions WHERE id=$1', [pos.id]);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [total, pos.user_id, pos.token]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, returned: fromUnits(total), yield: fromUnits(accruedYield) });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
@@ -2843,6 +2927,25 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS vault_strategies (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      risk_level TEXT,
+      target_apy NUMERIC(6,2),
+      supported_tokens TEXT[],
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS vault_positions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      strategy_id INTEGER REFERENCES vault_strategies(id),
+      token TEXT NOT NULL,
+      amount BIGINT NOT NULL,
+      deposited_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -2904,6 +3007,7 @@ async function start() {
   await pool.query(`
     COMMENT ON TABLE funding_payments IS 'staging:private';
     COMMENT ON TABLE idempotency_keys IS 'staging:private';
+    COMMENT ON TABLE vault_positions IS 'staging:private';
     COMMENT ON TABLE wallet_balances IS 'staging:private';
     COMMENT ON TABLE paper_balances IS 'staging:private';
     COMMENT ON TABLE defi_swaps IS 'staging:private';
@@ -3308,6 +3412,23 @@ async function start() {
       await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
       await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
     }
+
+    // Seed vault strategies (all environments get these)
+    await pool.query(`
+      INSERT INTO vault_strategies(id,name,description,risk_level,target_apy,supported_tokens,is_active) VALUES
+        (1,'Conservative','Low-volatility strategy using stablecoin lending pools.','low',6.5,ARRAY['USDC','BLOOM'],true),
+        (2,'Balanced','Mixed allocation: stablecoins + blue-chip crypto lending.','medium',11.0,ARRAY['USDC','BLOOM','ETH'],true),
+        (3,'Growth','Higher-yield DeFi strategies with active rebalancing.','high',18.5,ARRAY['BLOOM','ETH'],true)
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed vault positions for staging-alice
+    await pool.query(`
+      INSERT INTO vault_positions(id,user_id,username,strategy_id,token,amount,deposited_at) VALUES
+        (9001,9001,'staging-alice',1,'USDC',500000000000,NOW()-INTERVAL '30 days'),
+        (9002,9001,'staging-alice',2,'BLOOM',250000000000,NOW()-INTERVAL '7 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed daily opinion market snapshots
     {

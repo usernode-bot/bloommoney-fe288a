@@ -152,6 +152,8 @@
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
+      <button class="nav-item" data-view="vault">🏦 Vault</button>
+      <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
       <div class="py-1 px-2 text-xs text-zinc-600 font-medium mt-2">Discover</div>
@@ -197,8 +199,11 @@
       <!-- ICO -->
       <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
-      <!-- Earn (composite: stake / liquidity / ico) -->
+      <!-- Earn (composite: stake / liquidity / launchpad) -->
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Vault -->
+      <section id="section-vault" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Opinion / Prediction Markets -->
       <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -431,6 +436,8 @@ const VIEW_SECTION = {
   trade: 'section-swap', swap: 'section-swap',
   futures: 'section-futures',
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
+  launchpad: 'section-earn',
+  vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
   explore: 'section-explore',
@@ -442,6 +449,7 @@ const VIEW_SECTION = {
 const VIEW_TAB = {
   home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
+  launchpad: 'earn', vault: 'earn',
   predict: 'predict', markets: 'predict', profile: 'profile',
 };
 
@@ -475,6 +483,8 @@ async function loadView(view) {
       case 'profile': await renderProfile(sec); break;
       case 'trade': case 'swap': await renderSwap(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
+      case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
+      case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'futures': await renderFutures(sec); break;
       case 'nfts': await renderNFTs(sec); break;
@@ -1988,14 +1998,14 @@ async function renderICO(sec) {
   await load();
 }
 
-// ── Earn (composite: Stake / Liquidity / ICO) ───────────────────────────────────
+// ── Earn (composite: Stake / Liquidity / Launchpad / Vault link) ─────────────
 async function renderEarn(sec) {
   let tab = S.earnTab || 'stake';
   sec.innerHTML = `
     <h2 class="text-xl font-bold mb-4">🌱 Earn</h2>
-    <div class="flex gap-2 mb-4 border-b border-zinc-800 pb-2">
-      ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['ico','🚀 ICO']].map(([k,l])=>
-        `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${tab===k?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="setEarnTab('${k}')">${l}</button>`).join('')}
+    <div class="flex gap-2 mb-4 border-b border-zinc-800 pb-2 flex-wrap">
+      ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['launchpad','🚀 Launchpad'],['vault','🏦 Vault']].map(([k,l])=>
+        `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${tab===k?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="${k==='vault'?`navigate('vault')`:`setEarnTab('${k}')`}">${l}</button>`).join('')}
     </div>
     <div id="earn-sub"></div>`;
   const sub = document.getElementById('earn-sub');
@@ -2003,9 +2013,100 @@ async function renderEarn(sec) {
   try {
     if (tab === 'stake') await renderStake(sub);
     else if (tab === 'liquidity') await renderLiquidity(sub);
+    else if (tab === 'vault') { sub.innerHTML = ''; navigate('vault'); }
     else await renderICO(sub);
   } catch (e) { sub.innerHTML = err(e.message); }
   window.setEarnTab = (t) => { S.earnTab = t; renderEarn(sec); };
+}
+
+// ── Vault ─────────────────────────────────────────────────────────────────────
+async function renderVault(sec) {
+  async function load() {
+    await refreshBalances();
+    const [{ strategies }, { positions }] = await Promise.all([
+      api('GET', '/api/vault/strategies'),
+      api('GET', '/api/vault/positions'),
+    ]);
+    const riskBadge = (r) => {
+      if (r === 'low')    return `<span class="text-xs text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full font-medium">Low Risk</span>`;
+      if (r === 'medium') return `<span class="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full font-medium">Medium Risk</span>`;
+      return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
+    };
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
+      <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
+      <h3 class="font-semibold mb-3">Strategies</h3>
+      <div class="space-y-3 mb-6">
+        ${strategies.map(s => `
+          <div class="card">
+            <div class="flex justify-between items-start gap-3">
+              <div class="min-w-0">
+                <div class="font-semibold">${esc(s.name)}</div>
+                <div class="text-xs text-zinc-500 mt-0.5 line-clamp-1">${esc(s.description || '')}</div>
+                <div class="mt-1.5">${riskBadge(s.risk_level)}</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-lg font-bold text-emerald-400">${Number(s.target_apy).toFixed(1)}%</div>
+                <div class="text-xs text-zinc-500">Target APY</div>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+      <h3 class="font-semibold mb-3">Deposit</h3>
+      <div class="card space-y-3 mb-6">
+        <div>
+          <label class="text-xs text-zinc-500 block mb-1">Strategy</label>
+          <select id="vault-strategy" class="inp">
+            ${strategies.map(s => `<option value="${s.id}">${esc(s.name)} — ${Number(s.target_apy).toFixed(1)}% APY</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500 block mb-1">Token</label>
+          <select id="vault-token" class="inp">
+            <option value="BLOOM">BLOOM (Bal: ${getBal('BLOOM')})</option>
+            <option value="USDC">USDC (Bal: ${getBal('USDC')})</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500 block mb-1">Amount</label>
+          <input id="vault-amount" type="number" class="inp" placeholder="0.00" min="0">
+        </div>
+        <button class="btn btn-v w-full" onclick="doVaultDeposit()">Deposit</button>
+        <p id="vault-msg" class="text-sm"></p>
+      </div>
+      <h3 class="font-semibold mb-3">My Positions</h3>
+      ${positions.length ? `<div class="space-y-3">${positions.map(p => `
+        <div class="card flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold">${esc(p.strategy_name)}</div>
+            <div class="text-xs text-zinc-500">${(Number(p.amount)/1e6).toFixed(2)} ${esc(p.token)} · deposited ${tsAgo(p.deposited_at)} ago</div>
+            <div class="text-xs text-emerald-400 mt-0.5">Accrued: ${(Number(p.accrued_yield)/1e6).toFixed(6)} ${esc(p.token)}</div>
+          </div>
+          <button class="btn btn-z shrink-0" onclick="doVaultWithdraw(${p.id})">Withdraw</button>
+        </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No active positions</p>'}`;
+  }
+
+  window.doVaultDeposit = async () => {
+    const stratId = document.getElementById('vault-strategy')?.value;
+    const token   = document.getElementById('vault-token')?.value;
+    const amount  = document.getElementById('vault-amount')?.value;
+    const msg     = document.getElementById('vault-msg');
+    try {
+      await api('POST', '/api/vault/deposit', { strategy_id: stratId, token, amount });
+      if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = 'Deposited!'; }
+      await load();
+    } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
+  };
+
+  window.doVaultWithdraw = async (id) => {
+    try {
+      const d = await api('DELETE', `/api/vault/positions/${id}`);
+      alert(`Withdrawn! Received ${d.returned.toFixed(2)} (yield: ${d.yield.toFixed(6)})`);
+      await load();
+    } catch (e) { alert(e.message); }
+  };
+
+  await load();
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
