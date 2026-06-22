@@ -181,7 +181,12 @@ async function upsertUser(u) {
 }
 
 async function ensureBalances(userId, pubkey) {
-  for (const [sym, bal] of [['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000], ['ETH', 0], ['BTC', 0]]) {
+  for (const [sym, bal] of [
+    ['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000],
+    ['ETH', 0], ['BTC', 0],
+    ['BNB', 500000], ['SOL', 5000000], ['XRP', 50000000],
+    ['ADA', 100000000], ['DOGE', 200000000], ['TON', 10000000], ['USDT', 20000000],
+  ]) {
     await pool.query(
       'INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
       [userId, sym, bal]
@@ -272,9 +277,14 @@ async function userTier(userId) {
 const COINGECKO_TICKER_MAP = {
   BTC:  'bitcoin',
   ETH:  'ethereum',
+  BNB:  'binancecoin',
   SOL:  'solana',
-  DOGE: 'dogecoin',
+  XRP:  'ripple',
+  USDC: 'usd-coin',
+  USDT: 'tether',
   ADA:  'cardano',
+  DOGE: 'dogecoin',
+  TON:  'the-open-network',
   LINK: 'chainlink',
   DOT:  'polkadot',
   AVAX: 'avalanche-2',
@@ -311,8 +321,12 @@ async function getCoinGeckoPrices() {
 const PORTFOLIO_COINS = [
   { ticker: 'BTC',  name: 'Bitcoin',   qtyMin: 0.01, qtyMax: 0.5,   priceMin: 30000, priceMax: 65000 },
   { ticker: 'ETH',  name: 'Ethereum',  qtyMin: 0.1,  qtyMax: 5.0,   priceMin: 1500,  priceMax: 2500  },
+  { ticker: 'BNB',  name: 'BNB',       qtyMin: 0.5,  qtyMax: 20,    priceMin: 200,   priceMax: 400   },
   { ticker: 'SOL',  name: 'Solana',    qtyMin: 1,    qtyMax: 50,    priceMin: 50,    priceMax: 150   },
+  { ticker: 'XRP',  name: 'XRP',       qtyMin: 100,  qtyMax: 5000,  priceMin: 0.40,  priceMax: 0.70  },
+  { ticker: 'USDT', name: 'Tether',    qtyMin: 10,   qtyMax: 1000,  priceMin: 1,     priceMax: 1     },
   { ticker: 'DOGE', name: 'Dogecoin',  qtyMin: 100,  qtyMax: 10000, priceMin: 0.05,  priceMax: 0.20  },
+  { ticker: 'TON',  name: 'Toncoin',   qtyMin: 5,    qtyMax: 200,   priceMin: 3,     priceMax: 8     },
   { ticker: 'ADA',  name: 'Cardano',   qtyMin: 100,  qtyMax: 5000,  priceMin: 0.20,  priceMax: 0.60  },
   { ticker: 'LINK', name: 'Chainlink', qtyMin: 5,    qtyMax: 200,   priceMin: 5,     priceMax: 15    },
   { ticker: 'DOT',  name: 'Polkadot',  qtyMin: 5,    qtyMax: 200,   priceMin: 4,     priceMax: 10    },
@@ -363,7 +377,7 @@ setInterval(async () => {
       UPDATE market_prices
       SET price_usd = GREATEST(0.0001, price_usd * (1 + (random() * 0.01 - 0.005))),
           updated_at = NOW()
-      WHERE symbol != 'USDC'
+      WHERE symbol NOT IN ('USDC', 'USDT')
     `);
     await pool.query(`
       UPDATE futures_markets
@@ -793,14 +807,35 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/trade/market-stats', async (req, res) => {
+  try {
+    const symbols = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+    const { rows } = await pool.query(`
+      SELECT token, COUNT(*)::int AS swap_count
+      FROM (
+        SELECT from_token AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+        UNION ALL
+        SELECT to_token   AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+      ) t
+      WHERE token = ANY($1)
+      GROUP BY token
+    `, [symbols]);
+    const statsMap = {};
+    rows.forEach(r => { statsMap[r.token] = r.swap_count; });
+    const stats = symbols.map(sym => ({ symbol: sym, swap_count: statsMap[sym] || 0 }));
+    res.json({ stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Live ticker prices for the post composer "AI Trade Helper" badge. Resolves
 // only known tickers via COINGECKO_TICKER_MAP; unrecognized symbols are
 // silently dropped so the badge degrades gracefully. Reuses the cached
 // getCoinGeckoPrices() proxy. In staging there's no CoinGecko key, so return
 // deterministic fixed demo prices instead of empty results.
 const STAGING_TICKER_PRICES = {
-  BTC: 64000, ETH: 3200, SOL: 150, DOGE: 0.12,
-  ADA: 0.45, LINK: 14, DOT: 6, AVAX: 28,
+  BTC: 64000, ETH: 3200, BNB: 310,  SOL: 150,
+  XRP: 0.55,  USDC: 1.00, USDT: 1.00, ADA: 0.45,
+  DOGE: 0.12, TON: 5.50, LINK: 14, DOT: 6, AVAX: 28,
 };
 app.get('/api/ticker-prices', async (req, res) => {
   try {
@@ -855,6 +890,69 @@ app.get('/explorer-api/portfolio/:username', async (req, res) => {
     );
     const prices = await getCoinGeckoPrices();
     res.json({ user: { username: user.username, display_name: user.display_name, kyc_level: user.kyc_level }, holdings, prices });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Portfolio Chart (auth-required) ──────────────────────────────────────────
+
+app.get('/api/portfolio/chart', async (req, res) => {
+  try {
+    const range = (req.query.range || '1d').toLowerCase();
+    const hours = range === '1m' ? 720 : range === '1w' ? 168 : 24;
+
+    const { rows: holdings } = await pool.query(
+      'SELECT ticker, quantity::float AS quantity FROM investment_holdings WHERE user_id=$1',
+      [req.user.id]
+    );
+    if (!holdings.length) return res.json({ points: [], range });
+
+    const tickers = [...new Set(holdings.map(h => h.ticker?.toUpperCase()).filter(Boolean))];
+
+    const { rows: priceRows } = await pool.query(
+      `SELECT symbol, price_usd::float AS price_usd, recorded_at
+       FROM price_history
+       WHERE symbol = ANY($1) AND recorded_at >= NOW() - ($2 * interval '1 hour')
+       ORDER BY recorded_at ASC`,
+      [tickers, hours]
+    );
+
+    if (!priceRows.length) {
+      const livePrices = await getCoinGeckoPrices();
+      let total = 0;
+      for (const h of holdings) {
+        const p = livePrices[h.ticker?.toUpperCase()];
+        if (p != null) total += h.quantity * p;
+      }
+      return res.json({ points: total > 0 ? [{ ts: new Date().toISOString(), value: total }] : [], range });
+    }
+
+    // Build price lookup: symbol -> timestamp -> price
+    const priceMap = {};
+    for (const row of priceRows) {
+      const sym = row.symbol;
+      const ts = row.recorded_at.toISOString();
+      if (!priceMap[sym]) priceMap[sym] = {};
+      priceMap[sym][ts] = row.price_usd;
+    }
+
+    const timestamps = [...new Set(priceRows.map(r => r.recorded_at.toISOString()))].sort();
+    const lastKnown = {};
+    const points = [];
+
+    for (const ts of timestamps) {
+      for (const sym of tickers) {
+        if (priceMap[sym]?.[ts] != null) lastKnown[sym] = priceMap[sym][ts];
+      }
+      let value = 0, hasPrice = false;
+      for (const h of holdings) {
+        const sym = h.ticker?.toUpperCase();
+        const p = sym ? lastKnown[sym] : null;
+        if (p != null) { value += h.quantity * p; hasPrice = true; }
+      }
+      if (hasPrice) points.push({ ts, value });
+    }
+
+    res.json({ points, range });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1107,7 +1205,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { from_token, to_token, from_amount } = req.body;
-    const supported = ['USDC', 'BLOOM', 'ETH', 'BTC'];
+    const supported = ['USDC', 'USDT', 'BLOOM', 'ETH', 'BTC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TON'];
     if (!supported.includes(from_token) || !supported.includes(to_token) || from_token === to_token)
       return res.status(400).json({ error: 'Invalid tokens' });
 
@@ -4011,19 +4109,31 @@ async function start() {
   // Seed initial market prices
   await pool.query(`
     INSERT INTO market_prices(symbol,price_usd) VALUES
-      ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1)
+      ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1),
+      ('BNB',310),('SOL',150),('XRP',0.55),('ADA',0.45),
+      ('DOGE',0.12),('TON',5.50),('USDT',1)
     ON CONFLICT(symbol) DO NOTHING
   `);
 
   // Seed price history — 24 hourly data points per token using deterministic wave formulas.
   // Uses DATE_TRUNC so timestamps are hour-granular; ON CONFLICT skips existing rows within
   // the same boot hour, keeping the seed idempotent.
-  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '26 hours'`);
+  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '32 days'`);
   const historyTokenDefs = [
-    { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)     * 0.018)).toFixed(6) },
-    { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)     * 0.020)).toFixed(6) },
-    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1) * 0.030)).toFixed(6) },
+    { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)          * 0.018)).toFixed(6) },
+    { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)          * 0.020)).toFixed(6) },
+    { symbol: 'BNB',   fn: (i) => (310    * (1 + Math.cos(i * 0.41 + 0.8)    * 0.018)).toFixed(6) },
+    { symbol: 'SOL',   fn: (i) => (150    * (1 + Math.sin(i * 0.48 + 0.5)    * 0.025)).toFixed(6) },
+    { symbol: 'XRP',   fn: (i) => (0.55   * (1 + Math.sin(i * 0.55 + 1.2)    * 0.030)).toFixed(6) },
+    { symbol: 'ADA',   fn: (i) => (0.45   * (1 + Math.cos(i * 0.50 + 0.3)    * 0.028)).toFixed(6) },
+    { symbol: 'DOGE',  fn: (i) => (0.12   * (1 + Math.sin(i * 0.60 + 2.1)    * 0.035)).toFixed(6) },
+    { symbol: 'TON',   fn: (i) => (5.50   * (1 + Math.cos(i * 0.44 + 1.5)    * 0.022)).toFixed(6) },
+    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)      * 0.030)).toFixed(6) },
     { symbol: 'USDC',  fn: ()  => '1.000000' },
+    { symbol: 'USDT',  fn: ()  => '1.000000' },
+    { symbol: 'LINK',  fn: (i) => (10     * (1 + Math.cos(i * 0.43 + 2)      * 0.024)).toFixed(6) },
+    { symbol: 'DOT',   fn: (i) => (7      * (1 + Math.sin(i * 0.39 + 1)      * 0.021)).toFixed(6) },
+    { symbol: 'AVAX',  fn: (i) => (27     * (1 + Math.cos(i * 0.46 + 3)      * 0.023)).toFixed(6) },
   ];
   for (const t of historyTokenDefs) {
     const vals = [], params = [];
@@ -4097,7 +4207,10 @@ async function start() {
     for (const uid of [9001,9002,9003,9004,9005,9006]) {
       await pool.query(`
         INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES
-          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),($1,'ETH',2000000),($1,'BTC',100000)
+          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),
+          ($1,'ETH',2000000),($1,'BTC',100000),
+          ($1,'BNB',1000000),($1,'SOL',10000000),($1,'XRP',200000000),
+          ($1,'ADA',100000000),($1,'DOGE',200000000),($1,'TON',10000000),($1,'USDT',20000000)
         ON CONFLICT DO NOTHING
       `, [uid]);
       await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);
@@ -4262,7 +4375,9 @@ async function start() {
         (900116,9005,'Staging demo holding — Dogecoin','DOGE','crypto',2000.0,0.15),
         (900117,9005,'Staging demo holding — Cardano','ADA','crypto',500.0,0.50),
         (900118,9005,'Staging demo holding — Chainlink','LINK','crypto',20.0,10.0),
-        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0)
+        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0),
+        (900120,9006,'Staging demo holding — Bitcoin','BTC','crypto',1.0,40000.0),
+        (900121,9006,'Staging demo holding — Ethereum','ETH','crypto',10.0,1500.0)
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -4504,6 +4619,25 @@ async function start() {
 
     // Seed demo conversations + messages (private tables → empty in staging).
     await ensureMessagingSeed();
+
+    // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
+    // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
+    const { rows: [swapExists] } = await pool.query(
+      `SELECT 1 FROM defi_swaps WHERE user_id=9001 LIMIT 1`
+    );
+    if (!swapExists) {
+      await pool.query(`
+        INSERT INTO defi_swaps(user_id, from_token, to_token, from_amount, to_amount, rate, created_at) VALUES
+          (9001,'USDC','BTC',  5000000000,  77526, 0.0000155, NOW() - interval '2 hours'),
+          (9001,'USDC','ETH',  2000000000, 606060, 0.000303,  NOW() - interval '3 hours'),
+          (9002,'USDC','BTC',  1000000000,  15505, 0.0000155, NOW() - interval '5 hours'),
+          (9002,'ETH', 'USDC',    500000,1650000000, 3300,    NOW() - interval '6 hours'),
+          (9002,'USDC','BTC',   800000000,  12404, 0.0000155, NOW() - interval '7 hours'),
+          (9003,'USDC','BLOOM', 800000000,1600000000, 2.0,    NOW() - interval '8 hours'),
+          (9001,'BTC', 'ETH',     10000,   642857, 64.2857,   NOW() - interval '9 hours'),
+          (9003,'ETH', 'BTC',    300000,    4600, 0.01533,    NOW() - interval '10 hours')
+      `);
+    }
   }
 
   // ── Boot-time daily market creation (all environments) ──────────────────────
