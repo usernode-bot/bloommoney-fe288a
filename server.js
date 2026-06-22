@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const Parser = require('rss-parser');
 const verify = require('./lib/verify');
 
 const app = express();
@@ -491,6 +492,51 @@ async function runFunding() {
     );
   }
 }
+
+// ── Crypto news bot ──────────────────────────────────────────────────────────
+const NEWS_SOURCES = [
+  { name: 'CoinDesk',      url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
+  { name: 'CoinTelegraph', url: 'https://cointelegraph.com/rss' },
+];
+const NEWS_BOT_USER_ID = -1;
+const NEWS_BOT_USERNAME = 'CryptoNewsBot';
+const MAX_NEW_PER_SOURCE = 3;
+
+const rssParser = new Parser({ timeout: 8000 });
+
+async function fetchAndPostNews() {
+  for (const source of NEWS_SOURCES) {
+    try {
+      const feed = await rssParser.parseURL(source.url);
+      const items = (feed.items || []).slice(0, 10);
+      let posted = 0;
+      for (const item of items) {
+        if (posted >= MAX_NEW_PER_SOURCE) break;
+        const guid = item.guid || item.link;
+        if (!guid) continue;
+        const { rows } = await pool.query('SELECT 1 FROM news_dedup WHERE guid=$1', [guid]);
+        if (rows.length > 0) continue;
+        const title = (item.title || '').trim().slice(0, 275);
+        if (!title) continue;
+        await pool.query(
+          `INSERT INTO posts (user_id, username, content, is_bot, source_url, bot_source)
+           VALUES ($1, $2, $3, TRUE, $4, $5)`,
+          [NEWS_BOT_USER_ID, NEWS_BOT_USERNAME, title, item.link || null, source.name]
+        );
+        await pool.query('INSERT INTO news_dedup (guid) VALUES ($1) ON CONFLICT DO NOTHING', [guid]);
+        posted++;
+      }
+    } catch (e) {
+      console.error(`news bot fetch error (${source.name}):`, e.message);
+    }
+  }
+  // Prune old dedup entries to prevent unbounded growth.
+  await pool.query("DELETE FROM news_dedup WHERE created_at < NOW() - INTERVAL '7 days'").catch(() => {});
+}
+
+setInterval(fetchAndPostNews, 60 * 60 * 1000).unref?.();
+setTimeout(fetchAndPostNews, 5000).unref?.();
+
 // ── /api/me ───────────────────────────────────────────────────────────────────
 
 app.get('/api/me', async (req, res) => {
@@ -579,7 +625,7 @@ app.get('/api/feed', async (req, res) => {
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
@@ -593,6 +639,14 @@ app.get('/api/feed', async (req, res) => {
         WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
+    } else if (tab === 'news') {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.* FROM posts p
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = TRUE ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
     } else {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
@@ -602,7 +656,7 @@ app.get('/api/feed', async (req, res) => {
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
     }
@@ -4104,6 +4158,20 @@ async function start() {
     COMMENT ON TABLE nft_listings IS 'staging:private';
     COMMENT ON TABLE nft_bids IS 'staging:private';
     COMMENT ON TABLE nft_transfers IS 'staging:private';
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_url TEXT;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS bot_source VARCHAR(50);
+    CREATE TABLE IF NOT EXISTS news_dedup (
+      guid TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Ensure bot user exists (all environments)
+  await pool.query(`
+    INSERT INTO users (user_id, username, display_name)
+    VALUES (-1, 'CryptoNewsBot', 'Crypto News Bot 🤖')
+    ON CONFLICT (user_id) DO NOTHING
   `);
 
   // Seed initial market prices
@@ -4619,6 +4687,23 @@ async function start() {
 
     // Seed demo conversations + messages (private tables → empty in staging).
     await ensureMessagingSeed();
+
+    // Seed crypto news bot posts for the News tab
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,is_bot,bot_source,source_url) VALUES
+        (900030,-1,'CryptoNewsBot','Staging demo: BTC reaches simulated test milestone in staging environment',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900031,-1,'CryptoNewsBot','Staging demo: ETH upgrade simulation completes successfully on test chain',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900032,-1,'CryptoNewsBot','Staging demo: Crypto market conditions are normal in this staging run',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900033,-1,'CryptoNewsBot','Staging demo: Institutional adoption test story for QA of news tab UI',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900034,-1,'CryptoNewsBot','Staging demo: Stablecoin regulatory clarity headline for feed rendering test',TRUE,'CoinDesk','https://example.com/staging-test-article')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    await pool.query(`
+      INSERT INTO news_dedup(guid) VALUES
+        ('staging-demo-guid-1'),
+        ('staging-demo-guid-2')
+      ON CONFLICT DO NOTHING
+    `);
 
     // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
     // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
