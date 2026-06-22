@@ -170,6 +170,8 @@
     { "name": "Messages nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"messages\"]" },
     { "name": "Messages envelope in top bar", "path": "/?demo=1", "expectSelector": "#hdr-messages" },
     { "name": "Conversations API returns seeded demo inbox", "path": "/api/conversations?demo=1", "expectText": "BLOOM Whales" },
-    { "name": "User search API returns JSON", "path": "/api/users/search?q=staging", "expectSelector": "body" }
+    { "name": "User search API returns JSON", "path": "/api/users/search?q=staging", "expectSelector": "body" },
+    { "name": "Send modal in DOM", "path": "/?demo=1", "expectSelector": "#send-modal" },
+    { "name": "Receive modal in DOM", "path": "/?demo=1", "expectSelector": "#receive-modal" }
   ]
 }

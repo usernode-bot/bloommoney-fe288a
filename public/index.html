@@ -68,6 +68,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
@@ -97,6 +98,54 @@
         <button class="btn btn-z" onclick="closeTipModal()">Cancel</button>
         <button class="btn btn-v" onclick="submitTip()" id="tip-submit-btn">Send</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───── Send Modal ───── -->
+<div id="send-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onclick="if(event.target.id==='send-modal') closeSendModal()">
+  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+    <h2 class="text-xl font-bold mb-4">Send Tokens</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="text-sm text-[#8b95ab] block mb-2">Token</label>
+        <select id="send-token" class="inp w-full" onchange="updateSendBalance()"></select>
+      </div>
+      <div>
+        <label class="text-sm text-[#8b95ab] block mb-2">Recipient</label>
+        <input id="send-recipient" type="text" placeholder="@username" class="inp w-full" />
+      </div>
+      <div>
+        <label class="text-sm text-[#8b95ab] block mb-2">Amount</label>
+        <input id="send-amount" type="number" placeholder="0.00" step="0.000001" min="0" class="inp w-full" />
+        <div class="text-xs text-[#8b95ab] mt-1">Balance: <span id="send-balance" class="text-amber-400 font-semibold">0</span></div>
+      </div>
+      <div id="send-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-2 justify-end">
+        <button class="btn btn-z" onclick="closeSendModal()">Cancel</button>
+        <button class="btn btn-v" onclick="submitSend()" id="send-submit-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ───── Receive Modal ───── -->
+<div id="receive-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onclick="if(event.target.id==='receive-modal') closeReceiveModal()">
+  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-sm text-center" onclick="event.stopPropagation()">
+    <h2 class="text-xl font-bold mb-4">Receive</h2>
+    <div class="space-y-4">
+      <div>
+        <div class="text-xs text-[#8b95ab] mb-2">Your wallet address</div>
+        <code id="receive-address" class="block text-xs font-mono bg-[#0d1021] border border-[rgba(255,255,255,0.08)] rounded-lg px-3 py-2 break-all text-[#e8eaf0]"></code>
+      </div>
+      <button id="receive-copy-btn" class="btn btn-z w-full" onclick="copyReceiveAddress()">Copy Address</button>
+      <div>
+        <div class="text-xs text-[#8b95ab] mb-2">Scan QR code</div>
+        <div class="flex justify-center">
+          <canvas id="receive-qr" class="rounded-lg" style="background:#fff;"></canvas>
+        </div>
+      </div>
+      <button class="btn btn-z w-full" onclick="closeReceiveModal()">Close</button>
     </div>
   </div>
 </div>
@@ -1004,6 +1053,127 @@ window.submitTip = async () => {
   }
 };
 
+// ── Send / Receive Modal ──────────────────────────────────────────────────────
+const WALLET_TOKENS = ['USDC', 'BLOOM', 'ETH', 'BTC', 'TOK'];
+
+function updateSendBalance() {
+  const sym = document.getElementById('send-token')?.value;
+  const balSpan = document.getElementById('send-balance');
+  if (sym && balSpan) balSpan.textContent = `${getBal(sym)} ${sym}`;
+}
+
+window.openSendModal = () => {
+  const sel = document.getElementById('send-token');
+  const recipientInput = document.getElementById('send-recipient');
+  const amountInput = document.getElementById('send-amount');
+  const errorDiv = document.getElementById('send-error');
+  const submitBtn = document.getElementById('send-submit-btn');
+
+  const available = WALLET_TOKENS.filter(sym => (S.balances[sym] || 0) > 0);
+  if (available.length === 0) available.push('USDC');
+  sel.innerHTML = available.map(sym => `<option value="${sym}">${sym}</option>`).join('');
+  if (available.includes('USDC')) sel.value = 'USDC';
+
+  document.getElementById('send-balance').textContent = `${getBal(sel.value)} ${sel.value}`;
+  recipientInput.value = '';
+  amountInput.value = '';
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Send';
+
+  document.getElementById('send-modal').classList.remove('hidden');
+  recipientInput.focus();
+};
+
+window.closeSendModal = () => {
+  document.getElementById('send-modal').classList.add('hidden');
+};
+
+window.submitSend = async () => {
+  const sel = document.getElementById('send-token');
+  const recipientInput = document.getElementById('send-recipient');
+  const amountInput = document.getElementById('send-amount');
+  const errorDiv = document.getElementById('send-error');
+  const submitBtn = document.getElementById('send-submit-btn');
+
+  const token_symbol = sel.value;
+  const recipient_username = recipientInput.value.trim().replace(/^@/, '');
+  const amount = parseFloat(amountInput.value);
+
+  errorDiv.classList.add('hidden');
+  errorDiv.textContent = '';
+
+  if (!recipient_username) {
+    errorDiv.textContent = 'Please enter a recipient username';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+  if (!amount || amount <= 0) {
+    errorDiv.textContent = 'Please enter an amount greater than 0';
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+  const amountUnits = toUnits(amount.toString());
+  if (amountUnits > (S.balances[token_symbol] || 0)) {
+    errorDiv.textContent = `Insufficient ${token_symbol} balance`;
+    errorDiv.classList.remove('hidden');
+    return;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Sending…';
+  try {
+    await api('POST', '/api/wallet/transfer', { recipient_username, token_symbol, amount: amount.toString() });
+    closeSendModal();
+    await refreshBalances();
+    WALLET_TOKENS.forEach(sym => {
+      const el = document.getElementById(`wbal-${sym}`);
+      if (el) el.textContent = getBal(sym);
+    });
+    const banner = document.getElementById('wallet-send-banner');
+    if (banner) {
+      banner.textContent = `Sent ${fmtAmt(token_symbol, amountUnits)} ${token_symbol} to @${recipient_username}`;
+      banner.classList.remove('hidden');
+      setTimeout(() => banner.classList.add('hidden'), 3000);
+    }
+  } catch (e) {
+    errorDiv.textContent = e.message || 'Failed to send';
+    errorDiv.classList.remove('hidden');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Send';
+  }
+};
+
+window.openReceiveModal = () => {
+  const addr = S.user?.usernode_pubkey || '';
+  document.getElementById('receive-address').textContent = addr;
+  document.getElementById('receive-copy-btn').textContent = 'Copy Address';
+  document.getElementById('receive-modal').classList.remove('hidden');
+
+  if (addr && window.QRCode) {
+    QRCode.toCanvas(document.getElementById('receive-qr'), addr, { width: 180, margin: 2 }, (err) => {
+      if (err) console.error('QR error', err);
+    });
+  }
+};
+
+window.closeReceiveModal = () => {
+  document.getElementById('receive-modal').classList.add('hidden');
+};
+
+window.copyReceiveAddress = () => {
+  const addr = S.user?.usernode_pubkey || '';
+  if (!addr) return;
+  navigator.clipboard.writeText(addr).then(() => {
+    const btn = document.getElementById('receive-copy-btn');
+    if (btn) {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy Address'; }, 1500);
+    }
+  }).catch(() => {});
+};
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 async function renderProfile(sec) {
   const username = S.profileUser || S.user?.username;
@@ -1045,6 +1215,7 @@ async function renderProfile(sec) {
   }
 
   async function renderPortfolioTab() {
+    const isOwnProfile = (username === S.user?.username);
     const data = await fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r => r.json());
     const holdings = data.holdings || [];
     const prices = data.prices || {};
@@ -1089,7 +1260,27 @@ async function renderProfile(sec) {
     const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost * 100) : 0;
     const totalPnlCls = totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
 
+    const walletCard = isOwnProfile ? `
+      <div class="card space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-xs text-[#8b95ab] mb-1.5">Wallet</div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+              ${['USDC','BLOOM','ETH','BTC','TOK'].map(sym => `
+                <div class="text-xs"><span class="text-[#4e5872]">${sym}</span> <span id="wbal-${sym}" class="font-mono">${getBal(sym)}</span></div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button class="btn btn-z text-xs" onclick="openReceiveModal()">Receive</button>
+            <button class="btn btn-v text-xs" onclick="openSendModal()">Send</button>
+          </div>
+        </div>
+        <div id="wallet-send-banner" class="hidden text-emerald-400 text-sm"></div>
+      </div>` : '';
+
     return `
+      ${walletCard}
       <div class="card bg-[#161b2a]/80 space-y-1">
         <div class="text-xs text-[#8b95ab]">Portfolio value</div>
         <div class="text-2xl font-bold text-[#7c5cfc]">$${totalValue.toFixed(2)}</div>
@@ -1108,6 +1299,8 @@ async function renderProfile(sec) {
       futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
       funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
       ico_invest:   { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
+      transfer_out: { label: 'Transfer Out',      color: 'text-red-400',    bg: 'bg-red-900/30' },
+      transfer_in:  { label: 'Transfer In',       color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
     };
 
     function activityRows(items) {

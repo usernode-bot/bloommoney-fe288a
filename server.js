@@ -1525,6 +1525,72 @@ app.get('/api/activity', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Wallet Transfer ───────────────────────────────────────────────────────────
+
+app.post('/api/wallet/transfer', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { recipient_username, token_symbol, amount: amountStr } = req.body;
+    const ALLOWED_TOKENS = ['USDC', 'BLOOM', 'ETH', 'BTC', 'TOK'];
+
+    if (!ALLOWED_TOKENS.includes(token_symbol))
+      return res.status(400).json({ error: 'Invalid token' });
+
+    const amount = toUnits(amountStr);
+    if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const cleanRecipient = (recipient_username || '').replace(/^@/, '').trim();
+    if (!cleanRecipient) return res.status(400).json({ error: 'Recipient required' });
+    if (cleanRecipient === req.user.username)
+      return res.status(400).json({ error: 'Cannot send to yourself' });
+
+    const { rows: [recipient] } = await pool.query(
+      'SELECT user_id, username FROM users WHERE username=$1',
+      [cleanRecipient]
+    );
+    if (!recipient) return res.status(404).json({ error: 'Recipient not found' });
+
+    await client.query('BEGIN');
+
+    const { rows: [senderBal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, token_symbol]
+    );
+    if (!senderBal || Number(senderBal.balance) < amount)
+      throw new Error(`Insufficient ${token_symbol} balance`);
+
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amount, req.user.id, token_symbol]
+    );
+    await client.query(
+      `INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3)
+       ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$3, updated_at=NOW()`,
+      [recipient.user_id, token_symbol, amount]
+    );
+
+    const n = fromUnits(amount);
+    const fmtDisplay = token_symbol === 'ETH' ? n.toFixed(6) : token_symbol === 'BTC' ? n.toFixed(8) : n.toFixed(2);
+    await client.query(
+      `INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES
+       ($1,'transfer_out',$2,$3,$4),
+       ($5,'transfer_in',$2,$6,$7)`,
+      [
+        req.user.id, token_symbol, -amount,
+        `Sent ${fmtDisplay} ${token_symbol} to @${recipient.username}`,
+        recipient.user_id, amount,
+        `Received ${fmtDisplay} ${token_symbol} from @${req.user.username}`,
+      ]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── NFT ───────────────────────────────────────────────────────────────────────
 
 app.get('/api/nfts', async (req, res) => {
@@ -3636,6 +3702,21 @@ async function start() {
             (900209, 9003, 'market_trade', 'USDC',  -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
             (900210, 9003, 'market_trade', 'USDC',  -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
             (900211, 9003, 'ico_invest',   'USDC', -100000000, 'Staging demo ICO — Invested in SDC ICO')
+          ON CONFLICT(id) DO NOTHING
+        `);
+      }
+    }
+
+    // Seed transfer transactions for the Activity tab (transfer_out / transfer_in badges)
+    {
+      const { rows: [existTransfer] } = await pool.query(
+        `SELECT 1 FROM transactions WHERE description='Staging demo transfer — Sent 50.00 USDC to @staging-bob' LIMIT 1`
+      );
+      if (!existTransfer) {
+        await pool.query(`
+          INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
+            (900212, 9001, 'transfer_out', 'USDC', -50000000, 'Staging demo transfer — Sent 50.00 USDC to @staging-bob'),
+            (900213, 9002, 'transfer_in',  'USDC',  50000000, 'Staging demo transfer — Received 50.00 USDC from @staging-alice')
           ON CONFLICT(id) DO NOTHING
         `);
       }
