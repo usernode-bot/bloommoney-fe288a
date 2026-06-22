@@ -215,7 +215,7 @@
       <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Futures -->
-      <section id="section-futures" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+      <section id="section-futures" class="view hidden"></section>
 
       <!-- Trade Journal -->
       <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
@@ -322,9 +322,76 @@ select.inp option { background: var(--bg-card); }
 .pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff !important; border-radius: 9999px; border: none; }
 .pill-inactive { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 9999px; }
 .pill-inactive:hover { color: var(--text-primary); border-color: var(--border-hover); }
-/* Futures table zebra rows */
+/* Futures table zebra rows — kept for fallback compatibility */
 #section-futures tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
 /* Avatar hue override — purple/blue band */
+
+/* ── Futures Terminal ─────────────────────────────────────────────────────── */
+.futures-terminal {
+  --long:     #26a69a;
+  --short:    #ef5350;
+  --bg-term:  #0b0e11;
+  --bg-panel: #0d1018;
+  --border-t: rgba(255,255,255,0.05);
+  background: var(--bg-term);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 4rem);
+}
+.fut-header { background: var(--bg-panel); }
+.futures-terminal__main {
+  display: grid;
+  grid-template-columns: 180px 1fr 320px;
+  flex: 1;
+}
+.fut-panel-ob {
+  background: var(--bg-panel);
+  min-height: 420px;
+  border-right: 1px solid var(--border-t);
+}
+.fut-panel-chart {
+  background: var(--bg-term);
+  min-height: 420px;
+  border-right: 1px solid var(--border-t);
+}
+.fut-panel-entry {
+  background: var(--bg-panel);
+  min-height: 420px;
+  overflow-y: auto;
+}
+.fut-panel-bottom {
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-t);
+  max-height: 280px;
+  overflow: hidden;
+}
+.fut-panel-bottom .fut-bottom-scroll {
+  overflow-y: auto;
+  max-height: 225px;
+}
+.fut-ask { color: var(--short) !important; }
+.fut-bid { color: var(--long) !important; }
+.fut-side-long  { background: var(--long) !important;  color: #fff !important; }
+.fut-side-short { background: var(--short) !important; color: #fff !important; }
+.lev-active { outline: 1.5px solid currentColor !important; color: #e8eaf0 !important; }
+.fut-ob-row { position: relative; cursor: default; }
+.fut-ob-ask::before { content:''; position:absolute; top:0; right:0; bottom:0; width:var(--bar-w,0%); background:var(--short); opacity:0.1; }
+.fut-ob-bid::before { content:''; position:absolute; top:0; right:0; bottom:0; width:var(--bar-w,0%); background:var(--long); opacity:0.1; }
+.fut-mkt-tab { color:#8b95ab; border:1px solid rgba(255,255,255,0.06); background:transparent; transition:all 0.15s; }
+.fut-mkt-tab:hover { color:#e8eaf0; border-color:rgba(255,255,255,0.15); }
+.fut-mkt-tab-active { background:rgba(38,166,154,0.12); border-color:rgba(38,166,154,0.4) !important; color:#26a69a !important; }
+.fut-tab-btn { padding:0.3rem 0.75rem; font-size:0.75rem; color:#8b95ab; border-bottom:2px solid transparent; transition:color 0.15s, border-color 0.15s; }
+.fut-tab-btn:hover { color:#e8eaf0; }
+.fut-tab-active { color:#e8eaf0 !important; border-bottom-color:var(--long) !important; }
+@keyframes futPnlBlink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+.fut-pnl-blink { animation: futPnlBlink 0.35s ease-in-out 3; }
+@media (max-width: 767px) {
+  .futures-terminal__main { grid-template-columns: 1fr; }
+  .fut-panel-entry { order: 1; min-height: auto; }
+  .fut-panel-chart { order: 2; min-height: 260px; }
+  .fut-panel-ob   { order: 3; min-height: auto; border-right: none; border-top: 1px solid var(--border-t); }
+}
 </style>
 
 <script>
@@ -381,7 +448,7 @@ function fmtAmt(sym, v) {
 }
 function fmtUSD(v) { return (Number(v) / U).toFixed(2); }
 // AI Trade Helper: client-side mirror of server COINGECKO_TICKER_MAP keys.
-const KNOWN_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+const KNOWN_TICKERS = new Set(['BTC','ETH','BNB','SOL','XRP','USDT','ADA','DOGE','TON','LINK','DOT','AVAX']);
 const TICKER_RE = /\$([A-Za-z]{2,6})\b/g;
 function detectTickers(text) {
   const seen = [];
@@ -1609,7 +1676,7 @@ window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('trade'); };
 // ── Swap ──────────────────────────────────────────────────────────────────────
 async function renderSwap(sec) {
   if (S.tradeToken) { await renderTokenDetail(sec); return; }
-  const tokens = ['USDC','BLOOM','ETH','BTC'];
+  const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
   const swapState = { from: 'BTC', to: 'ETH', fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
 
   // Inject flip animation keyframes once
@@ -1631,10 +1698,17 @@ async function renderSwap(sec) {
   sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-4"></div>`;
 
   const TOKEN_COLORS = {
-    BTC:   { bg: 'rgba(251,191,36,0.15)',  text: '#fbbf24', symbol: '₿' },
-    ETH:   { bg: 'rgba(56,189,248,0.15)',  text: '#38bdf8', symbol: 'Ξ' },
-    USDC:  { bg: 'rgba(52,211,153,0.15)',  text: '#34d399', symbol: '$' },
-    BLOOM: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', symbol: '✿' },
+    BTC:   { bg: 'rgba(251,191,36,0.15)',   text: '#fbbf24', symbol: '₿' },
+    ETH:   { bg: 'rgba(56,189,248,0.15)',   text: '#38bdf8', symbol: 'Ξ' },
+    BNB:   { bg: 'rgba(243,186,47,0.15)',   text: '#f3ba2f', symbol: 'B' },
+    SOL:   { bg: 'rgba(153,69,255,0.15)',   text: '#9945ff', symbol: '◎' },
+    XRP:   { bg: 'rgba(0,149,207,0.15)',    text: '#0095cf', symbol: 'X' },
+    USDC:  { bg: 'rgba(52,211,153,0.15)',   text: '#34d399', symbol: '$' },
+    USDT:  { bg: 'rgba(38,161,123,0.15)',   text: '#26a17b', symbol: '₮' },
+    ADA:   { bg: 'rgba(0,140,255,0.15)',    text: '#008cff', symbol: '₳' },
+    DOGE:  { bg: 'rgba(203,155,31,0.15)',   text: '#cb9b1f', symbol: 'Ð' },
+    TON:   { bg: 'rgba(0,136,204,0.15)',    text: '#0088cc', symbol: '◆' },
+    BLOOM: { bg: 'rgba(167,139,250,0.15)',  text: '#a78bfa', symbol: '✿' },
   };
 
   function tokenBadge(sym) {
@@ -1846,20 +1920,32 @@ async function renderSwap(sec) {
   if (!mwrap) return;
 
   const TOKEN_META = {
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'     },
     BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
+    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
     BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'  },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
   };
-  const MARKET_ORDER = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+  const MARKET_ORDER = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'USDT', 'ADA', 'DOGE', 'TON', 'BLOOM', 'USDC'];
 
-  // Fetch all four price histories in parallel
+  let marketTab = 'most_active';
+  let marketStats = {};
+
+  // Fetch price histories and market stats in parallel
   let histories = {};
   try {
-    const results = await Promise.all(
-      MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))
-    );
-    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (results[i] && results[i].history) || []; });
+    const [histResults, statsData] = await Promise.all([
+      Promise.all(MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))),
+      api('GET', '/api/trade/market-stats').catch(() => ({ stats: [] })),
+    ]);
+    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (histResults[i] && histResults[i].history) || []; });
+    (statsData.stats || []).forEach(s => { marketStats[s.symbol] = s.swap_count; });
   } catch {}
 
   function buildSparkline(hist, color) {
@@ -1892,46 +1978,103 @@ async function renderSwap(sec) {
     return '$' + p.toFixed(4);
   }
 
-  const rows = MARKET_ORDER.map(sym => {
-    const meta = TOKEN_META[sym];
-    const hist = histories[sym];
-    const change = computeChange(hist);
-    const changeStr = change === null ? '—' :
-      (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
-    const changeClass = change === null ? 'text-[#8b95ab]' :
-      change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
-    const sparkline = buildSparkline(hist, meta.color);
-    return `
-      <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
-           onclick="openTokenDetail('${sym}')">
-        <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
-        <div class="flex-1 min-w-0">
-          <div class="text-sm font-semibold">${sym}</div>
-          <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
-        </div>
-        <div class="text-right shrink-0">
-          <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
-          <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
-        </div>
-        <div class="shrink-0">${sparkline}</div>
-      </div>`;
-  }).join('');
+  function getSortedSymbols(tab) {
+    const syms = [...MARKET_ORDER];
+    if (tab === 'most_active') {
+      syms.sort((a, b) => (marketStats[b] || 0) - (marketStats[a] || 0));
+    } else if (tab === 'top_gainer') {
+      syms.sort((a, b) => {
+        const ca = computeChange(histories[a]);
+        const cb = computeChange(histories[b]);
+        if (ca === null && cb === null) return 0;
+        if (ca === null) return 1;
+        if (cb === null) return -1;
+        return cb - ca;
+      });
+    } else if (tab === 'top_loser') {
+      syms.sort((a, b) => {
+        const ca = computeChange(histories[a]);
+        const cb = computeChange(histories[b]);
+        if (ca === null && cb === null) return 0;
+        if (ca === null) return 1;
+        if (cb === null) return -1;
+        return ca - cb;
+      });
+    }
+    return syms;
+  }
+
+  function renderMarketRows(tab) {
+    const rowsEl = document.getElementById('swap-market-rows');
+    if (!rowsEl) return;
+    const tabBtns = { most_active: 'mkt-tab-most-active', top_gainer: 'mkt-tab-top-gainer', top_loser: 'mkt-tab-top-loser' };
+    Object.entries(tabBtns).forEach(([t, id]) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+    });
+    const sorted = getSortedSymbols(tab);
+    rowsEl.innerHTML = sorted.map(sym => {
+      const meta = TOKEN_META[sym];
+      const hist = histories[sym];
+      const change = computeChange(hist);
+      const changeStr = change === null ? '—' :
+        (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
+      const changeClass = change === null ? 'text-[#8b95ab]' :
+        change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
+      const sparkline = buildSparkline(hist, meta.color);
+      return `
+        <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
+             onclick="openTokenDetail('${sym}')">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">${sym}</div>
+            <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
+            <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
+          </div>
+          <div class="shrink-0">${sparkline}</div>
+        </div>`;
+    }).join('');
+  }
+
+  window.setMarketTab = (tab) => {
+    marketTab = tab;
+    renderMarketRows(tab);
+  };
 
   mwrap.innerHTML = `
-    <h3 class="font-semibold mb-2 mt-6 text-[#e8eaf0]">Markets</h3>
-    <div class="space-y-2">${rows}</div>`;
+    <div class="flex items-center justify-between mt-6 mb-2">
+      <h3 class="font-semibold text-[#e8eaf0]">Markets</h3>
+      <div class="flex gap-2">
+        <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
+        <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
+        <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
+      </div>
+    </div>
+    <div id="swap-market-rows" class="space-y-2"></div>`;
+
+  renderMarketRows(marketTab);
 }
 
 // ── Token Detail ──────────────────────────────────────────────────────────────
 async function renderTokenDetail(sec) {
   const sym = S.tradeToken;
   const TOKEN_META_DETAIL = {
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'                         },
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',  desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'           },
+    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',      desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',          desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  btnCls: 'bg-yellow-500 hover:bg-yellow-400',    desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  btnCls: 'bg-purple-600 hover:bg-purple-500',    desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    btnCls: 'bg-cyan-600 hover:bg-cyan-500',        desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    btnCls: 'bg-teal-600 hover:bg-teal-500',        desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    btnCls: 'bg-blue-600 hover:bg-blue-500',        desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  btnCls: 'bg-yellow-600 hover:bg-yellow-500',    desc: 'The original meme coin, now widely used for tipping and payments.' },
+    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-600 hover:bg-sky-500',          desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v',                                desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500',  desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
   };
-  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD' };
+  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
   const useTradingView = sym in TV_SYMBOLS;
 
   const meta = TOKEN_META_DETAIL[sym];
@@ -2638,7 +2781,7 @@ async function renderMarketDetail(sec) {
 // ── Trade Journal ─────────────────────────────────────────────────────────────
 async function renderJournal(sec) {
   let filterType = 'all', filterDir = 'all', filterStatus = 'all';
-  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','BNB','SOL','XRP','USDT','ADA','DOGE','TON','LINK','DOT','AVAX']);
 
   function entryPnl(e) {
     if (e.exit_price == null) return null;
@@ -3190,168 +3333,478 @@ window.messageUser = async (username) => {
   } catch (e) { alert(e.message); }
 };
 
-// ── Futures ───────────────────────────────────────────────────────────────────
+// ── Futures Terminal ──────────────────────────────────────────────────────────
 async function renderFutures(sec) {
   let side = 'long', leverage = 5, qty = '';
+  let _chart = null, _areaSeries = null;
+  let _futuresTab = 'positions';
+  let _markets = [], _positions = [], _paperBal = 0;
 
-  async function load() {
-    const [{ markets }, { positions }, paperBal] = await Promise.all([
-      api('GET', '/api/futures/markets'),
-      api('GET', '/api/futures/positions'),
-      api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0),
-    ]);
-    await refreshBalances();
-
-    if (!S.futuresMarket && markets.length) S.futuresMarket = markets[0];
-    const mkt = S.futuresMarket || markets[0];
-    if (!S.futuresMarket && mkt) S.futuresMarket = mkt;
-    const futTier = (S.kyc && S.kyc.status === 'approved') ? S.kyc.level : 'basic';
-
-    function marginPreview() {
-      if (!qty || !mkt) return '—';
-      const mp = parseFloat(mkt.mark_price);
-      const margin = (parseFloat(qty) * mp * 1e6 / leverage);
-      const liqDist = mp * (0.9 / leverage);
-      const liqP = side === 'long' ? mp - liqDist : mp + liqDist;
-      return { margin: (margin/1e6).toFixed(2), liq: liqP.toFixed(2) };
-    }
-
-    const preview = marginPreview();
-    const openPositions = positions.filter(p => p.status === 'open');
-    const closedPositions = positions.filter(p => p.status !== 'open').slice(0, 5);
-
-    let chartHtml = '';
-    if (mkt) {
-      const { history } = await api('GET', `/api/futures/markets/${mkt.id}/history`).catch(() => ({ history: [] }));
-      const chartPts = history.map(h => ({ x: new Date(h.created_at).getTime(), y: parseFloat(h.mark_price) }));
-      chartHtml = svgLineChart(chartPts, { color: '#7c3aed', refLine: parseFloat(mkt.mark_price) });
-    }
-
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Futures Trading</h2>
-      <div class="flex gap-2 mb-4">
-        <button class="btn ${S.futuresMode==='paper'?'btn-v':'btn-z'}" onclick="S.futuresMode='paper';load()">📄 Paper Trading</button>
-        <button class="btn ${S.futuresMode==='live'?'btn-v':'btn-z'}" onclick="S.futuresMode='live';load()">⚡ Live Trading</button>
-      </div>
-      ${S.futuresMode==='paper'
-        ? `<div class="card mb-4 flex gap-4 items-center"><span class="text-[#8b95ab] text-sm">Paper Balance:</span><span class="text-[#7c5cfc] font-bold">${fmtUSD(paperBal)} USDC</span></div>`
-        : `<div class="card mb-4 flex gap-4 items-center"><span class="text-amber-400 text-sm font-medium">⚠ LIVE MODE — real balance</span><span class="text-emerald-400 font-bold">${getBal('USDC')} USDC</span></div>`}
-      ${S.futuresMode==='live' && futTier==='basic'
-        ? `<div class="card mb-4 border-amber-700/50"><p class="text-sm text-amber-300">🔒 Live trading needs <b>Social</b> verification. <button class="underline" onclick="navigate('verify')">Verify to unlock →</button></p></div>`
-        : S.futuresMode==='live' && futTier==='social'
-        ? `<div class="card mb-4 border-amber-700/50"><p class="text-xs text-[#8b95ab]">Social tier: up to 5× leverage. <button class="underline text-[#7c5cfc]" onclick="navigate('verify')">Go Premium for 20× →</button></p></div>` : ''}
-      ${mkt && chartHtml ? `<div class="card mb-4">
-        <div class="flex justify-between items-center mb-2">
-          <span class="text-sm font-medium">${esc(mkt.symbol)}</span>
-          <span class="font-mono text-[#e8eaf0]">$${parseFloat(mkt.mark_price).toFixed(2)}</span>
-        </div>
-        ${chartHtml}
-      </div>` : ''}
-      <div class="grid md:grid-cols-2 gap-4 mb-4">
-        <div class="card space-y-3">
-          <h3 class="font-semibold">Place Order</h3>
-          <div>
-            <label class="text-xs text-[#8b95ab]">Market</label>
-            <div class="flex gap-1 mt-1">${markets.map(m=>`<button class="btn text-xs ${S.futuresMarket?.id===m.id?'btn-v':'btn-z'}" onclick="S.futuresMarket=${JSON.stringify(m).replace(/"/g,'&quot;')};load()">${m.symbol}</button>`).join('')}</div>
-          </div>
-          ${mkt ? `<div class="text-xs text-[#8b95ab]">Mark: <span class="text-[#e8eaf0] font-mono">$${parseFloat(mkt.mark_price).toFixed(2)}</span></div>` : ''}
-          <div>
-            <div class="flex gap-2">
-              <button id="side-long" class="btn flex-1 ${side==='long'?'btn-g':'btn-z'}" onclick="side='long';updateFutures()">Long ▲</button>
-              <button id="side-short" class="btn flex-1 ${side==='short'?'btn-r':'btn-z'}" onclick="side='short';updateFutures()">Short ▼</button>
-            </div>
-          </div>
-          <div>
-            <label class="text-xs text-[#8b95ab]">Leverage: <span id="lev-label">${leverage}×</span></label>
-            <input id="lev-slider" type="range" min="1" max="20" value="${leverage}" class="w-full mt-1" oninput="leverage=parseInt(this.value);document.getElementById('lev-label').textContent=leverage+'×';updateFutures()">
-            <div class="flex justify-between text-xs text-[#4e5872]"><span>1×</span><span>20×</span></div>
-          </div>
-          <div>
-            <label class="text-xs text-[#8b95ab]">Quantity</label>
-            <input id="fut-qty" type="number" class="inp mt-1" placeholder="0.000" min="0" oninput="qty=this.value;updateFutures()">
-          </div>
-          <div id="fut-preview" class="text-xs text-[#8b95ab] space-y-0.5">
-            ${typeof preview === 'object' ? `<div>Margin: ${preview.margin} USDC</div><div>Liq. Price: $${preview.liq}</div>` : ''}
-          </div>
-          <button class="btn btn-v w-full" onclick="placeFutures()">Place Order</button>
-          <p id="fut-msg" class="text-sm"></p>
-        </div>
-        <div class="card">
-          <h3 class="font-semibold mb-3">Markets · Funding</h3>
-          <div class="space-y-2">${markets.map(m => {
-            const rate = (parseFloat(m.funding_rate||0)*100);
-            const next = m.next_funding_at ? fundingCountdown(m.next_funding_at) : '—';
-            return `<div class="flex justify-between items-center text-sm py-1 border-b border-[rgba(255,255,255,0.06)] last:border-0">
-              <span class="font-medium">${m.symbol}</span>
-              <span class="font-mono">$${parseFloat(m.mark_price).toFixed(2)}</span>
-              <span class="text-xs ${rate>=0?'text-emerald-400':'text-red-400'}" title="funding rate">${rate>=0?'+':''}${rate.toFixed(4)}%</span>
-              <span class="text-xs text-[#4e5872]" title="next funding">⏱ ${next}</span>
-            </div>`;}).join('')}</div>
-          <p class="text-xs text-[#4e5872] mt-2">Longs pay shorts when funding is positive.</p>
-        </div>
-      </div>
-      <div class="card mb-4">
-        <h3 class="font-semibold mb-3">Open Positions</h3>
-        ${openPositions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
-          <thead><tr class="text-[#4e5872] text-xs">${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-          <tbody>${openPositions.map(p => {
-            const pnl = parseFloat(p.unrealized_pnl||0)/1e6;
-            const fund = parseFloat(p.funding_paid||0)/1e6;
-            return `<tr class="border-t border-[rgba(255,255,255,0.06)]">
-              <td class="py-1.5 pr-3 font-medium">${p.symbol}</td>
-              <td class="pr-3 text-xs">${p.mode==='paper'?'📄':'⚡'}</td>
-              <td class="pr-3 ${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</td>
-              <td class="pr-3">${p.leverage}×</td>
-              <td class="pr-3 font-mono">${parseFloat(p.quantity).toFixed(4)}</td>
-              <td class="pr-3 font-mono">$${parseFloat(p.entry_price).toFixed(2)}</td>
-              <td class="pr-3 font-mono">$${parseFloat(p.mark_price||0).toFixed(2)}</td>
-              <td class="pr-3 ${fund>=0?'text-emerald-400':'text-red-400'}" title="funding paid/received">${fund>=0?'+':''}${fund.toFixed(2)}</td>
-              <td class="pr-3 ${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)}</td>
-              <td><button class="btn btn-r text-xs px-2 py-1" onclick="closeFutures(${p.id})">Close</button></td>
-            </tr>`;}).join('')}</tbody>
-        </table></div>` : '<p class="text-[#4e5872] text-sm">No open positions</p>'}
-      </div>
-      ${closedPositions.length ? `<div class="card">
-        <h3 class="font-semibold mb-3">Recent History</h3>
-        <div class="space-y-1">${closedPositions.map(p => {
-          const pnl = parseFloat(p.realized_pnl||0)/1e6;
-          return `<div class="flex justify-between text-sm py-1 border-b border-[rgba(255,255,255,0.06)] last:border-0">
-            <span>${p.symbol} <span class="${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</span> ${p.leverage}×</span>
-            <span class="text-xs text-[#8b95ab]">${p.status}</span>
-            <span class="${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)} USDC</span>
-          </div>`;}).join('')}</div>
-      </div>` : ''}`;
-
-    window.updateFutures = () => {};
-    window.placeFutures = async () => {
-      const msg = document.getElementById('fut-msg');
-      const qtyEl = document.getElementById('fut-qty');
-      const levEl = document.getElementById('lev-slider');
-      if (!S.futuresMarket) return;
-      try {
-        await api('POST', '/api/futures/positions', {
-          market_id: S.futuresMarket.id,
-          side, leverage: parseInt(levEl?.value||5),
-          quantity: parseFloat(qtyEl?.value||0),
-          mode: S.futuresMode,
-          idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now()
-        });
-        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Order placed'; }
-        await refreshBalances();
-        await load();
-      } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
-    };
-    window.closeFutures = async (id) => {
-      try {
-        const d = await api('DELETE', `/api/futures/positions/${id}`);
-        alert(`Position closed. PnL: ${d.pnl>=0?'+':''}${d.pnl.toFixed(2)} USDC`);
-        await load();
-      } catch (e) { alert(e.message); }
-    };
+  // ── Lazy-load TradingView Lightweight Charts v4 ──────────────────────────────
+  async function loadLWC() {
+    if (window.__LWC) return window.__LWC;
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js';
+      s.onload = () => { window.__LWC = window.LightweightCharts; resolve(window.__LWC); };
+      s.onerror = () => reject(new Error('LWC load failed'));
+      document.head.appendChild(s);
+    });
   }
 
-  await load();
-  _activeInterval = setInterval(load, 5000);
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  function pricePrecision(mp) { return mp < 1 ? 6 : mp < 100 ? 4 : 2; }
+
+  function buildOrderBook(mp) {
+    const prec = pricePrecision(mp);
+    const asks = [], bids = [];
+    for (let i = 0; i < 8; i++) {
+      asks.push({ price: (mp * (1 + (i + 1) * 0.00025)).toFixed(prec), size: (Math.floor(mp * (i + 3) * 17) % 80) + 15 });
+      bids.push({ price: (mp * (1 - (i + 1) * 0.00025)).toFixed(prec), size: (Math.floor(mp * (i + 5) * 13) % 80) + 15 });
+    }
+    return { asks: asks.reverse(), bids };
+  }
+
+  function renderOrderBookHtml(mp) {
+    const { asks, bids } = buildOrderBook(mp);
+    const maxSz = Math.max(...asks.map(a => a.size), ...bids.map(b => b.size));
+    const spread = (parseFloat(asks[asks.length - 1].price) - parseFloat(bids[0].price)).toFixed(pricePrecision(mp));
+    const askRows = asks.map(a =>
+      `<div class="fut-ob-row fut-ob-ask py-0.5 px-2 flex justify-between text-xs font-mono" style="--bar-w:${(a.size/maxSz*100).toFixed(1)}%">
+        <span class="fut-ask">${a.price}</span><span class="text-[#8b95ab]">${a.size}</span>
+      </div>`).join('');
+    const bidRows = bids.map(b =>
+      `<div class="fut-ob-row fut-ob-bid py-0.5 px-2 flex justify-between text-xs font-mono" style="--bar-w:${(b.size/maxSz*100).toFixed(1)}%">
+        <span class="fut-bid">${b.price}</span><span class="text-[#8b95ab]">${b.size}</span>
+      </div>`).join('');
+    return `
+      <div class="flex justify-between text-[10px] text-[#4e5872] px-2 mb-0.5"><span>Price</span><span>Size</span></div>
+      ${askRows}
+      <div class="py-1 px-2 text-center text-xs text-[#8b95ab] border-y" style="border-color:var(--border-t)">Spread: ${spread}</div>
+      ${bidRows}
+      <div class="text-[9px] text-[#4e5872] text-center mt-1 pb-1">Simulated depth</div>`;
+  }
+
+  function calcPreview(mkt) {
+    if (!qty || !mkt || isNaN(parseFloat(qty))) return null;
+    const mp = parseFloat(mkt.mark_price);
+    const prec = pricePrecision(mp);
+    const margin = parseFloat(qty) * mp / leverage;
+    const liqP = side === 'long' ? mp * (1 - 0.9 / leverage) : mp * (1 + 0.9 / leverage);
+    return { margin: margin.toFixed(2), liq: liqP.toFixed(prec) };
+  }
+
+  function buildPositionsHtml(openPos) {
+    if (!openPos.length) return `<tr><td colspan="10" class="py-4 text-center text-[#4e5872] text-xs">No open positions</td></tr>`;
+    return openPos.map(p => {
+      const pnl = parseFloat(p.unrealized_pnl || 0) / 1e6;
+      const fund = parseFloat(p.funding_paid || 0) / 1e6;
+      return `<tr class="border-t hover:bg-[rgba(255,255,255,0.02)] transition-colors fut-pos-row" style="border-color:var(--border-t)" data-pos-id="${p.id}">
+        <td class="py-1.5 pr-3 pl-3 text-xs font-medium">${esc(p.symbol)}</td>
+        <td class="pr-3 text-xs">${p.mode === 'paper' ? '📄' : '⚡'}</td>
+        <td class="pr-3 text-xs ${p.side === 'long' ? 'fut-bid' : 'fut-ask'}">${p.side}</td>
+        <td class="pr-3 text-xs">${p.leverage}×</td>
+        <td class="pr-3 font-mono text-xs">${parseFloat(p.quantity).toFixed(4)}</td>
+        <td class="pr-3 font-mono text-xs">$${parseFloat(p.entry_price).toFixed(2)}</td>
+        <td class="pr-3 font-mono text-xs">$${parseFloat(p.mark_price || 0).toFixed(2)}</td>
+        <td class="pr-3 text-xs ${fund >= 0 ? 'fut-bid' : 'fut-ask'}">${fund >= 0 ? '+' : ''}${fund.toFixed(2)}</td>
+        <td class="pr-3 text-xs font-bold fut-pnl-cell ${pnl >= 0 ? 'fut-bid' : 'fut-ask'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+        <td class="pr-2"><button class="text-[11px] px-2 py-0.5 rounded border transition-all" style="border-color:var(--short);color:var(--short)" onmouseenter="this.style.background='var(--short)';this.style.color='#fff'" onmouseleave="this.style.background='';this.style.color='var(--short)'" onclick="futClosePosBtn(${p.id})">Close</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function buildHistoryHtml(closedPos) {
+    if (!closedPos.length) return `<tr><td colspan="6" class="py-4 text-center text-[#4e5872] text-xs">No trade history</td></tr>`;
+    return closedPos.map(p => {
+      const pnl = parseFloat(p.realized_pnl || 0) / 1e6;
+      return `<tr class="border-t" style="border-color:var(--border-t)">
+        <td class="py-1.5 pr-3 pl-3 text-xs font-medium">${esc(p.symbol)}</td>
+        <td class="pr-3 text-xs ${p.side === 'long' ? 'fut-bid' : 'fut-ask'}">${p.side}</td>
+        <td class="pr-3 text-xs">${p.leverage}×</td>
+        <td class="pr-3 font-mono text-xs">$${parseFloat(p.entry_price).toFixed(2)}</td>
+        <td class="pr-3 text-xs ${p.status === 'liquidated' ? 'fut-ask' : 'text-[#8b95ab]'}">${p.status}</td>
+        <td class="text-xs font-bold ${pnl >= 0 ? 'fut-bid' : 'fut-ask'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── initialRender: build full terminal skeleton ───────────────────────────────
+  async function initialRender() {
+    sec.innerHTML = `<div class="flex justify-center py-12"><div class="spinner"></div></div>`;
+    try {
+      const [marketsData, posData, pb] = await Promise.all([
+        api('GET', '/api/futures/markets'),
+        api('GET', '/api/futures/positions'),
+        api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0),
+      ]);
+      await refreshBalances();
+      _markets = marketsData.markets || [];
+      _positions = posData.positions || [];
+      _paperBal = pb;
+    } catch (e) {
+      sec.innerHTML = `<div class="p-8 text-center text-[#4e5872] text-sm">Failed to load futures data: ${esc(e.message)}</div>`;
+      return;
+    }
+
+    if (!S.futuresMarket && _markets.length) S.futuresMarket = _markets[0];
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id) || _markets[0];
+    if (mkt) S.futuresMarket = mkt;
+
+    const mp = mkt ? parseFloat(mkt.mark_price) : 0;
+    const prec = pricePrecision(mp);
+    const futTier = (S.kyc && S.kyc.status === 'approved') ? S.kyc.level : 'basic';
+    const openPositions = _positions.filter(p => p.status === 'open');
+    const closedPositions = _positions.filter(p => p.status !== 'open').slice(0, 20);
+    const fundingRate = mkt ? parseFloat(mkt.funding_rate || 0) * 100 : 0;
+    const nextFunding = mkt && mkt.next_funding_at ? fundingCountdown(mkt.next_funding_at) : '—';
+    const openInterest = mkt ? (Number(mkt.open_interest || 0) / 1e6).toFixed(1) : '0';
+
+    const balHtml = S.futuresMode === 'paper'
+      ? `<span class="text-[#8b95ab] text-xs">Paper:</span> <span class="font-mono text-xs" style="color:var(--long)">$${fmtUSD(_paperBal)}</span>`
+      : `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+
+    let tierWarnHtml = '';
+    if (S.futuresMode === 'live' && futTier === 'basic')
+      tierWarnHtml = `<div class="text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+    else if (S.futuresMode === 'live' && futTier === 'social')
+      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+
+    const mktTabsHtml = _markets.map(m =>
+      `<button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm ${S.futuresMarket?.id === m.id ? 'fut-mkt-tab-active' : ''}" onclick="futSwitchMarket(${m.id})">${esc(m.symbol)}</button>`
+    ).join('');
+
+    const LEV_PRESETS = [1, 2, 3, 5, 10, 20];
+    const levPresetsHtml = LEV_PRESETS.map(l =>
+      `<button class="fut-lev-preset px-2 py-0.5 text-xs rounded border border-[rgba(255,255,255,0.08)] transition-all ${leverage === l ? 'lev-active' : 'text-[#8b95ab] hover:text-[#e8eaf0]'}" onclick="futSetLeverage(${l})">${l}×</button>`
+    ).join('');
+
+    const preview = calcPreview(mkt);
+
+    sec.innerHTML = `
+<div class="futures-terminal" id="fut-root">
+
+  <!-- ── Market Header Bar ── -->
+  <div class="fut-header flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b" style="border-color:var(--border-t)">
+    <div class="flex gap-1 flex-wrap" id="fut-mkt-tabs">${mktTabsHtml}</div>
+    <div class="h-4 w-px bg-[rgba(255,255,255,0.08)] hidden sm:block"></div>
+    <span id="fut-header-price" class="text-lg font-mono font-bold text-[#e8eaf0]">$${mp.toFixed(prec)}</span>
+    <div class="flex gap-4 text-xs">
+      <div class="flex flex-col leading-tight">
+        <span class="text-[#4e5872]">Funding</span>
+        <span id="fut-header-funding" class="font-mono ${fundingRate >= 0 ? 'fut-bid' : 'fut-ask'}">${fundingRate >= 0 ? '+' : ''}${fundingRate.toFixed(4)}%</span>
+      </div>
+      <div class="flex flex-col leading-tight">
+        <span class="text-[#4e5872]">Next Funding</span>
+        <span id="fut-header-countdown" class="font-mono text-[#8b95ab]">${nextFunding}</span>
+      </div>
+      <div class="flex flex-col leading-tight">
+        <span class="text-[#4e5872]">Open Interest</span>
+        <span id="fut-header-oi" class="font-mono text-[#8b95ab]">$${openInterest}K</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main 3-column area ── -->
+  <div class="futures-terminal__main">
+
+    <!-- Left: Order Book -->
+    <div class="fut-panel-ob">
+      <div class="px-2 py-1.5 text-[10px] font-semibold text-[#4e5872] tracking-wider uppercase border-b" style="border-color:var(--border-t)">Order Book</div>
+      <div id="fut-ob-content">${renderOrderBookHtml(mp)}</div>
+    </div>
+
+    <!-- Center: Chart -->
+    <div class="fut-panel-chart flex flex-col">
+      <div id="fut-chart-container" class="flex-1" style="min-height:380px;display:flex;align-items:center;justify-content:center">
+        <div class="spinner"></div>
+      </div>
+    </div>
+
+    <!-- Right: Order Entry -->
+    <div class="fut-panel-entry">
+      <div class="p-3 space-y-3">
+        <!-- Account row -->
+        <div class="flex items-center justify-between gap-2">
+          <div id="fut-balance-display" class="text-sm">${balHtml}</div>
+          <div class="flex gap-1">
+            <button class="text-xs px-2 py-0.5 rounded transition-all ${S.futuresMode === 'paper' ? 'border' : 'border border-[rgba(255,255,255,0.08)] text-[#8b95ab] hover:border-[rgba(255,255,255,0.2)]'}" style="${S.futuresMode === 'paper' ? 'background:rgba(38,166,154,0.12);color:#26a69a;border-color:rgba(38,166,154,0.4)' : ''}" onclick="futSetMode('paper')">Paper</button>
+            <button class="text-xs px-2 py-0.5 rounded transition-all ${S.futuresMode === 'live' ? 'border' : 'border border-[rgba(255,255,255,0.08)] text-[#8b95ab] hover:border-[rgba(255,255,255,0.2)]'}" style="${S.futuresMode === 'live' ? 'background:rgba(239,83,80,0.12);color:#ef5350;border-color:rgba(239,83,80,0.35)' : ''}" onclick="futSetMode('live')">Live</button>
+          </div>
+        </div>
+        ${tierWarnHtml}
+
+        <!-- Long / Short tabs -->
+        <div class="grid grid-cols-2 gap-1">
+          <button id="fut-side-long" class="py-2 rounded text-sm font-bold transition-all ${side === 'long' ? 'fut-side-long' : 'text-[#8b95ab] hover:text-[#26a69a] border border-[rgba(255,255,255,0.06)]'}" style="${side !== 'long' ? 'background:#161b2a' : ''}" onclick="futSetSide('long')">Long ▲</button>
+          <button id="fut-side-short" class="py-2 rounded text-sm font-bold transition-all ${side === 'short' ? 'fut-side-short' : 'text-[#8b95ab] hover:text-[#ef5350] border border-[rgba(255,255,255,0.06)]'}" style="${side !== 'short' ? 'background:#161b2a' : ''}" onclick="futSetSide('short')">Short ▼</button>
+        </div>
+
+        <!-- Leverage -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-xs text-[#4e5872]">Leverage</label>
+            <span id="fut-lev-display" class="text-xs font-mono text-[#e8eaf0]">${leverage}×</span>
+          </div>
+          <div class="flex gap-1 flex-wrap mb-1.5" id="fut-lev-presets">${levPresetsHtml}</div>
+          <input id="fut-lev-custom" type="number" min="1" max="20" value="${leverage}" class="inp text-xs py-1 text-center" placeholder="Custom 1-20×" oninput="futSetLeverageCustom(parseInt(this.value)||1)">
+        </div>
+
+        <!-- Size -->
+        <div>
+          <label class="text-xs text-[#4e5872]">Size</label>
+          <input id="fut-qty" type="number" class="inp mt-1 text-xs" placeholder="0.0000" min="0" step="0.0001" oninput="futUpdatePreview(this.value)">
+          <div id="fut-preview" class="mt-1.5 space-y-0.5 text-xs text-[#8b95ab]">${preview ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>` : ''}</div>
+        </div>
+
+        <!-- Place Order -->
+        <button id="fut-submit-btn" class="w-full py-2.5 rounded font-bold text-sm transition-all ${side === 'long' ? 'fut-side-long' : 'fut-side-short'}" onclick="futPlaceOrder()">${side === 'long' ? 'Buy / Long' : 'Sell / Short'}</button>
+        <div id="fut-msg" class="text-xs text-center min-h-[1rem]"></div>
+      </div>
+    </div>
+  </div><!-- /.futures-terminal__main -->
+
+  <!-- ── Bottom: Positions / History tabs ── -->
+  <div class="fut-panel-bottom">
+    <div class="flex items-center gap-0.5 px-3 py-1 border-b" style="border-color:var(--border-t)">
+      <button id="fut-tab-positions" class="fut-tab-btn ${_futuresTab === 'positions' ? 'fut-tab-active' : ''}" onclick="futSetTab('positions')">Positions <span id="fut-pos-count" class="text-[#4e5872]">(${openPositions.length})</span></button>
+      <button id="fut-tab-history" class="fut-tab-btn ${_futuresTab === 'history' ? 'fut-tab-active' : ''}" onclick="futSetTab('history')">History <span id="fut-hist-count" class="text-[#4e5872]">(${closedPositions.length})</span></button>
+      <div class="ml-auto pr-1"><div id="fut-pos-toast" class="text-xs font-mono hidden px-2"></div></div>
+    </div>
+    <div class="fut-bottom-scroll overflow-x-auto">
+      <div id="fut-positions-panel" class="${_futuresTab === 'positions' ? '' : 'hidden'}">
+        <table class="w-full text-xs"><thead><tr class="text-[#4e5872]">
+          ${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1.5 pr-3 first:pl-3 font-normal">${h}</th>`).join('')}
+        </tr></thead><tbody id="fut-positions-body">${buildPositionsHtml(openPositions)}</tbody></table>
+      </div>
+      <div id="fut-history-panel" class="${_futuresTab === 'history' ? '' : 'hidden'}">
+        <table class="w-full text-xs"><thead><tr class="text-[#4e5872]">
+          ${['Market','Side','Lev','Entry','Status','PnL'].map(h=>`<th class="text-left py-1.5 pr-3 first:pl-3 font-normal">${h}</th>`).join('')}
+        </tr></thead><tbody id="fut-history-body">${buildHistoryHtml(closedPositions)}</tbody></table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.futures-terminal -->`;
+
+    // ── Initialize chart ──────────────────────────────────────────────────────
+    const chartEl = document.getElementById('fut-chart-container');
+    try {
+      const LWC = await loadLWC();
+      if (chartEl && LWC) {
+        chartEl.innerHTML = '';
+        chartEl.style.display = 'block';
+        _chart = LWC.createChart(chartEl, {
+          autoSize: true,
+          layout: { background: { color: '#0b0e11' }, textColor: '#8b95ab', fontFamily: 'ui-monospace,monospace' },
+          grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+          crosshair: { mode: 1 },
+          rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
+          timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: false },
+          handleScroll: true, handleScale: true,
+        });
+        _areaSeries = _chart.addAreaSeries({
+          topColor: 'rgba(38,166,154,0.28)',
+          bottomColor: 'rgba(38,166,154,0)',
+          lineColor: '#26a69a',
+          lineWidth: 2,
+        });
+        if (mkt) {
+          const { history } = await api('GET', `/api/futures/markets/${mkt.id}/history`).catch(() => ({ history: [] }));
+          const pts = history
+            .map(h => ({ time: Math.floor(new Date(h.created_at).getTime() / 1000), value: parseFloat(h.mark_price) }))
+            .sort((a, b) => a.time - b.time)
+            .filter((p, i, arr) => i === 0 || p.time !== arr[i - 1].time);
+          if (pts.length > 0) { _areaSeries.setData(pts); _chart.timeScale().fitContent(); }
+        }
+      }
+    } catch {
+      if (chartEl) chartEl.innerHTML = `<div class="text-xs text-[#4e5872] p-4 text-center">Chart unavailable</div>`;
+    }
+  }
+
+  // ── refresh: update dynamic DOM without destroying chart ─────────────────────
+  async function refresh() {
+    try {
+      const [marketsData, posData, pb] = await Promise.all([
+        api('GET', '/api/futures/markets'),
+        api('GET', '/api/futures/positions'),
+        api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0),
+      ]);
+      _markets = marketsData.markets || [];
+      _positions = posData.positions || [];
+      _paperBal = pb;
+    } catch { return; }
+
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id) || _markets[0];
+    if (mkt) S.futuresMarket = mkt;
+    if (!mkt) return;
+
+    const mp = parseFloat(mkt.mark_price);
+    const prec = pricePrecision(mp);
+    const fundingRate = parseFloat(mkt.funding_rate || 0) * 100;
+    const nextFunding = mkt.next_funding_at ? fundingCountdown(mkt.next_funding_at) : '—';
+    const openInterest = (Number(mkt.open_interest || 0) / 1e6).toFixed(1);
+    const openPositions = _positions.filter(p => p.status === 'open');
+    const closedPositions = _positions.filter(p => p.status !== 'open').slice(0, 20);
+
+    function setEl(id, html, isText) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (isText) el.textContent = html; else el.innerHTML = html;
+    }
+
+    setEl('fut-header-price', '$' + mp.toFixed(prec), true);
+    const fundEl = document.getElementById('fut-header-funding');
+    if (fundEl) { fundEl.textContent = (fundingRate >= 0 ? '+' : '') + fundingRate.toFixed(4) + '%'; fundEl.className = 'font-mono ' + (fundingRate >= 0 ? 'fut-bid' : 'fut-ask'); }
+    setEl('fut-header-countdown', nextFunding, true);
+    setEl('fut-header-oi', '$' + openInterest + 'K', true);
+    setEl('fut-ob-content', renderOrderBookHtml(mp));
+    setEl('fut-positions-body', buildPositionsHtml(openPositions));
+    setEl('fut-history-body', buildHistoryHtml(closedPositions));
+    setEl('fut-pos-count', '(' + openPositions.length + ')', true);
+    setEl('fut-hist-count', '(' + closedPositions.length + ')', true);
+
+    const balEl = document.getElementById('fut-balance-display');
+    if (balEl) balEl.innerHTML = S.futuresMode === 'paper'
+      ? `<span class="text-[#8b95ab] text-xs">Paper:</span> <span class="font-mono text-xs" style="color:var(--long)">$${fmtUSD(_paperBal)}</span>`
+      : `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+
+    updatePreviewDisplay(mkt);
+
+    if (_areaSeries) {
+      try { _areaSeries.update({ time: Math.floor(Date.now() / 1000), value: mp }); } catch {}
+    }
+  }
+
+  function updatePreviewDisplay(mkt) {
+    const preview = calcPreview(mkt);
+    const el = document.getElementById('fut-preview');
+    if (!el) return;
+    el.innerHTML = preview
+      ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>`
+      : '';
+  }
+
+  function updateLevUI() {
+    document.querySelectorAll('.fut-lev-preset').forEach(btn => {
+      const l = parseInt(btn.textContent);
+      btn.classList.toggle('lev-active', l === leverage);
+      btn.classList.toggle('text-[#8b95ab]', l !== leverage);
+    });
+    const dispEl = document.getElementById('fut-lev-display');
+    if (dispEl) dispEl.textContent = leverage + '×';
+  }
+
+  function updateSideUI() {
+    const lBtn = document.getElementById('fut-side-long');
+    const sBtn = document.getElementById('fut-side-short');
+    const subBtn = document.getElementById('fut-submit-btn');
+    if (lBtn) { lBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'long' ? 'fut-side-long' : 'text-[#8b95ab] hover:text-[#26a69a] border border-[rgba(255,255,255,0.06)]'}`; if (side !== 'long') lBtn.style.background = '#161b2a'; else lBtn.style.background = ''; }
+    if (sBtn) { sBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'short' ? 'fut-side-short' : 'text-[#8b95ab] hover:text-[#ef5350] border border-[rgba(255,255,255,0.06)]'}`; if (side !== 'short') sBtn.style.background = '#161b2a'; else sBtn.style.background = ''; }
+    if (subBtn) { subBtn.className = `w-full py-2.5 rounded font-bold text-sm transition-all ${side === 'long' ? 'fut-side-long' : 'fut-side-short'}`; subBtn.textContent = side === 'long' ? 'Buy / Long' : 'Sell / Short'; }
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    updatePreviewDisplay(mkt);
+  }
+
+  // ── Exposed globals ───────────────────────────────────────────────────────────
+  window.futSwitchMarket = async (id) => {
+    clearInterval(_activeInterval); _activeInterval = null;
+    const mkt = _markets.find(m => m.id === id);
+    if (mkt) S.futuresMarket = mkt;
+    if (_chart) { try { _chart.remove(); } catch {} _chart = null; _areaSeries = null; }
+    await initialRender();
+    _activeInterval = setInterval(refresh, 5000);
+  };
+
+  window.futSetMode = async (mode) => {
+    S.futuresMode = mode;
+    clearInterval(_activeInterval); _activeInterval = null;
+    if (_chart) { try { _chart.remove(); } catch {} _chart = null; _areaSeries = null; }
+    await initialRender();
+    _activeInterval = setInterval(refresh, 5000);
+  };
+
+  window.futSetSide = (s) => { side = s; updateSideUI(); };
+
+  window.futSetLeverage = (l) => {
+    leverage = l;
+    const custom = document.getElementById('fut-lev-custom');
+    if (custom) custom.value = l;
+    updateLevUI();
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    updatePreviewDisplay(mkt);
+  };
+
+  window.futSetLeverageCustom = (l) => {
+    l = Math.max(1, Math.min(20, l || 1));
+    leverage = l;
+    updateLevUI();
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    updatePreviewDisplay(mkt);
+  };
+
+  window.futUpdatePreview = (val) => {
+    qty = val;
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    updatePreviewDisplay(mkt);
+  };
+
+  window.futSetTab = (tab) => {
+    _futuresTab = tab;
+    ['positions', 'history'].forEach(t => {
+      document.getElementById('fut-' + t + '-panel')?.classList.toggle('hidden', tab !== t);
+      document.getElementById('fut-tab-' + t)?.classList.toggle('fut-tab-active', tab === t);
+    });
+  };
+
+  window.futClosePosBtn = async (id) => {
+    const row = document.querySelector(`[data-pos-id="${id}"]`);
+    if (row) row.style.opacity = '0.4';
+    const toast = document.getElementById('fut-pos-toast');
+    try {
+      const d = await api('DELETE', `/api/futures/positions/${id}`);
+      if (toast) {
+        const sign = d.pnl >= 0 ? '+' : '';
+        toast.textContent = `Closed — PnL: ${sign}${d.pnl.toFixed(2)} USDC`;
+        toast.className = `text-xs font-mono px-2 ${d.pnl >= 0 ? 'fut-bid' : 'fut-ask'}`;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 3000);
+      }
+      await refreshBalances();
+      await refresh();
+    } catch (e) {
+      if (row) row.style.opacity = '1';
+      if (toast) { toast.textContent = e.message; toast.className = 'text-xs font-mono px-2 fut-ask'; toast.classList.remove('hidden'); setTimeout(() => toast.classList.add('hidden'), 3000); }
+    }
+  };
+
+  window.futPlaceOrder = async () => {
+    const msg = document.getElementById('fut-msg');
+    const qtyEl = document.getElementById('fut-qty');
+    if (!S.futuresMarket) return;
+    if (msg) { msg.textContent = ''; msg.className = 'text-xs text-center min-h-[1rem]'; }
+    try {
+      await api('POST', '/api/futures/positions', {
+        market_id: S.futuresMarket.id, side, leverage,
+        quantity: parseFloat(qtyEl?.value || 0),
+        mode: S.futuresMode,
+        idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now(),
+      });
+      if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-bid'; msg.textContent = '✓ Order placed'; }
+      if (qtyEl) { qtyEl.value = ''; qty = ''; updatePreviewDisplay(S.futuresMarket); }
+      await refreshBalances();
+      await refresh();
+    } catch (e) {
+      if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-ask'; msg.textContent = e.message; }
+    }
+  };
+
+  // Backward-compat alias
+  window.closeFutures = window.futClosePosBtn;
+
+  await initialRender();
+  _activeInterval = setInterval(refresh, 5000);
 }
 
 // ── NFTs ──────────────────────────────────────────────────────────────────────
