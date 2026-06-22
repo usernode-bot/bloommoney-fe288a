@@ -867,6 +867,138 @@ app.delete('/api/social/link/:provider', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+const JOURNAL_ASSET_TYPES = new Set(['stock', 'etf', 'crypto']);
+const JOURNAL_DIRECTIONS   = new Set(['buy', 'sell']);
+
+app.get('/api/journal/summary', async (req, res) => {
+  try {
+    const { rows: [s] } = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_count,
+        SUM(CASE WHEN exit_price IS NOT NULL THEN 1 ELSE 0 END)::int AS closed_count,
+        SUM(CASE WHEN exit_price IS NULL THEN 1 ELSE 0 END)::int AS open_count,
+        SUM(CASE WHEN exit_price IS NOT NULL AND
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity > 0
+          THEN 1 ELSE 0 END)::int AS profitable_count,
+        COALESCE(SUM(CASE WHEN exit_price IS NOT NULL THEN
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity
+        ELSE 0 END), 0)::float AS realized_pnl
+      FROM trade_journal_entries WHERE user_id=$1
+    `, [req.user.id]);
+    res.json(s);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, direction, status } = req.query;
+    const params = [req.user.id];
+    const conds = ['user_id=$1'];
+    if (asset_type && JOURNAL_ASSET_TYPES.has(asset_type)) {
+      params.push(asset_type); conds.push(`asset_type=$${params.length}`);
+    }
+    if (direction && JOURNAL_DIRECTIONS.has(direction)) {
+      params.push(direction); conds.push(`direction=$${params.length}`);
+    }
+    if (status === 'open') conds.push('exit_price IS NULL');
+    else if (status === 'closed') conds.push('exit_price IS NOT NULL');
+    const { rows } = await pool.query(
+      `SELECT * FROM trade_journal_entries WHERE ${conds.join(' AND ')} ORDER BY trade_date DESC, created_at DESC`,
+      params
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!trade_date) return res.status(400).json({ error: 'trade_date required' });
+    const qty = parseAmount(quantity);
+    const ep  = parseAmount(entry_price);
+    if (!qty || !ep) return res.status(400).json({ error: 'quantity and entry_price must be positive numbers' });
+    const xp = exit_price != null && exit_price !== '' ? parseAmount(exit_price) : null;
+    if (exit_price != null && exit_price !== '' && !xp) return res.status(400).json({ error: 'Invalid exit_price' });
+    if (notes && typeof notes === 'string' && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_journal_entries(user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0, 20), direction, qty, ep, xp,
+       trade_date, (xp && exit_date) ? exit_date : null, notes || null]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    const sets = [], params = [id, req.user.id];
+    const push = (col, val) => { params.push(val); sets.push(`${col}=$${params.length}`); };
+    if (asset_type !== undefined) {
+      if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+      push('asset_type', asset_type);
+    }
+    if (ticker !== undefined) {
+      if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+      push('ticker', ticker.toUpperCase().slice(0, 20));
+    }
+    if (direction !== undefined) {
+      if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+      push('direction', direction);
+    }
+    if (quantity !== undefined) {
+      const v = parseAmount(quantity); if (!v) return res.status(400).json({ error: 'Invalid quantity' });
+      push('quantity', v);
+    }
+    if (entry_price !== undefined) {
+      const v = parseAmount(entry_price); if (!v) return res.status(400).json({ error: 'Invalid entry_price' });
+      push('entry_price', v);
+    }
+    if (trade_date !== undefined) push('trade_date', trade_date);
+    if (exit_price !== undefined) {
+      if (exit_price === null || exit_price === '') { push('exit_price', null); push('exit_date', null); }
+      else {
+        const v = parseAmount(exit_price); if (!v) return res.status(400).json({ error: 'Invalid exit_price' });
+        push('exit_price', v);
+        push('exit_date', exit_date || null);
+      }
+    }
+    if (notes !== undefined) {
+      if (notes && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+      push('notes', notes || null);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    sets.push(`updated_at=NOW()`);
+    const { rows } = await pool.query(
+      `UPDATE trade_journal_entries SET ${sets.join(',')} WHERE id=$1 AND user_id=$2 RETURNING *`,
+      params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_journal_entries WHERE id=$1 AND user_id=$2',
+      [id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── OAuth popup callback ──────────────────────────────────────────────────────
 // Receives the provider redirect, extracts code/state, and postMessages back
 // to the opener (which is the BloomMoney iframe). Values are sanitized before
@@ -2843,6 +2975,22 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS trade_journal_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(10) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(4) NOT NULL,
+      quantity NUMERIC(24,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date DATE NOT NULL,
+      exit_date DATE,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_journal_user_idx ON trade_journal_entries (user_id, trade_date DESC);
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -2917,6 +3065,7 @@ async function start() {
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
+    COMMENT ON TABLE trade_journal_entries IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -3238,6 +3387,26 @@ async function start() {
     }
 
     }
+
+    // Seed trade journal entries for staging users
+    await pool.query(`
+      INSERT INTO trade_journal_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes) VALUES
+        (9010001,9001,'crypto','BTC','buy',0.5,58000,63000,'2026-05-01','2026-05-15','Staging demo — BTC swing long, closed +$2,500'),
+        (9010002,9001,'stock','AAPL','buy',10,178.50,null,'2026-06-01',null,'Staging demo — AAPL open position, waiting for earnings'),
+        (9010003,9001,'etf','SPY','buy',5,511.00,495.50,'2026-04-10','2026-04-20','Staging demo — SPY losing trade, cut early'),
+        (9010004,9001,'crypto','ETH','buy',2.0,2200,2680,'2026-05-20','2026-06-05','Staging demo — ETH long, rode the breakout'),
+        (9010005,9002,'stock','TSLA','sell',3,195.00,182.00,'2026-04-15','2026-04-28','Staging demo — TSLA short, covered at support'),
+        (9010006,9002,'etf','QQQ','buy',8,430.00,null,'2026-06-10',null,'Staging demo — QQQ position open, tech momentum'),
+        (9010007,9002,'crypto','SOL','buy',20,145.00,138.50,'2026-05-05','2026-05-12','Staging demo — SOL scalp, stopped out'),
+        (9010008,9002,'stock','NVDA','buy',2,875.00,921.00,'2026-05-18','2026-06-02','Staging demo — NVDA pre-earnings run'),
+        (9010009,9003,'etf','GLD','buy',15,210.00,225.50,'2026-04-01','2026-04-22','Staging demo — Gold ETF long, inflation hedge paid off'),
+        (9010010,9003,'crypto','BTC','sell',0.1,67000,71000,'2026-05-28','2026-06-08','Staging demo — BTC short, bad timing, covered at loss'),
+        (9010011,9003,'stock','AMZN','buy',5,185.00,null,'2026-06-15',null,'Staging demo — AMZN open, watching AWS segment'),
+        (9010012,9004,'crypto','DOGE','buy',5000,0.155,0.182,'2026-04-20','2026-05-01','Staging demo — DOGE meme run, quick profit'),
+        (9010013,9004,'etf','IWM','sell',10,198.00,204.50,'2026-05-10','2026-05-22','Staging demo — IWM short, wrong direction, loss'),
+        (9010014,9004,'stock','MSFT','buy',4,415.00,null,'2026-06-12',null,'Staging demo — MSFT open, Copilot growth thesis')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed opinion market snapshots
     {
