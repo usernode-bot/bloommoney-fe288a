@@ -12,6 +12,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
+const SWAP_GAS = 1 * UNITS;      // 1 BLOOM gas fee per swap
+const FUTURES_GAS = 1 * UNITS;   // 1 BLOOM gas fee per futures open/close
 // Post-to-Earn: points credited for each successful top-level post to the feed.
 const POST_REWARD_POINTS = 5;
 
@@ -64,7 +66,7 @@ const BASIC_DAILY_TRADE_COUNT = 25;
 const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '2mb' }));
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -74,7 +76,7 @@ app.use((req, res, next) => {
   // CSP compatible with the Tailwind CDN + the hosted Usernode bridge origin.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
     "connect-src 'self' https://social-vibecoding.usernodelabs.org",
     "img-src 'self' data: https:",
@@ -135,7 +137,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|vault|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/mint|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|vault|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -181,7 +183,12 @@ async function upsertUser(u) {
 }
 
 async function ensureBalances(userId, pubkey) {
-  for (const [sym, bal] of [['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000], ['ETH', 0], ['BTC', 0]]) {
+  for (const [sym, bal] of [
+    ['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000],
+    ['ETH', 0], ['BTC', 0],
+    ['BNB', 500000], ['SOL', 5000000], ['XRP', 50000000],
+    ['ADA', 100000000], ['DOGE', 200000000], ['TON', 10000000], ['USDT', 20000000],
+  ]) {
     await pool.query(
       'INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
       [userId, sym, bal]
@@ -258,7 +265,7 @@ async function withinBasicDailyCap(userId, tier) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS n FROM transactions
      WHERE user_id=$1 AND created_at > NOW()-INTERVAL '1 day'
-       AND type IN ('swap','futures_open','market_trade','ico_invest')`,
+       AND type IN ('swap','swap_gas','futures_open','futures_gas','market_trade','ico_invest','nft_buy')`,
     [userId]
   );
   return (rows[0]?.n || 0) < BASIC_DAILY_TRADE_COUNT;
@@ -272,9 +279,14 @@ async function userTier(userId) {
 const COINGECKO_TICKER_MAP = {
   BTC:  'bitcoin',
   ETH:  'ethereum',
+  BNB:  'binancecoin',
   SOL:  'solana',
-  DOGE: 'dogecoin',
+  XRP:  'ripple',
+  USDC: 'usd-coin',
+  USDT: 'tether',
   ADA:  'cardano',
+  DOGE: 'dogecoin',
+  TON:  'the-open-network',
   LINK: 'chainlink',
   DOT:  'polkadot',
   AVAX: 'avalanche-2',
@@ -311,8 +323,12 @@ async function getCoinGeckoPrices() {
 const PORTFOLIO_COINS = [
   { ticker: 'BTC',  name: 'Bitcoin',   qtyMin: 0.01, qtyMax: 0.5,   priceMin: 30000, priceMax: 65000 },
   { ticker: 'ETH',  name: 'Ethereum',  qtyMin: 0.1,  qtyMax: 5.0,   priceMin: 1500,  priceMax: 2500  },
+  { ticker: 'BNB',  name: 'BNB',       qtyMin: 0.5,  qtyMax: 20,    priceMin: 200,   priceMax: 400   },
   { ticker: 'SOL',  name: 'Solana',    qtyMin: 1,    qtyMax: 50,    priceMin: 50,    priceMax: 150   },
+  { ticker: 'XRP',  name: 'XRP',       qtyMin: 100,  qtyMax: 5000,  priceMin: 0.40,  priceMax: 0.70  },
+  { ticker: 'USDT', name: 'Tether',    qtyMin: 10,   qtyMax: 1000,  priceMin: 1,     priceMax: 1     },
   { ticker: 'DOGE', name: 'Dogecoin',  qtyMin: 100,  qtyMax: 10000, priceMin: 0.05,  priceMax: 0.20  },
+  { ticker: 'TON',  name: 'Toncoin',   qtyMin: 5,    qtyMax: 200,   priceMin: 3,     priceMax: 8     },
   { ticker: 'ADA',  name: 'Cardano',   qtyMin: 100,  qtyMax: 5000,  priceMin: 0.20,  priceMax: 0.60  },
   { ticker: 'LINK', name: 'Chainlink', qtyMin: 5,    qtyMax: 200,   priceMin: 5,     priceMax: 15    },
   { ticker: 'DOT',  name: 'Polkadot',  qtyMin: 5,    qtyMax: 200,   priceMin: 4,     priceMax: 10    },
@@ -363,7 +379,7 @@ setInterval(async () => {
       UPDATE market_prices
       SET price_usd = GREATEST(0.0001, price_usd * (1 + (random() * 0.01 - 0.005))),
           updated_at = NOW()
-      WHERE symbol != 'USDC'
+      WHERE symbol NOT IN ('USDC', 'USDT')
     `);
     await pool.query(`
       UPDATE futures_markets
@@ -372,6 +388,16 @@ setInterval(async () => {
           funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
+    // Anchor ETH-PERP and BTC-PERP to real CoinGecko prices (BLOOM-PERP stays synthetic).
+    const _perpPrices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices();
+    for (const [perp, ticker] of [['ETH-PERP', 'ETH'], ['BTC-PERP', 'BTC']]) {
+      if (_perpPrices[ticker] != null) {
+        await pool.query(
+          'UPDATE futures_markets SET mark_price=$1, index_price=$1, updated_at=NOW() WHERE symbol=$2',
+          [_perpPrices[ticker], perp]
+        );
+      }
+    }
     await pool.query(`INSERT INTO futures_price_snapshots(market_id, mark_price) SELECT id, mark_price FROM futures_markets`);
     await pool.query(`DELETE FROM futures_price_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM futures_price_snapshots) r WHERE rn > 200)`);
     await pool.query(`UPDATE opinion_markets SET status='closed' WHERE is_daily=true AND status='open' AND closes_at <= NOW()`);
@@ -487,11 +513,22 @@ app.get('/api/me', async (req, res) => {
 
 app.patch('/api/me', async (req, res) => {
   try {
-    const { display_name, bio } = req.body;
+    const { display_name, bio, avatar_url } = req.body;
     if (display_name != null && String(display_name).length > 80) return res.status(400).json({ error: 'Display name too long' });
     if (bio != null && String(bio).length > 300) return res.status(400).json({ error: 'Bio too long' });
-    await pool.query('UPDATE users SET display_name=$1, bio=$2 WHERE user_id=$3',
-      [display_name || null, bio || null, req.user.id]);
+    if (avatar_url !== undefined) {
+      if (typeof avatar_url !== 'string' || !avatar_url.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'Invalid avatar' });
+      }
+      if (Buffer.byteLength(avatar_url, 'utf8') > 512 * 1024) {
+        return res.status(400).json({ error: 'Avatar too large' });
+      }
+      await pool.query('UPDATE users SET display_name=$1, bio=$2, avatar_url=$3 WHERE user_id=$4',
+        [display_name || null, bio || null, avatar_url, req.user.id]);
+    } else {
+      await pool.query('UPDATE users SET display_name=$1, bio=$2 WHERE user_id=$3',
+        [display_name || null, bio || null, req.user.id]);
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -499,7 +536,7 @@ app.patch('/api/me', async (req, res) => {
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,avatar_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -539,19 +576,34 @@ app.get('/api/feed', async (req, res) => {
       const params = [req.user.id, lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url
+        FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
       `, params));
-    } else {
+    } else if (tab === 'wins') {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
+    } else {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url
+        FROM posts p
+        LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
@@ -575,18 +627,22 @@ app.get('/api/feed', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const MILESTONE_TYPES = new Set(['debt_free','savings_goal','investment_win','income_milestone','emergency_fund','net_worth','other_win']);
+
 app.post('/api/posts', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { content, parent_id, locked } = req.body;
+    const { content, parent_id, locked, milestone_type } = req.body;
     if (!content || content.length > 280) return res.status(400).json({ error: 'Invalid content' });
     const isTopLevel = !parent_id;
     // Only top-level posts can be locked; replies are never lockable.
     const isLocked = !!locked && !parent_id;
+    // Only top-level posts can be milestones; replies cannot.
+    const milestoneType = isTopLevel && milestone_type && MILESTONE_TYPES.has(milestone_type) ? milestone_type : null;
     await client.query('BEGIN');
     const { rows: [post] } = await client.query(`
-      INSERT INTO posts (user_id, username, content, parent_id, locked) VALUES ($1,$2,$3,$4,$5) RETURNING *
-    `, [req.user.id, req.user.username, content, parent_id || null, isLocked]);
+      INSERT INTO posts (user_id, username, content, parent_id, locked, milestone_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [req.user.id, req.user.username, content, parent_id || null, isLocked, milestoneType]);
     if (parent_id) {
       await client.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
     }
@@ -612,10 +668,14 @@ app.post('/api/posts', requireWallet, async (req, res) => {
 
 app.get('/api/posts/:id', async (req, res) => {
   try {
-    const { rows: [post] } = await pool.query('SELECT * FROM posts WHERE id=$1 AND deleted=false', [req.params.id]);
+    const { rows: [post] } = await pool.query(
+      'SELECT p.*, u.avatar_url AS author_avatar_url FROM posts p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.id=$1 AND p.deleted=false',
+      [req.params.id]
+    );
     if (!post) return res.status(404).json({ error: 'Not found' });
     const { rows: replies } = await pool.query(
-      'SELECT * FROM posts WHERE parent_id=$1 AND deleted=false ORDER BY id ASC', [post.id]
+      'SELECT p.*, u.avatar_url AS author_avatar_url FROM posts p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.parent_id=$1 AND p.deleted=false ORDER BY p.id ASC',
+      [post.id]
     );
     const { rows: liked } = await pool.query(
       'SELECT 1 FROM post_likes WHERE user_id=$1 AND post_id=$2', [req.user.id, post.id]
@@ -685,22 +745,22 @@ app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
 
     await client.query('BEGIN');
     const { rows: [senderBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='TOK' FOR UPDATE",
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
       [req.user.id]
     );
     if (!senderBal || Number(senderBal.balance) < amount)
-      throw new Error('Insufficient TOK balance');
+      throw new Error('Insufficient BLOOM balance');
 
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='TOK'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
       [amount, req.user.id]
     );
     await client.query(
-      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'TOK',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
+      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'BLOOM',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
       [post.user_id, amount]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','TOK',$2,$3)",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','BLOOM',$2,$3)",
       [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`]
     );
     await client.query('COMMIT');
@@ -749,14 +809,35 @@ app.get('/api/prices', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/trade/market-stats', async (req, res) => {
+  try {
+    const symbols = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+    const { rows } = await pool.query(`
+      SELECT token, COUNT(*)::int AS swap_count
+      FROM (
+        SELECT from_token AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+        UNION ALL
+        SELECT to_token   AS token FROM defi_swaps WHERE created_at >= NOW() - interval '24 hours'
+      ) t
+      WHERE token = ANY($1)
+      GROUP BY token
+    `, [symbols]);
+    const statsMap = {};
+    rows.forEach(r => { statsMap[r.token] = r.swap_count; });
+    const stats = symbols.map(sym => ({ symbol: sym, swap_count: statsMap[sym] || 0 }));
+    res.json({ stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Live ticker prices for the post composer "AI Trade Helper" badge. Resolves
 // only known tickers via COINGECKO_TICKER_MAP; unrecognized symbols are
 // silently dropped so the badge degrades gracefully. Reuses the cached
 // getCoinGeckoPrices() proxy. In staging there's no CoinGecko key, so return
 // deterministic fixed demo prices instead of empty results.
 const STAGING_TICKER_PRICES = {
-  BTC: 64000, ETH: 3200, SOL: 150, DOGE: 0.12,
-  ADA: 0.45, LINK: 14, DOT: 6, AVAX: 28,
+  BTC: 64000, ETH: 3200, BNB: 310,  SOL: 150,
+  XRP: 0.55,  USDC: 1.00, USDT: 1.00, ADA: 0.45,
+  DOGE: 0.12, TON: 5.50, LINK: 14, DOT: 6, AVAX: 28,
 };
 app.get('/api/ticker-prices', async (req, res) => {
   try {
@@ -814,6 +895,69 @@ app.get('/explorer-api/portfolio/:username', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Portfolio Chart (auth-required) ──────────────────────────────────────────
+
+app.get('/api/portfolio/chart', async (req, res) => {
+  try {
+    const range = (req.query.range || '1d').toLowerCase();
+    const hours = range === '1m' ? 720 : range === '1w' ? 168 : 24;
+
+    const { rows: holdings } = await pool.query(
+      'SELECT ticker, quantity::float AS quantity FROM investment_holdings WHERE user_id=$1',
+      [req.user.id]
+    );
+    if (!holdings.length) return res.json({ points: [], range });
+
+    const tickers = [...new Set(holdings.map(h => h.ticker?.toUpperCase()).filter(Boolean))];
+
+    const { rows: priceRows } = await pool.query(
+      `SELECT symbol, price_usd::float AS price_usd, recorded_at
+       FROM price_history
+       WHERE symbol = ANY($1) AND recorded_at >= NOW() - ($2 * interval '1 hour')
+       ORDER BY recorded_at ASC`,
+      [tickers, hours]
+    );
+
+    if (!priceRows.length) {
+      const livePrices = await getCoinGeckoPrices();
+      let total = 0;
+      for (const h of holdings) {
+        const p = livePrices[h.ticker?.toUpperCase()];
+        if (p != null) total += h.quantity * p;
+      }
+      return res.json({ points: total > 0 ? [{ ts: new Date().toISOString(), value: total }] : [], range });
+    }
+
+    // Build price lookup: symbol -> timestamp -> price
+    const priceMap = {};
+    for (const row of priceRows) {
+      const sym = row.symbol;
+      const ts = row.recorded_at.toISOString();
+      if (!priceMap[sym]) priceMap[sym] = {};
+      priceMap[sym][ts] = row.price_usd;
+    }
+
+    const timestamps = [...new Set(priceRows.map(r => r.recorded_at.toISOString()))].sort();
+    const lastKnown = {};
+    const points = [];
+
+    for (const ts of timestamps) {
+      for (const sym of tickers) {
+        if (priceMap[sym]?.[ts] != null) lastKnown[sym] = priceMap[sym][ts];
+      }
+      let value = 0, hasPrice = false;
+      for (const h of holdings) {
+        const sym = h.ticker?.toUpperCase();
+        const p = sym ? lastKnown[sym] : null;
+        if (p != null) { value += h.quantity * p; hasPrice = true; }
+      }
+      if (hasPrice) points.push({ ts, value });
+    }
+
+    res.json({ points, range });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Social Account Linking ────────────────────────────────────────────────────
 
 app.get('/api/social/accounts', async (req, res) => {
@@ -863,6 +1007,138 @@ app.delete('/api/social/link/:provider', async (req, res) => {
       'DELETE FROM social_accounts WHERE user_id=$1 AND provider=$2',
       [req.user.id, provider]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+const JOURNAL_ASSET_TYPES = new Set(['stock', 'etf', 'crypto']);
+const JOURNAL_DIRECTIONS   = new Set(['buy', 'sell']);
+
+app.get('/api/journal/summary', async (req, res) => {
+  try {
+    const { rows: [s] } = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_count,
+        SUM(CASE WHEN exit_price IS NOT NULL THEN 1 ELSE 0 END)::int AS closed_count,
+        SUM(CASE WHEN exit_price IS NULL THEN 1 ELSE 0 END)::int AS open_count,
+        SUM(CASE WHEN exit_price IS NOT NULL AND
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity > 0
+          THEN 1 ELSE 0 END)::int AS profitable_count,
+        COALESCE(SUM(CASE WHEN exit_price IS NOT NULL THEN
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity
+        ELSE 0 END), 0)::float AS realized_pnl
+      FROM trade_journal_entries WHERE user_id=$1
+    `, [req.user.id]);
+    res.json(s);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, direction, status } = req.query;
+    const params = [req.user.id];
+    const conds = ['user_id=$1'];
+    if (asset_type && JOURNAL_ASSET_TYPES.has(asset_type)) {
+      params.push(asset_type); conds.push(`asset_type=$${params.length}`);
+    }
+    if (direction && JOURNAL_DIRECTIONS.has(direction)) {
+      params.push(direction); conds.push(`direction=$${params.length}`);
+    }
+    if (status === 'open') conds.push('exit_price IS NULL');
+    else if (status === 'closed') conds.push('exit_price IS NOT NULL');
+    const { rows } = await pool.query(
+      `SELECT * FROM trade_journal_entries WHERE ${conds.join(' AND ')} ORDER BY trade_date DESC, created_at DESC`,
+      params
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!trade_date) return res.status(400).json({ error: 'trade_date required' });
+    const qty = parseAmount(quantity);
+    const ep  = parseAmount(entry_price);
+    if (!qty || !ep) return res.status(400).json({ error: 'quantity and entry_price must be positive numbers' });
+    const xp = exit_price != null && exit_price !== '' ? parseAmount(exit_price) : null;
+    if (exit_price != null && exit_price !== '' && !xp) return res.status(400).json({ error: 'Invalid exit_price' });
+    if (notes && typeof notes === 'string' && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_journal_entries(user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0, 20), direction, qty, ep, xp,
+       trade_date, (xp && exit_date) ? exit_date : null, notes || null]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    const sets = [], params = [id, req.user.id];
+    const push = (col, val) => { params.push(val); sets.push(`${col}=$${params.length}`); };
+    if (asset_type !== undefined) {
+      if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+      push('asset_type', asset_type);
+    }
+    if (ticker !== undefined) {
+      if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+      push('ticker', ticker.toUpperCase().slice(0, 20));
+    }
+    if (direction !== undefined) {
+      if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+      push('direction', direction);
+    }
+    if (quantity !== undefined) {
+      const v = parseAmount(quantity); if (!v) return res.status(400).json({ error: 'Invalid quantity' });
+      push('quantity', v);
+    }
+    if (entry_price !== undefined) {
+      const v = parseAmount(entry_price); if (!v) return res.status(400).json({ error: 'Invalid entry_price' });
+      push('entry_price', v);
+    }
+    if (trade_date !== undefined) push('trade_date', trade_date);
+    if (exit_price !== undefined) {
+      if (exit_price === null || exit_price === '') { push('exit_price', null); push('exit_date', null); }
+      else {
+        const v = parseAmount(exit_price); if (!v) return res.status(400).json({ error: 'Invalid exit_price' });
+        push('exit_price', v);
+        push('exit_date', exit_date || null);
+      }
+    }
+    if (notes !== undefined) {
+      if (notes && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+      push('notes', notes || null);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    sets.push(`updated_at=NOW()`);
+    const { rows } = await pool.query(
+      `UPDATE trade_journal_entries SET ${sets.join(',')} WHERE id=$1 AND user_id=$2 RETURNING *`,
+      params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_journal_entries WHERE id=$1 AND user_id=$2',
+      [id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -931,7 +1207,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { from_token, to_token, from_amount } = req.body;
-    const supported = ['USDC', 'BLOOM', 'ETH', 'BTC'];
+    const supported = ['USDC', 'USDT', 'BLOOM', 'ETH', 'BTC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TON'];
     if (!supported.includes(from_token) || !supported.includes(to_token) || from_token === to_token)
       return res.status(400).json({ error: 'Invalid tokens' });
 
@@ -950,12 +1226,27 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     const toUnitsAmt = Math.floor(fromUnitsAmt * rate * 0.997);
 
     await client.query('BEGIN');
-    const { rows: [fromBal] } = await client.query(
-      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
-      [req.user.id, from_token]
+
+    // Lock BLOOM row first for the gas fee (must be atomic with the swap).
+    // When swapping BLOOM→X, bloomRequired covers both the swap amount and gas.
+    const { rows: [bloomGasBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
+      [req.user.id]
     );
-    if (!fromBal || Number(fromBal.balance) < fromUnitsAmt)
-      throw new Error('Insufficient balance');
+    const bloomAvail = Number(bloomGasBal?.balance || 0);
+    const bloomRequired = from_token === 'BLOOM' ? fromUnitsAmt + SWAP_GAS : SWAP_GAS;
+    if (bloomAvail < bloomRequired)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+
+    // For non-BLOOM source tokens, also lock and verify the source row.
+    if (from_token !== 'BLOOM') {
+      const { rows: [fromBal] } = await client.query(
+        'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+        [req.user.id, from_token]
+      );
+      if (!fromBal || Number(fromBal.balance) < fromUnitsAmt)
+        throw new Error('Insufficient balance');
+    }
 
     await client.query(
       'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
@@ -965,6 +1256,11 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [toUnitsAmt, req.user.id, to_token]
     );
+    // Deduct BLOOM gas fee
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [SWAP_GAS, req.user.id]
+    );
     await client.query(
       'INSERT INTO defi_swaps(user_id,from_token,to_token,from_amount,to_amount,rate) VALUES($1,$2,$3,$4,$5,$6)',
       [req.user.id, from_token, to_token, fromUnitsAmt, toUnitsAmt, rate]
@@ -972,6 +1268,10 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap',$2,$3,$4)",
       [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap_gas','BLOOM',$2,'Swap gas fee')",
+      [req.user.id, -SWAP_GAS]
     );
     await client.query('COMMIT');
     res.json({ ok: true, to_amount: fromUnits(toUnitsAmt), to_token });
@@ -1513,6 +1813,13 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const marginUnits = Math.ceil(qty * markPrice * UNITS / lev);
     const liqPrice = side === 'long' ? markPrice * (1 - 0.9 / lev) : markPrice * (1 + 0.9 / lev);
 
+    // BLOOM gas fee check — applies to both live and paper modes.
+    const { rows: [bloomOpenBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomOpenBal || Number(bloomOpenBal.balance) < FUTURES_GAS)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+
     if (mode === 'live') {
       const { rows: [bal] } = await client.query(
         "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
@@ -1525,6 +1832,12 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
     }
 
+    // Deduct BLOOM gas fee
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [FUTURES_GAS, req.user.id]
+    );
+
     const { rows: [pos] } = await client.query(`
       INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
@@ -1533,6 +1846,10 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
       [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures open gas fee')",
+      [req.user.id, -FUTURES_GAS]
     );
     await client.query('COMMIT');
     res.json({ position: pos });
@@ -1553,6 +1870,18 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     if (!pos) throw new Error('Position not found');
     const pnl = Math.round((pos.mark_price - parseFloat(pos.entry_price)) * parseFloat(pos.quantity) * (pos.side === 'long' ? 1 : -1) * UNITS);
     const returnAmt = Math.max(0, Number(pos.margin) + pnl);
+
+    // BLOOM gas fee for closing (applies to both live and paper modes).
+    const { rows: [bloomCloseBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomCloseBal || Number(bloomCloseBal.balance) < FUTURES_GAS)
+      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+    await client.query(
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      [FUTURES_GAS, req.user.id]
+    );
+
     await client.query("UPDATE futures_positions SET status='closed', realized_pnl=$1, closed_at=NOW() WHERE id=$2", [pnl, pos.id]);
     if (pos.mode === 'live') {
       await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
@@ -1560,6 +1889,10 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance+$1 WHERE user_id=$2', [returnAmt, req.user.id]);
     }
     await client.query('UPDATE futures_markets SET open_interest=GREATEST(0, open_interest-$1) WHERE id=$2', [pos.margin, pos.market_id]);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
+      [req.user.id, -FUTURES_GAS]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, pnl: fromUnits(pnl), returned: fromUnits(returnAmt) });
   } catch (e) {
@@ -1588,47 +1921,444 @@ app.get('/api/activity', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+app.get('/api/journal', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM trade_entries WHERE user_id=$1 ORDER BY trade_date DESC, id DESC',
+      [req.user.id]
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, notes } = req.body;
+    if (!['crypto','stock','etf'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!['long','short'].includes(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    const qty = parseAmount(quantity);
+    if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
+    const ep = parseAmount(entry_price);
+    if (!ep) return res.status(400).json({ error: 'Invalid entry_price' });
+    const td = trade_date ? new Date(trade_date) : new Date();
+    if (isNaN(td.getTime())) return res.status(400).json({ error: 'Invalid trade_date' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_entries(user_id,asset_type,ticker,direction,quantity,entry_price,trade_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0,20), direction, qty, ep, td, (notes||'').slice(0,500)]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/journal/:id', async (req, res) => {
+  try {
+    const { exit_price, notes } = req.body;
+    const ep = exit_price != null ? parseAmount(exit_price) : null;
+    if (exit_price != null && !ep) return res.status(400).json({ error: 'Invalid exit_price' });
+    const { rows: [entry] } = await pool.query(
+      `UPDATE trade_entries
+       SET exit_price = COALESCE($1, exit_price),
+           notes = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE notes END,
+           updated_at = NOW()
+       WHERE id=$3 AND user_id=$4
+       RETURNING *`,
+      [ep, notes !== undefined ? (notes||'').slice(0,500) : null, req.params.id, req.user.id]
+    );
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/journal/:id', async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_entries WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── NFT ───────────────────────────────────────────────────────────────────────
 
 app.get('/api/nfts', async (req, res) => {
   try {
-    let q = 'SELECT * FROM nfts WHERE burned=false';
     const params = [];
-    if (req.query.owner) { q += ` AND owner_username=$${params.push(req.query.owner)}`; }
-    q += ' ORDER BY id DESC LIMIT 50';
+    let where = 'n.burned=false';
+    if (req.query.owner) { where += ` AND n.owner_username=$${params.push(req.query.owner)}`; }
+    if (req.query.creator) { where += ` AND n.creator_username=$${params.push(req.query.creator)}`; }
+    if (req.query.collection) { where += ` AND n.collection=$${params.push(req.query.collection)}`; }
+    if (req.query.rarity) { where += ` AND n.rarity=$${params.push(req.query.rarity)}`; }
+    if (req.query.listed === 'true') { where += ' AND nl.status=\'active\''; }
+    if (req.query.search) { where += ` AND (n.name ILIKE $${params.push('%' + req.query.search + '%')} OR n.collection ILIKE $${params.length})`; }
+    const sort = req.query.sort === 'price_asc' ? 'nl.price_usdc ASC NULLS LAST'
+               : req.query.sort === 'price_desc' ? 'nl.price_usdc DESC NULLS LAST'
+               : req.query.sort === 'oldest' ? 'n.id ASC'
+               : 'n.id DESC';
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const q = `SELECT n.*, nl.price_usdc, nl.id AS listing_id, nl.expires_at
+               FROM nfts n LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+               WHERE ${where} ORDER BY ${sort} LIMIT $${params.push(limit)} OFFSET $${params.push(offset)}`;
     const { rows } = await pool.query(q, params);
     res.json({ nfts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nfts/favorites', async (req, res) => {
+  if (!req.user) return res.json({ nfts: [] });
+  try {
+    const { rows } = await pool.query(
+      `SELECT n.*, nl.price_usdc, nl.id AS listing_id
+       FROM nft_favorites f
+       JOIN nfts n ON n.id=f.nft_id
+       LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+       WHERE f.user_id=$1 AND n.burned=false ORDER BY f.created_at DESC`,
+      [req.user.id]
+    );
+    res.json({ nfts: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nfts/:id', async (req, res) => {
+  try {
+    const { rows: [nft] } = await pool.query(
+      `SELECT n.*, nl.price_usdc, nl.id AS listing_id, nl.expires_at
+       FROM nfts n LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+       WHERE n.id=$1 AND n.burned=false`,
+      [req.params.id]
+    );
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    const { rows: bids } = await pool.query(
+      `SELECT * FROM nft_bids WHERE nft_id=$1 AND status='open' ORDER BY price_usdc DESC`,
+      [nft.id]
+    );
+    const { rows: transfers } = await pool.query(
+      `SELECT * FROM nft_transfers WHERE nft_id=$1 ORDER BY created_at DESC LIMIT 20`,
+      [nft.id]
+    );
+    let favorited = false;
+    if (req.user) {
+      const { rows } = await pool.query('SELECT 1 FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+      favorited = rows.length > 0;
+    }
+    res.json({ nft, bids, transfers, favorited });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nft-collections', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.name, c.description, c.banner_url, c.creator_username,
+             COUNT(n.id)::int AS item_count,
+             COALESCE(MIN(nl.price_usdc),0) AS floor_price,
+             COALESCE(SUM(nt.price_usdc) FILTER (WHERE nt.event_type='sale'),0) AS volume_usdc
+      FROM nft_collections c
+      LEFT JOIN nfts n ON n.collection=c.name AND n.burned=false
+      LEFT JOIN nft_listings nl ON nl.nft_id=n.id AND nl.status='active'
+      LEFT JOIN nft_transfers nt ON nt.nft_id=n.id
+      GROUP BY c.id ORDER BY volume_usdc DESC
+    `);
+    res.json({ collections: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/nft-activity', async (req, res) => {
+  if (!req.user) return res.json({ events: [] });
+  try {
+    const { rows } = await pool.query(
+      `SELECT nt.*, n.name AS nft_name, n.image_url AS nft_image, n.token_id
+       FROM nft_transfers nt
+       JOIN nfts n ON n.id=nt.nft_id
+       WHERE nt.to_user_id=$1 OR nt.from_user_id=$1
+       ORDER BY nt.created_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    res.json({ events: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/nfts/mint', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { name, description, image_url } = req.body;
+    const { name, description, image_url, royalty_bps, rarity, properties, collection } = req.body;
     if (!validStr(name, 100)) return res.status(400).json({ error: 'Invalid name' });
     if (!validStr(image_url, 1000) || !HTTP_URL_RE.test(image_url))
       return res.status(400).json({ error: 'image_url must be an http(s) URL' });
     if (description != null && String(description).length > 500)
       return res.status(400).json({ error: 'Description too long' });
-    const MINT_COST = 10 * UNITS;
+    const rbps = Math.max(0, Math.min(parseInt(royalty_bps) || 500, 2000));
+    const rarityVal = ['common','uncommon','rare','epic','legendary'].includes(rarity) ? rarity : 'common';
+    const collectionVal = validStr(collection, 100) ? collection : 'BloomMoney Genesis';
+    let propsJson = null;
+    if (properties) {
+      try { propsJson = JSON.stringify(typeof properties === 'string' ? JSON.parse(properties) : properties); } catch (_) {}
+    }
+    const MINT_COST = 10.5 * UNITS;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
-    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient BLOOM (need 10)');
-    await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [MINT_COST, req.user.id]);
+    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient BLOOM (need 10.5)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [MINT_COST, req.user.id]);
     const { rows: [nft] } = await client.query(
-      "INSERT INTO nfts(owner_user_id,owner_username,name,description,image_url,token_id) VALUES($1,$2,$3,$4,$5,'TEMP') RETURNING id",
-      [req.user.id, req.user.username, name, description || '', image_url]
+      `INSERT INTO nfts(owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity,properties)
+       VALUES($1,$2,$1,$2,$3,$4,$5,'TEMP',$6,$7,$8,$9) RETURNING id`,
+      [req.user.id, req.user.username, name, description || '', image_url, collectionVal, rbps, rarityVal, propsJson]
     );
     const tokenId = 'BLOOM-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
     await client.query('UPDATE nfts SET token_id=$1 WHERE id=$2', [tokenId, nft.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
+       VALUES($1,NULL,NULL,$2,$3,'mint','BLOOM-TX-' || LPAD(TO_HEX($1),8,'0'))`,
+      [nft.id, req.user.id, req.user.username]
+    );
+    await client.query(
+      `INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_gas','BLOOM',$2,$3)`,
+      [req.user.id, -MINT_COST, `Mint NFT: ${name}`]
+    );
     await client.query('COMMIT');
-    res.json({ ok: true, token_id: tokenId });
+    res.json({ ok: true, token_id: tokenId, nft_id: nft.id });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/list', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { price_usdc, expires_days } = req.body;
+    const price = parseInt(price_usdc);
+    if (!price || price < 1) return res.status(400).json({ error: 'price_usdc required (min 1 micro-unit)' });
+    const days = Math.max(1, Math.min(parseInt(expires_days) || 30, 90));
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    if (nft.owner_user_id !== req.user.id) return res.status(403).json({ error: 'Not your NFT' });
+    await client.query(
+      `INSERT INTO nft_listings(nft_id,seller_user_id,seller_username,price_usdc,expires_at)
+       VALUES($1,$2,$3,$4,NOW()+$5*interval '1 day')
+       ON CONFLICT DO NOTHING`,
+      [nft.id, req.user.id, req.user.username, price, days]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/nfts/:id/list', requireWallet, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      "UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND seller_user_id=$2 AND status='active'",
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'No active listing found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/nfts/:id/buy', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query(
+      'SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]
+    );
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id === req.user.id) throw new Error('Cannot buy your own NFT');
+    const { rows: [listing] } = await client.query(
+      "SELECT * FROM nft_listings WHERE nft_id=$1 AND status='active' AND expires_at > NOW() FOR UPDATE", [nft.id]
+    );
+    if (!listing) throw new Error('No active listing for this NFT');
+
+    const tier = await userTier(req.user.id);
+    if (!await withinBasicDailyCap(req.user.id, tier)) throw new Error('Daily trade cap reached for Basic tier');
+
+    const price = listing.price_usdc;
+    const royalty = Math.floor(price * (nft.royalty_bps || 0) / 10000);
+    const gasFee = Math.floor(price * 0.025); // 2.5% platform fee
+    const sellerReceives = price - royalty - gasFee;
+
+    // Deduct from buyer
+    const { rows: [buyerBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!buyerBal || Number(buyerBal.balance) < price) throw new Error('Insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [price, req.user.id]);
+
+    // Pay seller
+    await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.owner_user_id, sellerReceives]);
+
+    // Royalty to creator
+    if (royalty > 0 && nft.creator_user_id && nft.creator_user_id !== nft.owner_user_id) {
+      await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.creator_user_id, royalty]);
+      await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name} sold to @${req.user.username}`]);
+    }
+
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
+    // Transfer ownership
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [req.user.id, req.user.username, nft.id]);
+    await client.query("UPDATE nft_listings SET status='sold' WHERE id=$1", [listing.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'sale',$6,$7)`,
+      [nft.id, nft.owner_user_id, nft.owner_username, req.user.id, req.user.username, price, txHash]
+    );
+    // Transactions
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_buy','USDC',$2,$3)", [req.user.id, -price, `Buy NFT: ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_sale','USDC',$2,$3)", [nft.owner_user_id, sellerReceives, `Sale NFT: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/bid', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { price_usdc, expires_days } = req.body;
+    const price = parseInt(price_usdc);
+    if (!price || price < 1) return res.status(400).json({ error: 'price_usdc required' });
+    const days = Math.max(1, Math.min(parseInt(expires_days) || 7, 30));
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id === req.user.id) throw new Error('Cannot bid on own NFT');
+    const { rows: [bal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!bal || Number(bal.balance) < price) throw new Error('Insufficient USDC');
+    await client.query(
+      `INSERT INTO nft_bids(nft_id,bidder_user_id,bidder_username,price_usdc,expires_at)
+       VALUES($1,$2,$3,$4,NOW()+$5*interval '1 day')`,
+      [nft.id, req.user.id, req.user.username, price, days]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/nfts/bids/:bidId', requireWallet, async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      "UPDATE nft_bids SET status='withdrawn' WHERE id=$1 AND bidder_user_id=$2 AND status='open'",
+      [req.params.bidId, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Bid not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/nfts/:id/accept-bid/:bidId', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id !== req.user.id) throw new Error('Not your NFT');
+    const { rows: [bid] } = await client.query(
+      "SELECT * FROM nft_bids WHERE id=$1 AND nft_id=$2 AND status='open' AND expires_at > NOW() FOR UPDATE",
+      [req.params.bidId, nft.id]
+    );
+    if (!bid) throw new Error('Bid not found or expired');
+
+    const price = bid.price_usdc;
+    const royalty = Math.floor(price * (nft.royalty_bps || 0) / 10000);
+    const gasFee = Math.floor(price * 0.025);
+    const sellerReceives = price - royalty - gasFee;
+
+    const { rows: [buyerBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [bid.bidder_user_id]
+    );
+    if (!buyerBal || Number(buyerBal.balance) < price) throw new Error('Bidder has insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [price, bid.bidder_user_id]);
+    await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [req.user.id, sellerReceives]);
+    if (royalty > 0 && nft.creator_user_id && nft.creator_user_id !== req.user.id) {
+      await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.creator_user_id, royalty]);
+      await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name}`]);
+    }
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'B';
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [bid.bidder_user_id, bid.bidder_username, nft.id]);
+    await client.query("UPDATE nft_bids SET status='accepted' WHERE id=$1", [bid.id]);
+    await client.query("UPDATE nft_bids SET status='outbid' WHERE nft_id=$1 AND id!=$2 AND status='open'", [nft.id, bid.id]);
+    await client.query("UPDATE nft_listings SET status='sold' WHERE nft_id=$1 AND status='active'", [nft.id]);
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'sale',$6,$7)`,
+      [nft.id, req.user.id, req.user.username, bid.bidder_user_id, bid.bidder_username, price, txHash]
+    );
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_buy','USDC',$2,$3)", [bid.bidder_user_id, -price, `Buy NFT (bid): ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_sale','USDC',$2,$3)", [req.user.id, sellerReceives, `Sale NFT: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/transfer', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_username } = req.body;
+    if (!validStr(to_username, 255)) return res.status(400).json({ error: 'to_username required' });
+    await client.query('BEGIN');
+    const { rows: [nft] } = await client.query('SELECT * FROM nfts WHERE id=$1 AND burned=false FOR UPDATE', [req.params.id]);
+    if (!nft) throw new Error('NFT not found');
+    if (nft.owner_user_id !== req.user.id) throw new Error('Not your NFT');
+    if (nft.owner_username === to_username) throw new Error('Cannot transfer to yourself');
+    const { rows: [recipient] } = await client.query('SELECT user_id,username FROM users WHERE username=$1', [to_username]);
+    if (!recipient) throw new Error('Recipient not found');
+    const GAS = Math.floor(0.5 * UNITS);
+    const { rows: [bloomBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+    );
+    if (!bloomBal || Number(bloomBal.balance) < GAS) throw new Error('Insufficient BLOOM (need 0.5 for gas)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [GAS, req.user.id]);
+    await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [recipient.user_id, recipient.username, nft.id]);
+    await client.query("UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND status='active'", [nft.id]);
+    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T';
+    await client.query(
+      `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
+       VALUES($1,$2,$3,$4,$5,'transfer',$6)`,
+      [nft.id, req.user.id, req.user.username, recipient.user_id, recipient.username, txHash]
+    );
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_transfer_gas','BLOOM',$2,$3)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`]);
+    await client.query('COMMIT');
+    res.json({ ok: true, tx_hash: txHash });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.post('/api/nfts/:id/favorite', requireWallet, async (req, res) => {
+  try {
+    const { rows: [nft] } = await pool.query('SELECT id FROM nfts WHERE id=$1 AND burned=false', [req.params.id]);
+    if (!nft) return res.status(404).json({ error: 'NFT not found' });
+    const { rows: [existing] } = await pool.query('SELECT 1 FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+    if (existing) {
+      await pool.query('DELETE FROM nft_favorites WHERE user_id=$1 AND nft_id=$2', [req.user.id, nft.id]);
+      res.json({ ok: true, favorited: false });
+    } else {
+      await pool.query('INSERT INTO nft_favorites(user_id,nft_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.user.id, nft.id]);
+      res.json({ ok: true, favorited: true });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── KYC ───────────────────────────────────────────────────────────────────────
@@ -2260,6 +2990,399 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
   } finally { client.release(); }
 });
 
+// ── Messaging (direct & group chats) ────────────────────────────────────────────
+// Private feature: conversations/conversation_members/messages are all
+// staging:private. No requireWallet — messaging is social, not financial.
+
+const MESSAGE_MAX_LEN = 4000;
+const GROUP_MAX_MEMBERS = 50;
+
+// Membership check shared by every conversation-scoped route. Returns the
+// conversation row when the user belongs to it, otherwise null.
+async function loadMemberConversation(conversationId, userId) {
+  const { rows } = await pool.query(
+    `SELECT c.* FROM conversations c
+     JOIN conversation_members m ON m.conversation_id = c.id
+     WHERE c.id = $1 AND m.user_id = $2`,
+    [conversationId, userId]
+  );
+  return rows[0] || null;
+}
+
+// Resolve a list of usernames to existing, non-banned user rows. Skips the
+// caller (added separately) and de-dupes. Throws on an unknown username.
+async function resolveUsernames(usernames, callerId) {
+  const out = [];
+  const seen = new Set([callerId]);
+  for (const raw of usernames) {
+    if (!validStr(raw, 255)) continue;
+    const { rows } = await pool.query(
+      'SELECT user_id, username, is_banned FROM users WHERE username=$1', [raw]
+    );
+    const u = rows[0];
+    if (!u) throw new Error(`Unknown user: ${raw}`);
+    if (u.is_banned) throw new Error(`User unavailable: ${raw}`);
+    if (seen.has(u.user_id)) continue;
+    seen.add(u.user_id);
+    out.push(u);
+  }
+  return out;
+}
+
+// GET /api/conversations — the caller's inbox, newest activity first.
+app.get('/api/conversations', async (req, res) => {
+  try {
+    // Staging-only demo injection: guarantee the tester sees a populated inbox
+    // without referencing real users in the boot seed.
+    if (IS_STAGING && req.query.demo === '1') {
+      await injectDemoConversations(req.user).catch(() => {});
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        c.id, c.type, c.title, c.created_by_user_id, c.last_message_at,
+        me.last_read_at,
+        (SELECT COUNT(*)::int FROM conversation_members cm WHERE cm.conversation_id = c.id) AS member_count,
+        (SELECT COUNT(*)::int FROM messages msg
+           WHERE msg.conversation_id = c.id
+             AND msg.created_at > me.last_read_at
+             AND msg.sender_user_id <> $1) AS unread,
+        lm.content       AS last_content,
+        lm.sender_username AS last_sender,
+        lm.created_at    AS last_at
+      FROM conversation_members me
+      JOIN conversations c ON c.id = me.conversation_id
+      LEFT JOIN LATERAL (
+        SELECT content, sender_username, created_at
+        FROM messages WHERE conversation_id = c.id
+        ORDER BY created_at DESC LIMIT 1
+      ) lm ON TRUE
+      WHERE me.user_id = $1
+      ORDER BY c.last_message_at DESC
+    `, [req.user.id]);
+
+    // For direct conversations, attach the counterpart's identity for the title.
+    const directIds = rows.filter(r => r.type === 'direct').map(r => r.id);
+    const others = {};
+    if (directIds.length) {
+      const { rows: mems } = await pool.query(`
+        SELECT cm.conversation_id, cm.username, u.display_name
+        FROM conversation_members cm
+        LEFT JOIN users u ON u.user_id = cm.user_id
+        WHERE cm.conversation_id = ANY($1) AND cm.user_id <> $2
+      `, [directIds, req.user.id]);
+      mems.forEach(m => { if (!others[m.conversation_id]) others[m.conversation_id] = m; });
+    }
+
+    let total_unread = 0;
+    const conversations = rows.map(r => {
+      total_unread += Number(r.unread) || 0;
+      const counterpart = others[r.id];
+      return {
+        id: r.id,
+        type: r.type,
+        title: r.title,
+        member_count: r.member_count,
+        unread: Number(r.unread) || 0,
+        last_message: r.last_content ? {
+          content: r.last_content, sender_username: r.last_sender, created_at: r.last_at,
+        } : null,
+        last_message_at: r.last_message_at,
+        other_username: counterpart ? counterpart.username : null,
+        other_display_name: counterpart ? counterpart.display_name : null,
+      };
+    });
+    res.json({ conversations, total_unread });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations — create a direct (find-or-create) or group chat.
+app.post('/api/conversations', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { type } = req.body || {};
+    if (type === 'direct') {
+      const { username } = req.body || {};
+      if (!validStr(username, 255)) return res.status(400).json({ error: 'username required' });
+      const [target] = await resolveUsernames([username], req.user.id);
+      if (!target) return res.status(400).json({ error: 'Cannot message yourself' });
+
+      // Find an existing direct conversation with exactly these two members.
+      const { rows: existing } = await client.query(`
+        SELECT c.id FROM conversations c
+        JOIN conversation_members a ON a.conversation_id = c.id AND a.user_id = $1
+        JOIN conversation_members b ON b.conversation_id = c.id AND b.user_id = $2
+        WHERE c.type = 'direct'
+          AND (SELECT COUNT(*) FROM conversation_members m WHERE m.conversation_id = c.id) = 2
+        LIMIT 1
+      `, [req.user.id, target.user_id]);
+      if (existing.length) return res.json({ id: existing[0].id, type: 'direct', created: false });
+
+      await client.query('BEGIN');
+      const { rows: [conv] } = await client.query(
+        `INSERT INTO conversations(type, created_by_user_id) VALUES('direct', $1) RETURNING id`,
+        [req.user.id]
+      );
+      await client.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3),($1,$4,$5)`,
+        [conv.id, req.user.id, req.user.username, target.user_id, target.username]
+      );
+      await client.query('COMMIT');
+      return res.json({ id: conv.id, type: 'direct', created: true });
+    }
+
+    if (type === 'group') {
+      const { title, usernames } = req.body || {};
+      if (!validStr(title, 255)) return res.status(400).json({ error: 'Group name required' });
+      if (!Array.isArray(usernames) || usernames.length < 1) {
+        return res.status(400).json({ error: 'Pick at least one member' });
+      }
+      const members = await resolveUsernames(usernames, req.user.id);
+      if (!members.length) return res.status(400).json({ error: 'Pick at least one valid member' });
+      if (members.length + 1 > GROUP_MAX_MEMBERS) return res.status(400).json({ error: 'Too many members' });
+
+      await client.query('BEGIN');
+      const { rows: [conv] } = await client.query(
+        `INSERT INTO conversations(type, title, created_by_user_id) VALUES('group', $1, $2) RETURNING id`,
+        [title, req.user.id]
+      );
+      await client.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)`,
+        [conv.id, req.user.id, req.user.username]
+      );
+      for (const m of members) {
+        await client.query(
+          `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)
+           ON CONFLICT DO NOTHING`,
+          [conv.id, m.user_id, m.username]
+        );
+      }
+      await client.query('COMMIT');
+      return res.json({ id: conv.id, type: 'group', created: true });
+    }
+
+    return res.status(400).json({ error: 'Invalid conversation type' });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// GET /api/conversations/:id/messages — thread history; marks the thread read.
+app.get('/api/conversations/:id/messages', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const { rows: members } = await pool.query(
+      `SELECT cm.user_id, cm.username, u.display_name
+       FROM conversation_members cm
+       LEFT JOIN users u ON u.user_id = cm.user_id
+       WHERE cm.conversation_id = $1`, [convId]
+    );
+    const { rows: msgs } = await pool.query(
+      `SELECT id, sender_user_id, sender_username, content, created_at
+       FROM messages WHERE conversation_id = $1
+       ORDER BY created_at ASC LIMIT 200`, [convId]
+    );
+
+    // Opening the thread marks it read.
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+
+    const other = conv.type === 'direct' ? members.find(m => m.user_id !== req.user.id) : null;
+    res.json({
+      conversation: {
+        id: conv.id, type: conv.type, title: conv.title,
+        created_by_user_id: conv.created_by_user_id,
+        member_count: members.length,
+        other_username: other ? other.username : null,
+        other_display_name: other ? other.display_name : null,
+      },
+      members,
+      messages: msgs,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/messages — send a message.
+app.post('/api/conversations/:id/messages', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const content = (req.body && typeof req.body.content === 'string') ? req.body.content.trim() : '';
+    if (!content) return res.status(400).json({ error: 'Message cannot be empty' });
+    if (content.length > MESSAGE_MAX_LEN) return res.status(400).json({ error: 'Message too long' });
+
+    const { rows: [msg] } = await pool.query(
+      `INSERT INTO messages(conversation_id, sender_user_id, sender_username, content)
+       VALUES($1,$2,$3,$4)
+       RETURNING id, sender_user_id, sender_username, content, created_at`,
+      [convId, req.user.id, req.user.username, content]
+    );
+    await pool.query(`UPDATE conversations SET last_message_at = NOW() WHERE id = $1`, [convId]);
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+    res.json({ message: msg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/members — invite users to a group.
+app.post('/api/conversations/:id/members', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    if (conv.type !== 'group') return res.status(400).json({ error: 'Can only add people to a group' });
+
+    const { usernames } = req.body || {};
+    if (!Array.isArray(usernames) || !usernames.length) return res.status(400).json({ error: 'No users provided' });
+    const members = await resolveUsernames(usernames, req.user.id);
+    const { rows: [{ n }] } = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM conversation_members WHERE conversation_id=$1', [convId]
+    );
+    if (n + members.length > GROUP_MAX_MEMBERS) return res.status(400).json({ error: 'Too many members' });
+
+    let added = 0;
+    for (const m of members) {
+      const r = await pool.query(
+        `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,$2,$3)
+         ON CONFLICT DO NOTHING`,
+        [convId, m.user_id, m.username]
+      );
+      added += r.rowCount;
+    }
+    res.json({ ok: true, added });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/conversations/:id/read — mark a conversation read.
+app.post('/api/conversations/:id/read', async (req, res) => {
+  try {
+    const convId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(convId)) return res.status(400).json({ error: 'bad id' });
+    const conv = await loadMemberConversation(convId, req.user.id);
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    await pool.query(
+      `UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2`,
+      [convId, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/users/search?q= — recipient lookup for starting chats / adding people.
+app.get('/api/users/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (q.length < 1) return res.json({ users: [] });
+    const { rows } = await pool.query(`
+      SELECT username, display_name FROM users
+      WHERE user_id <> $1 AND is_banned = false
+        AND (username ILIKE $2 OR display_name ILIKE $2)
+      ORDER BY username ASC
+      LIMIT 10
+    `, [req.user.id, '%' + q + '%']);
+    res.json({ users: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Boot-time messaging seed (staging only). Creates the two demo conversations
+// (direct alice↔bob + the "BLOOM Whales" group) with a handful of messages.
+// Idempotent via explicit high ids + ON CONFLICT DO NOTHING. Safe to call
+// repeatedly (boot seed and request-time demo injection both call it).
+async function ensureMessagingSeed() {
+  if (!IS_STAGING) return;
+  // Direct: staging-alice (9001) ↔ staging-bob (9002), conversation id 9902.
+  await pool.query(
+    `INSERT INTO conversations(id,type,created_by_user_id,last_message_at)
+     VALUES (9902,'direct',9001,NOW()-INTERVAL '8 minutes') ON CONFLICT(id) DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id,user_id,username) VALUES
+       (9902,9001,'staging-alice'),(9902,9002,'staging-bob')
+     ON CONFLICT DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
+       (990001,9902,9001,'staging-alice','Staging demo — hey Bob, did you see BLOOM pumped today? 🌸',NOW()-INTERVAL '20 minutes'),
+       (990002,9902,9002,'staging-bob','Staging demo — yeah! Staked another 500 this morning.',NOW()-INTERVAL '16 minutes'),
+       (990003,9902,9001,'staging-alice','Staging demo — nice. Want to copy-trade my ETH-PERP long?',NOW()-INTERVAL '12 minutes'),
+       (990004,9902,9002,'staging-bob','Staging demo — for sure, send me the link 🚀',NOW()-INTERVAL '8 minutes')
+     ON CONFLICT(id) DO NOTHING`
+  );
+  // Group: "Staging demo — BLOOM Whales", conversation id 9901, members
+  // alice/bob/carol/eve (9001/9002/9003/9005).
+  await pool.query(
+    `INSERT INTO conversations(id,type,title,created_by_user_id,last_message_at)
+     VALUES (9901,'group','Staging demo — BLOOM Whales',9001,NOW()-INTERVAL '3 minutes') ON CONFLICT(id) DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id,user_id,username) VALUES
+       (9901,9001,'staging-alice'),(9901,9002,'staging-bob'),
+       (9901,9003,'staging-carol'),(9901,9005,'staging-eve')
+     ON CONFLICT DO NOTHING`
+  );
+  await pool.query(
+    `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
+       (990011,9901,9001,'staging-alice','Staging demo — welcome to the BLOOM Whales group! 🐳',NOW()-INTERVAL '30 minutes'),
+       (990012,9901,9003,'staging-carol','Staging demo — gm whales. Opinion markets are heating up.',NOW()-INTERVAL '22 minutes'),
+       (990013,9901,9005,'staging-eve','Staging demo — staking rewards just hit my wallet 🌱',NOW()-INTERVAL '14 minutes'),
+       (990014,9901,9002,'staging-bob','Staging demo — who is aping the new ICO?',NOW()-INTERVAL '7 minutes'),
+       (990015,9901,9001,'staging-alice','Staging demo — I am in for a small bag. DYOR though!',NOW()-INTERVAL '3 minutes')
+     ON CONFLICT(id) DO NOTHING`
+  );
+}
+
+// Staging demo: idempotently ensure the current tester has a populated inbox.
+// Adds them to the seeded demo group and gives them a direct welcome thread.
+async function injectDemoConversations(user) {
+  // Ensure the demo users + the two boot-seeded conversations exist (the boot
+  // seed already creates them, but request-time injection must be self-standing
+  // so the ?demo=1 route works even against a freshly migrated test DB).
+  await ensureMessagingSeed();
+  // (a) add the tester to the demo group "Staging demo — BLOOM Whales" (id 9901).
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id, user_id, username)
+     VALUES (9901, $1, $2) ON CONFLICT DO NOTHING`,
+    [user.id, user.username]
+  );
+  // (b) ensure a direct conversation between the tester and staging-alice (9001).
+  const { rows: existing } = await pool.query(`
+    SELECT c.id FROM conversations c
+    JOIN conversation_members a ON a.conversation_id = c.id AND a.user_id = $1
+    JOIN conversation_members b ON b.conversation_id = c.id AND b.user_id = 9001
+    WHERE c.type = 'direct'
+      AND (SELECT COUNT(*) FROM conversation_members m WHERE m.conversation_id = c.id) = 2
+    LIMIT 1
+  `, [user.id]);
+  if (!existing.length) {
+    const { rows: [conv] } = await pool.query(
+      `INSERT INTO conversations(type, created_by_user_id, last_message_at)
+       VALUES('direct', 9001, NOW()) RETURNING id`
+    );
+    await pool.query(
+      `INSERT INTO conversation_members(conversation_id, user_id, username) VALUES($1,9001,'staging-alice'),($1,$2,$3)`,
+      [conv.id, user.id, user.username]
+    );
+    await pool.query(
+      `INSERT INTO messages(conversation_id, sender_user_id, sender_username, content)
+       VALUES($1, 9001, 'staging-alice', 'Staging demo — Welcome to BloomMoney messages! 🌸')`,
+      [conv.id]
+    );
+  }
+}
+
 // ── Server-rendered Admin console (Phase 5) ─────────────────────────────────────
 // Standalone HTML pages at /admin pathnames. They pass the GET branch of the
 // auth gate, so each handler re-checks admin explicitly and renders a "not
@@ -2712,6 +3835,7 @@ async function start() {
       UNIQUE(post_id, user_id)
     );
     ALTER TABLE posts ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS milestone_type VARCHAR(50);
     CREATE TABLE IF NOT EXISTS post_unlocks (
       id SERIAL PRIMARY KEY,
       post_id INTEGER NOT NULL REFERENCES posts(id),
@@ -2853,6 +3977,58 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       burned BOOLEAN DEFAULT FALSE
     );
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS creator_user_id INTEGER;
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS creator_username VARCHAR(255);
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS royalty_bps INTEGER NOT NULL DEFAULT 500;
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS rarity VARCHAR(20) NOT NULL DEFAULT 'common';
+    ALTER TABLE nfts ADD COLUMN IF NOT EXISTS properties JSONB;
+    CREATE TABLE IF NOT EXISTS nft_collections (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) UNIQUE NOT NULL,
+      description TEXT,
+      banner_url TEXT,
+      creator_username VARCHAR(255),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_listings (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      seller_user_id INTEGER NOT NULL,
+      seller_username VARCHAR(255) NOT NULL,
+      price_usdc BIGINT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS nft_listings_active_unique ON nft_listings(nft_id) WHERE status='active';
+    CREATE TABLE IF NOT EXISTS nft_bids (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      bidder_user_id INTEGER NOT NULL,
+      bidder_username VARCHAR(255) NOT NULL,
+      price_usdc BIGINT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open',
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_transfers (
+      id SERIAL PRIMARY KEY,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      from_user_id INTEGER,
+      from_username VARCHAR(255),
+      to_user_id INTEGER,
+      to_username VARCHAR(255),
+      event_type VARCHAR(20) NOT NULL DEFAULT 'transfer',
+      price_usdc BIGINT,
+      tx_hash VARCHAR(64),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS nft_favorites (
+      user_id INTEGER NOT NULL,
+      nft_id INTEGER NOT NULL REFERENCES nfts(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id, nft_id)
+    );
     CREATE TABLE IF NOT EXISTS kyc_verifications (
       id SERIAL PRIMARY KEY,
       user_id INTEGER UNIQUE NOT NULL,
@@ -2946,6 +4122,48 @@ async function start() {
       amount BIGINT NOT NULL,
       deposited_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS trade_journal_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(10) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(4) NOT NULL,
+      quantity NUMERIC(24,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date DATE NOT NULL,
+      exit_date DATE,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_journal_user_idx ON trade_journal_entries (user_id, trade_date DESC);
+    CREATE TABLE IF NOT EXISTS conversations (
+      id SERIAL PRIMARY KEY,
+      type VARCHAR(10) NOT NULL DEFAULT 'direct',
+      title VARCHAR(255),
+      created_by_user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_message_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS conversation_members (
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      user_id INTEGER NOT NULL,
+      username VARCHAR(255) NOT NULL,
+      joined_at TIMESTAMPTZ DEFAULT NOW(),
+      last_read_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (conversation_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS conversation_members_user_idx ON conversation_members (user_id);
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      sender_user_id INTEGER NOT NULL,
+      sender_username VARCHAR(255) NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at DESC);
   `);
 
   // ── Phase 1/3 migrations (idempotent) ──────────────────────────────────────
@@ -2975,6 +4193,25 @@ async function start() {
     ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ;
     ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ;
     ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS icon_url TEXT;
+  `);
+
+  // trade_entries — personal trade journal (private: individual P&L data).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trade_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(20) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(10) NOT NULL,
+      quantity NUMERIC(20,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_entries_user_idx ON trade_entries (user_id, trade_date DESC);
   `);
 
   // funding_payments — per-position funding settlements (Phase 3, private).
@@ -3021,24 +4258,45 @@ async function start() {
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
+    COMMENT ON TABLE trade_journal_entries IS 'staging:private';
+    COMMENT ON TABLE trade_entries IS 'staging:private';
+    COMMENT ON TABLE conversations IS 'staging:private';
+    COMMENT ON TABLE conversation_members IS 'staging:private';
+    COMMENT ON TABLE messages IS 'staging:private';
+    COMMENT ON TABLE nft_favorites IS 'staging:private';
+    COMMENT ON TABLE nft_listings IS 'staging:private';
+    COMMENT ON TABLE nft_bids IS 'staging:private';
+    COMMENT ON TABLE nft_transfers IS 'staging:private';
   `);
 
   // Seed initial market prices
   await pool.query(`
     INSERT INTO market_prices(symbol,price_usd) VALUES
-      ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1)
+      ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1),
+      ('BNB',310),('SOL',150),('XRP',0.55),('ADA',0.45),
+      ('DOGE',0.12),('TON',5.50),('USDT',1)
     ON CONFLICT(symbol) DO NOTHING
   `);
 
   // Seed price history — 24 hourly data points per token using deterministic wave formulas.
   // Uses DATE_TRUNC so timestamps are hour-granular; ON CONFLICT skips existing rows within
   // the same boot hour, keeping the seed idempotent.
-  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '26 hours'`);
+  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '32 days'`);
   const historyTokenDefs = [
-    { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)     * 0.018)).toFixed(6) },
-    { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)     * 0.020)).toFixed(6) },
-    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1) * 0.030)).toFixed(6) },
+    { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)          * 0.018)).toFixed(6) },
+    { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)          * 0.020)).toFixed(6) },
+    { symbol: 'BNB',   fn: (i) => (310    * (1 + Math.cos(i * 0.41 + 0.8)    * 0.018)).toFixed(6) },
+    { symbol: 'SOL',   fn: (i) => (150    * (1 + Math.sin(i * 0.48 + 0.5)    * 0.025)).toFixed(6) },
+    { symbol: 'XRP',   fn: (i) => (0.55   * (1 + Math.sin(i * 0.55 + 1.2)    * 0.030)).toFixed(6) },
+    { symbol: 'ADA',   fn: (i) => (0.45   * (1 + Math.cos(i * 0.50 + 0.3)    * 0.028)).toFixed(6) },
+    { symbol: 'DOGE',  fn: (i) => (0.12   * (1 + Math.sin(i * 0.60 + 2.1)    * 0.035)).toFixed(6) },
+    { symbol: 'TON',   fn: (i) => (5.50   * (1 + Math.cos(i * 0.44 + 1.5)    * 0.022)).toFixed(6) },
+    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)      * 0.030)).toFixed(6) },
     { symbol: 'USDC',  fn: ()  => '1.000000' },
+    { symbol: 'USDT',  fn: ()  => '1.000000' },
+    { symbol: 'LINK',  fn: (i) => (10     * (1 + Math.cos(i * 0.43 + 2)      * 0.024)).toFixed(6) },
+    { symbol: 'DOT',   fn: (i) => (7      * (1 + Math.sin(i * 0.39 + 1)      * 0.021)).toFixed(6) },
+    { symbol: 'AVAX',  fn: (i) => (27     * (1 + Math.cos(i * 0.46 + 3)      * 0.023)).toFixed(6) },
   ];
   for (const t of historyTokenDefs) {
     const vals = [], params = [];
@@ -3074,6 +4332,10 @@ async function start() {
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
     `);
+    // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
+    await pool.query(`
+      UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL
+    `, ['data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMDBhYTU1Ii8+PHRleHQgeD0iMzIiIHk9IjQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIzMiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BPC90ZXh0Pjwvc3ZnPg==']);
 
     // Give demo users an obviously-fake non-zero Points available balance so the
     // Post-to-Earn badge renders a realistic number in staging previews. Scoped
@@ -3108,7 +4370,10 @@ async function start() {
     for (const uid of [9001,9002,9003,9004,9005,9006]) {
       await pool.query(`
         INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES
-          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),($1,'ETH',2000000),($1,'BTC',100000)
+          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),
+          ($1,'ETH',2000000),($1,'BTC',100000),
+          ($1,'BNB',1000000),($1,'SOL',10000000),($1,'XRP',200000000),
+          ($1,'ADA',100000000),($1,'DOGE',200000000),($1,'TON',10000000),($1,'USDT',20000000)
         ON CONFLICT DO NOTHING
       `, [uid]);
       await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);
@@ -3116,16 +4381,16 @@ async function start() {
 
     // Seed posts
     const posts = [
-      [9001,'Staging demo post #1 — BloomMoney is the future of onchain finance! 🌸'],
-      [9002,'Staging demo post #2 — Just minted my first NFT on BloomMoney. The UI is incredible.'],
-      [9003,'Staging demo post #3 — Opinion markets are live! Betting YES on ETH to $5k before 2027.'],
-      [9004,'Staging demo post #4 — Paper trading BTC-PERP with 10x leverage. Up 23% today! 📈'],
-      [9005,'Staging demo post #5 — Staking 500 BLOOM at 12% APY. Passive income is the way.'],
-      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 BLOOM. The rate is great right now!'],
-      [9002,'Staging demo post #7 — Added liquidity to BLOOM/USDC pool. Earning fees every day.'],
-      [9003,'Staging demo post #8 — Invested in the SDC ICO. Early adopter advantages are real.'],
-      [9006,'Staging demo post #9 — Platform stats looking healthy. 500 trades in 24 hours!'],
-      [9004,'Staging demo post #10 — Closed my ETH-PERP long for +15% PnL. BloomMoney futures rule!'],
+      [9001,'Staging demo post #1 — $BTC consolidating at support. BloomMoney is the future of onchain finance! 🌸'],
+      [9002,'Staging demo post #2 — $ETH looking bullish after the merge. Just minted my first NFT on BloomMoney.'],
+      [9003,'Staging demo post #3 — Opinion markets are live! Betting YES on $ETH to $5k before 2027. 📊'],
+      [9004,'Staging demo post #4 — Paper trading $BTC-PERP with 10x leverage. Up 23% today! 📈'],
+      [9005,'Staging demo post #5 — Staking 500 $BLOOM at 12% APY. Passive income is the way.'],
+      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 $BLOOM. The rate is great right now!'],
+      [9002,'Staging demo post #7 — Added liquidity to $BLOOM/USDC pool. Earning fees every day.'],
+      [9003,'Staging demo post #8 — $BTC dominance rising. Invested in the SDC ICO. Early adopter advantages are real.'],
+      [9006,'Staging demo post #9 — Platform stats looking healthy. $ETH volume up 30% in 24 hours! 🚀'],
+      [9004,'Staging demo post #10 — Closed my $ETH-PERP long for +15% PnL. BloomMoney futures rule!'],
     ];
     for (let i = 0; i < posts.length; i++) {
       const uid = posts[i][0];
@@ -3154,6 +4419,17 @@ async function start() {
         (900016,9005,'staging-eve','Staging demo alpha — the secret BLOOM entry I''m not unblurring for free 🌸',TRUE)
       ON CONFLICT(id) DO NOTHING`
     );
+
+    // Seed milestone posts for the Wins 🏆 tab.
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,milestone_type) VALUES
+        (900017,9001,'staging-alice','Staging demo win — Just paid off my student loan after 4 years! Freedom! 🎉','debt_free'),
+        (900018,9002,'staging-bob','Staging demo win — Finally hit my $10k emergency fund goal. Took 18 months but we made it.','emergency_fund'),
+        (900019,9003,'staging-carol','Staging demo win — My ETH position is up 40% since last year. Best investment I''ve made.','investment_win'),
+        (900020,9004,'staging-dave','Staging demo win — Got a 25% raise at my new job. Time to max out the savings rate!','income_milestone'),
+        (900021,9005,'staging-eve','Staging demo win — Hit $50k net worth at 28. Slow and steady wins the race. 💰','net_worth')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed follows
     await pool.query(`
@@ -3187,15 +4463,123 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
-    // Seed NFTs
+    // Seed NFT collections
     await pool.query(`
-      INSERT INTO nfts(id,owner_user_id,owner_username,name,description,image_url,token_id) VALUES
-        (9001,9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=BLOOM+NFT+1','BLOOM-00002329'),
-        (9002,9002,'staging-bob','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A'),
-        (9003,9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B'),
-        (9004,9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C')
+      INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES
+        (9001,'BloomMoney Genesis','Staging demo collection — The original BloomMoney genesis collection.','https://placehold.co/1200x300/0052ff/ffffff?text=BloomMoney+Genesis','staging-alice'),
+        (9002,'Bloom Rares','Staging demo collection — Hand-picked rare Bloom artifacts.','https://placehold.co/1200x300/7c3aed/ffffff?text=Bloom+Rares','staging-carol'),
+        (9003,'Bull Runners','Staging demo collection — Commemorative bull run series.','https://placehold.co/1200x300/dc2626/ffffff?text=Bull+Runners','staging-dave')
       ON CONFLICT(id) DO NOTHING
     `);
+    // Seed NFTs
+    await pool.query(`
+      INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES
+        (9001,9001,'staging-alice',9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=BLOOM+NFT+1','BLOOM-00002329','BloomMoney Genesis',500,'rare'),
+        (9002,9002,'staging-bob',9001,'staging-alice','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A','BloomMoney Genesis',500,'common'),
+        (9003,9003,'staging-carol',9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B','Bloom Rares',750,'epic'),
+        (9004,9004,'staging-dave',9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C','Bull Runners',300,'uncommon'),
+        (9005,9001,'staging-alice',9001,'staging-alice','Staging Diamond Hands','Staging demo NFT — For holders who never sold.','https://placehold.co/400x400/06b6d4/ffffff?text=DIAMOND+HANDS','BLOOM-0000232D','BloomMoney Genesis',500,'legendary'),
+        (9006,9002,'staging-bob',9003,'staging-carol','Staging Moon Mission','Staging demo NFT — 100x or bust.','https://placehold.co/400x400/f59e0b/000000?text=MOON+MISSION','BLOOM-0000232E','Bloom Rares',750,'rare'),
+        (9007,9005,'staging-eve',9004,'staging-dave','Staging Degen #1','Staging demo NFT — Staging degen trader badge.','https://placehold.co/400x400/ef4444/ffffff?text=DEGEN+1','BLOOM-0000232F','Bull Runners',300,'common'),
+        (9008,9003,'staging-carol',9003,'staging-carol','Staging Aurora','Staging demo NFT — Northern lights edition.','https://placehold.co/400x400/10b981/ffffff?text=AURORA','BLOOM-00002330','Bloom Rares',750,'epic')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT listings (active marketplace listings)
+    await pool.query(`
+      INSERT INTO nft_listings(id,nft_id,seller_user_id,seller_username,price_usdc,status,expires_at) VALUES
+        (9001,9002,9002,'staging-bob',150000000,'active',NOW()+INTERVAL '30 days'),
+        (9002,9004,9004,'staging-dave',75000000,'active',NOW()+INTERVAL '14 days'),
+        (9003,9006,9002,'staging-bob',220000000,'active',NOW()+INTERVAL '21 days'),
+        (9004,9007,9005,'staging-eve',40000000,'active',NOW()+INTERVAL '7 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT bids
+    await pool.query(`
+      INSERT INTO nft_bids(id,nft_id,bidder_user_id,bidder_username,price_usdc,status,expires_at) VALUES
+        (9001,9002,9003,'staging-carol',120000000,'open',NOW()+INTERVAL '5 days'),
+        (9002,9002,9005,'staging-eve',130000000,'open',NOW()+INTERVAL '3 days'),
+        (9003,9004,9001,'staging-alice',60000000,'open',NOW()+INTERVAL '6 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    // Seed NFT transfer history (mints + sales)
+    await pool.query(`
+      INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES
+        (9001,9001,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-00002329'),
+        (9002,9002,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232A'),
+        (9003,9002,9001,'staging-alice',9002,'staging-bob','sale',100000000,'BLOOM-TX-0000232B'),
+        (9004,9003,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232C'),
+        (9005,9004,NULL,NULL,9004,'staging-dave','mint',NULL,'BLOOM-TX-0000232D'),
+        (9006,9005,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232E'),
+        (9007,9006,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232F'),
+        (9008,9006,9003,'staging-carol',9002,'staging-bob','sale',180000000,'BLOOM-TX-00002330'),
+        (9009,9007,NULL,NULL,9005,'staging-eve','mint',NULL,'BLOOM-TX-00002331'),
+        (9010,9008,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-00002332')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed 17 additional NFT collections (ids 9004-9020) so there are 20 total,
+    // each with 2-3 NFTs, one active listing, mint history, and (on ~half) a
+    // sale, so /api/nft-collections renders item_count, floor_price, and volume.
+    // Deterministic ids keep the block idempotent across container rebuilds.
+    const demoCollections = [
+      { id: 9004, name: 'Pixel Pioneers',        hex: 'ec4899', creator: 'staging-alice', blurb: 'Retro pixel-art trailblazers of the chain.' },
+      { id: 9005, name: 'Neon Degens',           hex: '22d3ee', creator: 'staging-bob',   blurb: 'High-octane neon traders who never sleep.' },
+      { id: 9006, name: 'Moon Apes',             hex: 'a3e635', creator: 'staging-carol', blurb: 'Apes bound for the moon, one banana at a time.' },
+      { id: 9007, name: 'Diamond Hands Club',    hex: '38bdf8', creator: 'staging-dave',  blurb: 'For holders who never let go.' },
+      { id: 9008, name: 'Crypto Kitties Reborn', hex: 'f472b6', creator: 'staging-eve',   blurb: 'The classic collectible cats, reimagined.' },
+      { id: 9009, name: 'DeFi Legends',          hex: '34d399', creator: 'staging-alice', blurb: 'Portraits of the protocols that built DeFi.' },
+      { id: 9010, name: 'Bloom Botanica',        hex: '10b981', creator: 'staging-carol', blurb: 'Rare on-chain flora from the Bloom garden.' },
+      { id: 9011, name: 'Genesis Whales',        hex: '6366f1', creator: 'staging-bob',   blurb: 'The biggest bags from the genesis era.' },
+      { id: 9012, name: 'Cyber Samurai',         hex: 'ef4444', creator: 'staging-dave',  blurb: 'Blade-wielding warriors of the metaverse.' },
+      { id: 9013, name: 'Vapor Dreams',          hex: '8b5cf6', creator: 'staging-eve',   blurb: 'Vaporwave aesthetics minted forever.' },
+      { id: 9014, name: 'Golden Bulls',          hex: 'f59e0b', creator: 'staging-alice', blurb: 'Gilded bulls commemorating every green candle.' },
+      { id: 9015, name: 'Frosty Penguins',       hex: '60a5fa', creator: 'staging-bob',   blurb: 'Chill penguins waddling across the blockchain.' },
+      { id: 9016, name: 'Solar Flares',          hex: 'fb923c', creator: 'staging-carol', blurb: 'Radiant bursts of cosmic energy.' },
+      { id: 9017, name: 'Phantom Hackers',       hex: '14b8a6', creator: 'staging-dave',  blurb: 'Shadowy coders of the dark forest.' },
+      { id: 9018, name: 'Retro Arcade',          hex: 'e879f9', creator: 'staging-eve',   blurb: 'Coin-op nostalgia, tokenized.' },
+      { id: 9019, name: 'Astro Voyagers',        hex: '818cf8', creator: 'staging-alice', blurb: 'Explorers charting the interstellar mainnet.' },
+      { id: 9020, name: 'Emerald Enclave',       hex: '059669', creator: 'staging-carol', blurb: 'A secret society of jade-clad collectors.' },
+    ];
+    const demoOwners = [
+      { id: 9001, username: 'staging-alice' },
+      { id: 9002, username: 'staging-bob' },
+      { id: 9003, username: 'staging-carol' },
+      { id: 9004, username: 'staging-dave' },
+      { id: 9005, username: 'staging-eve' },
+    ];
+    const demoRarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+    const colRows = [], nftRows = [], listingRows = [], transferRows = [];
+    let demoNftId = 9100, demoListingId = 9100, demoMintTxId = 9200, demoSaleTxId = 9400;
+    demoCollections.forEach((c, ci) => {
+      const slug = c.name.replace(/ /g, '+');
+      const banner = `https://placehold.co/1200x300/${c.hex}/ffffff?text=${slug}`;
+      colRows.push(`(${c.id},'${c.name}','Staging demo collection — ${c.blurb}','${banner}','${c.creator}')`);
+      const count = 2 + (ci % 2); // 2 or 3 NFTs per collection
+      const creator = demoOwners[ci % demoOwners.length];
+      let firstNftId = null;
+      for (let j = 0; j < count; j++) {
+        const id = demoNftId++;
+        if (firstNftId === null) firstNftId = id;
+        const owner = demoOwners[(ci + j) % demoOwners.length];
+        const rarity = demoRarities[(ci + j) % demoRarities.length];
+        const royalty = 300 + ((ci + j) % 5) * 100;
+        const img = `https://placehold.co/400x400/${c.hex}/ffffff?text=${c.name.split(' ')[0]}+${j + 1}`;
+        nftRows.push(`(${id},${owner.id},'${owner.username}',${creator.id},'${creator.username}','${c.name} #${j + 1}','Staging demo NFT — ${c.blurb}','${img}','BLOOM-S${id}','${c.name}',${royalty},'${rarity}')`);
+        transferRows.push(`(${demoMintTxId++},${id},NULL,NULL,${owner.id},'${owner.username}','mint',NULL,'BLOOM-TX-S${id}')`);
+      }
+      const seller = demoOwners[ci % demoOwners.length];
+      const price = (25 + ci * 7) * 1000000; // USDC, 6 decimals
+      listingRows.push(`(${demoListingId++},${firstNftId},${seller.id},'${seller.username}',${price},'active',NOW()+INTERVAL '14 days')`);
+      if (ci % 2 === 0) { // sale history on half the collections so volume_usdc > 0
+        const buyer = demoOwners[(ci + 2) % demoOwners.length];
+        const salePrice = (40 + ci * 9) * 1000000;
+        transferRows.push(`(${demoSaleTxId++},${firstNftId},${seller.id},'${seller.username}',${buyer.id},'${buyer.username}','sale',${salePrice},'BLOOM-TX-SALE-${firstNftId}')`);
+      }
+    });
+    await pool.query(`INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES ${colRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES ${nftRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_listings(id,nft_id,seller_user_id,seller_username,price_usdc,status,expires_at) VALUES ${listingRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES ${transferRows.join(',')} ON CONFLICT(id) DO NOTHING`);
 
     // Seed auto-generated crypto portfolios for staging users (8-coin pool only)
     await pool.query(`
@@ -3218,7 +4602,9 @@ async function start() {
         (900116,9005,'Staging demo holding — Dogecoin','DOGE','crypto',2000.0,0.15),
         (900117,9005,'Staging demo holding — Cardano','ADA','crypto',500.0,0.50),
         (900118,9005,'Staging demo holding — Chainlink','LINK','crypto',20.0,10.0),
-        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0)
+        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0),
+        (900120,9006,'Staging demo holding — Bitcoin','BTC','crypto',1.0,40000.0),
+        (900121,9006,'Staging demo holding — Ethereum','ETH','crypto',10.0,1500.0)
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -3282,17 +4668,23 @@ async function start() {
       if (!exist) {
         await pool.query(`
           INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
-            (900201, 9001, 'swap',         'USDC', -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
-            (900202, 9001, 'swap',         'USDC',  -75000000, 'Staging demo swap — Swap USDC to ETH'),
-            (900203, 9001, 'swap',         'BLOOM', -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
-            (900204, 9001, 'swap',         'USDC', -200000000, 'Staging demo swap — Swap USDC to BTC'),
-            (900205, 9001, 'swap',         'ETH',     -500000, 'Staging demo swap — Swap ETH to USDC'),
-            (900206, 9004, 'futures_open', 'USDC', -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
-            (900207, 9004, 'futures_pnl',  'USDC',  72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
-            (900208, 9004, 'futures_open', 'USDC', -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
-            (900209, 9003, 'market_trade', 'USDC',  -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
-            (900210, 9003, 'market_trade', 'USDC',  -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
-            (900211, 9003, 'ico_invest',   'USDC', -100000000, 'Staging demo ICO — Invested in SDC ICO')
+            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
+            (900202, 9001, 'swap',         'USDC',   -75000000, 'Staging demo swap — Swap USDC to ETH'),
+            (900203, 9001, 'swap',         'BLOOM',  -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
+            (900204, 9001, 'swap',         'USDC',  -200000000, 'Staging demo swap — Swap USDC to BTC'),
+            (900205, 9001, 'swap',         'ETH',      -500000, 'Staging demo swap — Swap ETH to USDC'),
+            (900206, 9004, 'futures_open', 'USDC',  -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
+            (900207, 9004, 'futures_pnl',  'USDC',   72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
+            (900208, 9004, 'futures_open', 'USDC',  -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
+            (900209, 9003, 'market_trade', 'USDC',   -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
+            (900210, 9003, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
+            (900211, 9003, 'ico_invest',   'USDC',  -100000000, 'Staging demo ICO — Invested in SDC ICO'),
+            (900212, 9001, 'tip',          'BLOOM',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002'),
+            (900213, 9002, 'tip',          'BLOOM',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003'),
+            (900214, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900215, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900216, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures open gas fee'),
+            (900217, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures close gas fee')
           ON CONFLICT(id) DO NOTHING
         `);
       }
@@ -3342,6 +4734,26 @@ async function start() {
     }
 
     }
+
+    // Seed trade journal entries for staging users
+    await pool.query(`
+      INSERT INTO trade_journal_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes) VALUES
+        (9010001,9001,'crypto','BTC','buy',0.5,58000,63000,'2026-05-01','2026-05-15','Staging demo — BTC swing long, closed +$2,500'),
+        (9010002,9001,'stock','AAPL','buy',10,178.50,null,'2026-06-01',null,'Staging demo — AAPL open position, waiting for earnings'),
+        (9010003,9001,'etf','SPY','buy',5,511.00,495.50,'2026-04-10','2026-04-20','Staging demo — SPY losing trade, cut early'),
+        (9010004,9001,'crypto','ETH','buy',2.0,2200,2680,'2026-05-20','2026-06-05','Staging demo — ETH long, rode the breakout'),
+        (9010005,9002,'stock','TSLA','sell',3,195.00,182.00,'2026-04-15','2026-04-28','Staging demo — TSLA short, covered at support'),
+        (9010006,9002,'etf','QQQ','buy',8,430.00,null,'2026-06-10',null,'Staging demo — QQQ position open, tech momentum'),
+        (9010007,9002,'crypto','SOL','buy',20,145.00,138.50,'2026-05-05','2026-05-12','Staging demo — SOL scalp, stopped out'),
+        (9010008,9002,'stock','NVDA','buy',2,875.00,921.00,'2026-05-18','2026-06-02','Staging demo — NVDA pre-earnings run'),
+        (9010009,9003,'etf','GLD','buy',15,210.00,225.50,'2026-04-01','2026-04-22','Staging demo — Gold ETF long, inflation hedge paid off'),
+        (9010010,9003,'crypto','BTC','sell',0.1,67000,71000,'2026-05-28','2026-06-08','Staging demo — BTC short, bad timing, covered at loss'),
+        (9010011,9003,'stock','AMZN','buy',5,185.00,null,'2026-06-15',null,'Staging demo — AMZN open, watching AWS segment'),
+        (9010012,9004,'crypto','DOGE','buy',5000,0.155,0.182,'2026-04-20','2026-05-01','Staging demo — DOGE meme run, quick profit'),
+        (9010013,9004,'etf','IWM','sell',10,198.00,204.50,'2026-05-10','2026-05-22','Staging demo — IWM short, wrong direction, loss'),
+        (9010014,9004,'stock','MSFT','buy',4,415.00,null,'2026-06-12',null,'Staging demo — MSFT open, Copilot growth thesis')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed opinion market snapshots
     {
@@ -3430,6 +4842,17 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
+    // Seed trade journal entries (staging:private table — always empty in prod copy).
+    await pool.query(`
+      INSERT INTO trade_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,notes) VALUES
+        (900001,9001,'crypto','ETH','long',1.5,3200,3450,NOW()-INTERVAL '30 days','Staging demo trade — ETH breakout long, closed for profit'),
+        (900002,9001,'crypto','BTC','long',0.05,64000,NULL,NOW()-INTERVAL '14 days','Staging demo trade — BTC accumulation, still open'),
+        (900003,9004,'crypto','SOL','short',10,155,140,NOW()-INTERVAL '10 days','Staging demo trade — SOL overextended, shorted into resistance'),
+        (900004,9004,'crypto','ETH','short',2,3300,NULL,NOW()-INTERVAL '5 days','Staging demo trade — ETH short, still open'),
+        (900005,9002,'stock','AAPL','long',5,185,178,NOW()-INTERVAL '20 days','Staging demo trade — AAPL earnings play, small loss')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
     // Seed daily opinion market snapshots
     {
       const { rows: [cntDaily] } = await pool.query('SELECT COUNT(*)::int AS n FROM opinion_market_snapshots WHERE market_id IN (9010,9011,9012,9013)');
@@ -3442,6 +4865,28 @@ async function start() {
         ];
         await pool.query(`INSERT INTO opinion_market_snapshots(market_id,yes_pct,created_at) VALUES ${dailySeeds.join(',')}`);
       }
+    }
+
+    // Seed demo conversations + messages (private tables → empty in staging).
+    await ensureMessagingSeed();
+
+    // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
+    // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
+    const { rows: [swapExists] } = await pool.query(
+      `SELECT 1 FROM defi_swaps WHERE user_id=9001 LIMIT 1`
+    );
+    if (!swapExists) {
+      await pool.query(`
+        INSERT INTO defi_swaps(user_id, from_token, to_token, from_amount, to_amount, rate, created_at) VALUES
+          (9001,'USDC','BTC',  5000000000,  77526, 0.0000155, NOW() - interval '2 hours'),
+          (9001,'USDC','ETH',  2000000000, 606060, 0.000303,  NOW() - interval '3 hours'),
+          (9002,'USDC','BTC',  1000000000,  15505, 0.0000155, NOW() - interval '5 hours'),
+          (9002,'ETH', 'USDC',    500000,1650000000, 3300,    NOW() - interval '6 hours'),
+          (9002,'USDC','BTC',   800000000,  12404, 0.0000155, NOW() - interval '7 hours'),
+          (9003,'USDC','BLOOM', 800000000,1600000000, 2.0,    NOW() - interval '8 hours'),
+          (9001,'BTC', 'ETH',     10000,   642857, 64.2857,   NOW() - interval '9 hours'),
+          (9003,'ETH', 'BTC',    300000,    4600, 0.01533,    NOW() - interval '10 hours')
+      `);
     }
   }
 
