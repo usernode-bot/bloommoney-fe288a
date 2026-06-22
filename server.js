@@ -893,6 +893,69 @@ app.get('/explorer-api/portfolio/:username', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Portfolio Chart (auth-required) ──────────────────────────────────────────
+
+app.get('/api/portfolio/chart', async (req, res) => {
+  try {
+    const range = (req.query.range || '1d').toLowerCase();
+    const hours = range === '1m' ? 720 : range === '1w' ? 168 : 24;
+
+    const { rows: holdings } = await pool.query(
+      'SELECT ticker, quantity::float AS quantity FROM investment_holdings WHERE user_id=$1',
+      [req.user.id]
+    );
+    if (!holdings.length) return res.json({ points: [], range });
+
+    const tickers = [...new Set(holdings.map(h => h.ticker?.toUpperCase()).filter(Boolean))];
+
+    const { rows: priceRows } = await pool.query(
+      `SELECT symbol, price_usd::float AS price_usd, recorded_at
+       FROM price_history
+       WHERE symbol = ANY($1) AND recorded_at >= NOW() - ($2 * interval '1 hour')
+       ORDER BY recorded_at ASC`,
+      [tickers, hours]
+    );
+
+    if (!priceRows.length) {
+      const livePrices = await getCoinGeckoPrices();
+      let total = 0;
+      for (const h of holdings) {
+        const p = livePrices[h.ticker?.toUpperCase()];
+        if (p != null) total += h.quantity * p;
+      }
+      return res.json({ points: total > 0 ? [{ ts: new Date().toISOString(), value: total }] : [], range });
+    }
+
+    // Build price lookup: symbol -> timestamp -> price
+    const priceMap = {};
+    for (const row of priceRows) {
+      const sym = row.symbol;
+      const ts = row.recorded_at.toISOString();
+      if (!priceMap[sym]) priceMap[sym] = {};
+      priceMap[sym][ts] = row.price_usd;
+    }
+
+    const timestamps = [...new Set(priceRows.map(r => r.recorded_at.toISOString()))].sort();
+    const lastKnown = {};
+    const points = [];
+
+    for (const ts of timestamps) {
+      for (const sym of tickers) {
+        if (priceMap[sym]?.[ts] != null) lastKnown[sym] = priceMap[sym][ts];
+      }
+      let value = 0, hasPrice = false;
+      for (const h of holdings) {
+        const sym = h.ticker?.toUpperCase();
+        const p = sym ? lastKnown[sym] : null;
+        if (p != null) { value += h.quantity * p; hasPrice = true; }
+      }
+      if (hasPrice) points.push({ ts, value });
+    }
+
+    res.json({ points, range });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Social Account Linking ────────────────────────────────────────────────────
 
 app.get('/api/social/accounts', async (req, res) => {
@@ -3665,19 +3728,22 @@ async function start() {
   // Seed price history — 24 hourly data points per token using deterministic wave formulas.
   // Uses DATE_TRUNC so timestamps are hour-granular; ON CONFLICT skips existing rows within
   // the same boot hour, keeping the seed idempotent.
-  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '26 hours'`);
+  await pool.query(`DELETE FROM price_history WHERE recorded_at < NOW() - interval '32 days'`);
   const historyTokenDefs = [
     { symbol: 'ETH',   fn: (i) => (2500   * (1 + Math.sin(i * 0.45)          * 0.018)).toFixed(6) },
     { symbol: 'BTC',   fn: (i) => (67000  * (1 + Math.cos(i * 0.38)          * 0.020)).toFixed(6) },
     { symbol: 'BNB',   fn: (i) => (310    * (1 + Math.cos(i * 0.41 + 0.8)    * 0.018)).toFixed(6) },
     { symbol: 'SOL',   fn: (i) => (150    * (1 + Math.sin(i * 0.48 + 0.5)    * 0.025)).toFixed(6) },
-    { symbol: 'XRP',   fn: (i) => (0.55   * (1 + Math.sin(i * 0.55 + 1.2)   * 0.030)).toFixed(6) },
-    { symbol: 'ADA',   fn: (i) => (0.45   * (1 + Math.cos(i * 0.50 + 0.3)   * 0.028)).toFixed(6) },
-    { symbol: 'DOGE',  fn: (i) => (0.12   * (1 + Math.sin(i * 0.60 + 2.1)   * 0.035)).toFixed(6) },
-    { symbol: 'TON',   fn: (i) => (5.50   * (1 + Math.cos(i * 0.44 + 1.5)   * 0.022)).toFixed(6) },
-    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)     * 0.030)).toFixed(6) },
+    { symbol: 'XRP',   fn: (i) => (0.55   * (1 + Math.sin(i * 0.55 + 1.2)    * 0.030)).toFixed(6) },
+    { symbol: 'ADA',   fn: (i) => (0.45   * (1 + Math.cos(i * 0.50 + 0.3)    * 0.028)).toFixed(6) },
+    { symbol: 'DOGE',  fn: (i) => (0.12   * (1 + Math.sin(i * 0.60 + 2.1)    * 0.035)).toFixed(6) },
+    { symbol: 'TON',   fn: (i) => (5.50   * (1 + Math.cos(i * 0.44 + 1.5)    * 0.022)).toFixed(6) },
+    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)      * 0.030)).toFixed(6) },
     { symbol: 'USDC',  fn: ()  => '1.000000' },
     { symbol: 'USDT',  fn: ()  => '1.000000' },
+    { symbol: 'LINK',  fn: (i) => (10     * (1 + Math.cos(i * 0.43 + 2)      * 0.024)).toFixed(6) },
+    { symbol: 'DOT',   fn: (i) => (7      * (1 + Math.sin(i * 0.39 + 1)      * 0.021)).toFixed(6) },
+    { symbol: 'AVAX',  fn: (i) => (27     * (1 + Math.cos(i * 0.46 + 3)      * 0.023)).toFixed(6) },
   ];
   for (const t of historyTokenDefs) {
     const vals = [], params = [];
@@ -3875,7 +3941,9 @@ async function start() {
         (900116,9005,'Staging demo holding — Dogecoin','DOGE','crypto',2000.0,0.15),
         (900117,9005,'Staging demo holding — Cardano','ADA','crypto',500.0,0.50),
         (900118,9005,'Staging demo holding — Chainlink','LINK','crypto',20.0,10.0),
-        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0)
+        (900119,9005,'Staging demo holding — Polkadot','DOT','crypto',100.0,6.0),
+        (900120,9006,'Staging demo holding — Bitcoin','BTC','crypto',1.0,40000.0),
+        (900121,9006,'Staging demo holding — Ethereum','ETH','crypto',10.0,1500.0)
       ON CONFLICT(id) DO NOTHING
     `);
 
