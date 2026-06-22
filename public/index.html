@@ -440,8 +440,10 @@ function avatarDataUri(username) {
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }
 // Reusable circular <img> avatar. `cls` adds Tailwind sizing/extra classes.
-function avatarImg(username, cls) {
-  return `<img src="${avatarDataUri(username)}" alt="@${esc(username)}" ` +
+// `avatarUrl` is an optional stored data URI; falls back to the generated SVG.
+function avatarImg(username, cls, avatarUrl) {
+  const src = avatarUrl || avatarDataUri(username);
+  return `<img src="${esc(src)}" alt="@${esc(username)}" ` +
     `class="rounded-full object-cover shrink-0 ring-1 ring-white/10 ${cls || 'w-8 h-8'}" ` +
     `loading="lazy" draggable="false">`;
 }
@@ -749,7 +751,7 @@ async function renderFeed(sec) {
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
-          <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10')}</button>
+          <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10', p.author_avatar_url)}</button>
           <div class="min-w-0">
             <button class="text-sm font-semibold text-[#e8eaf0] hover:text-[#7c5cfc] truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
             ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
@@ -1133,6 +1135,16 @@ async function renderProfile(sec) {
         <div class="card">
           ${editMode ? `
             <div class="space-y-3">
+              <div class="flex items-center gap-3">
+                <label class="group relative cursor-pointer shrink-0" title="Change photo">
+                  ${avatarImg(username, 'w-14 h-14', user.avatar_url)}
+                  <div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
+                    <span class="text-white text-lg">📷</span>
+                  </div>
+                  <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">
+                </label>
+                <button class="btn btn-z text-xs" onclick="document.getElementById('avatar-file-input').click()">Change photo</button>
+              </div>
               <input id="edit-name" class="inp" value="${esc(user.display_name||'')}" placeholder="Display name">
               <textarea id="edit-bio" class="inp" rows="3" placeholder="Bio">${esc(user.bio||'')}</textarea>
               <div class="flex gap-2">
@@ -1142,7 +1154,15 @@ async function renderProfile(sec) {
             </div>` : `
             <div class="flex items-start justify-between gap-3">
               <div class="flex items-center gap-3">
-                <div class="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">${esc(username[0].toUpperCase())}</div>
+                ${isMe ? `
+                  <label class="group relative cursor-pointer shrink-0" title="Upload profile photo">
+                    ${avatarImg(username, 'w-14 h-14', user.avatar_url)}
+                    <div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
+                      <span class="text-white text-lg">📷</span>
+                    </div>
+                    <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">
+                  </label>
+                ` : avatarImg(username, 'w-14 h-14 shrink-0', user.avatar_url)}
                 <div>
                   <div class="font-bold text-lg flex items-center gap-2">${esc(user.display_name || username)}${roiData && roiData.closed_trade_count > 0 ? `<span class="${roiData.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} text-xs font-semibold">📈 ${roiData.all_time_roi_pct >= 0 ? '+' : ''}${roiData.all_time_roi_pct}%</span>` : ''}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
                   <div class="text-[#8b95ab] text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-[#7c5cfc] hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
@@ -1215,6 +1235,35 @@ async function renderProfile(sec) {
       editMode = false;
       await renderProfile(sec);
     } catch (e) { alert(e.message); }
+  };
+
+  window.handleAvatarUpload = (input) => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) { alert('Image must be under 1 MB'); input.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = async () => {
+        const SIZE = 200;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(SIZE / img.width, SIZE / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+        const dataUri = canvas.toDataURL('image/jpeg', 0.80);
+        try {
+          await api('PATCH', '/api/me', { avatar_url: dataUri });
+          user.avatar_url = dataUri;
+          if (S.user && S.user.user_id === user.user_id) S.user.avatar_url = dataUri;
+          await fullRender();
+        } catch (e) { alert(e.message); }
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
   };
   window.doFollow = async (uname, following) => {
     try {

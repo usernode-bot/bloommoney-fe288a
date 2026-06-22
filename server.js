@@ -64,7 +64,7 @@ const BASIC_DAILY_TRADE_COUNT = 25;
 const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '2mb' }));
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -487,11 +487,22 @@ app.get('/api/me', async (req, res) => {
 
 app.patch('/api/me', async (req, res) => {
   try {
-    const { display_name, bio } = req.body;
+    const { display_name, bio, avatar_url } = req.body;
     if (display_name != null && String(display_name).length > 80) return res.status(400).json({ error: 'Display name too long' });
     if (bio != null && String(bio).length > 300) return res.status(400).json({ error: 'Bio too long' });
-    await pool.query('UPDATE users SET display_name=$1, bio=$2 WHERE user_id=$3',
-      [display_name || null, bio || null, req.user.id]);
+    if (avatar_url !== undefined) {
+      if (typeof avatar_url !== 'string' || !avatar_url.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'Invalid avatar' });
+      }
+      if (Buffer.byteLength(avatar_url, 'utf8') > 512 * 1024) {
+        return res.status(400).json({ error: 'Avatar too large' });
+      }
+      await pool.query('UPDATE users SET display_name=$1, bio=$2, avatar_url=$3 WHERE user_id=$4',
+        [display_name || null, bio || null, avatar_url, req.user.id]);
+    } else {
+      await pool.query('UPDATE users SET display_name=$1, bio=$2 WHERE user_id=$3',
+        [display_name || null, bio || null, req.user.id]);
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -499,7 +510,7 @@ app.patch('/api/me', async (req, res) => {
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,avatar_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -539,8 +550,11 @@ app.get('/api/feed', async (req, res) => {
       const params = [req.user.id, lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url
+        FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
@@ -550,8 +564,11 @@ app.get('/api/feed', async (req, res) => {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url
+        FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
@@ -612,10 +629,14 @@ app.post('/api/posts', requireWallet, async (req, res) => {
 
 app.get('/api/posts/:id', async (req, res) => {
   try {
-    const { rows: [post] } = await pool.query('SELECT * FROM posts WHERE id=$1 AND deleted=false', [req.params.id]);
+    const { rows: [post] } = await pool.query(
+      'SELECT p.*, u.avatar_url AS author_avatar_url FROM posts p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.id=$1 AND p.deleted=false',
+      [req.params.id]
+    );
     if (!post) return res.status(404).json({ error: 'Not found' });
     const { rows: replies } = await pool.query(
-      'SELECT * FROM posts WHERE parent_id=$1 AND deleted=false ORDER BY id ASC', [post.id]
+      'SELECT p.*, u.avatar_url AS author_avatar_url FROM posts p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.parent_id=$1 AND p.deleted=false ORDER BY p.id ASC',
+      [post.id]
     );
     const { rows: liked } = await pool.query(
       'SELECT 1 FROM post_likes WHERE user_id=$1 AND post_id=$2', [req.user.id, post.id]
@@ -2970,6 +2991,10 @@ async function start() {
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
     `);
+    // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
+    await pool.query(`
+      UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL
+    `, ['data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMDBhYTU1Ii8+PHRleHQgeD0iMzIiIHk9IjQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIzMiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BPC90ZXh0Pjwvc3ZnPg==']);
 
     // Give demo users an obviously-fake non-zero Points available balance so the
     // Post-to-Earn badge renders a realistic number in staging previews. Scoped
