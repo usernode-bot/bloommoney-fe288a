@@ -202,6 +202,7 @@
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
+      <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
@@ -252,6 +253,9 @@
       <!-- ICO -->
       <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
+      <!-- Trade Journal -->
+      <section id="section-journal" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
       <!-- Earn (composite: stake / liquidity / ico) -->
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
@@ -260,6 +264,9 @@
 
       <!-- Futures -->
       <section id="section-futures" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
+      <!-- Trade Journal -->
+      <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
 
       <!-- NFTs -->
       <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -516,6 +523,7 @@ const VIEW_SECTION = {
   home: 'app-feed', feed: 'app-feed',
   trade: 'section-swap', swap: 'section-swap',
   futures: 'section-futures',
+  journal: 'section-journal',
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -565,6 +573,7 @@ async function loadView(view) {
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
       case 'futures': await renderFutures(sec); break;
+      case 'journal': await renderJournal(sec); break;
       case 'nfts': await renderNFTs(sec); break;
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
@@ -749,6 +758,17 @@ document.getElementById('connect-wallet-btn').addEventListener('click', connectW
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
   let feedState = { tab: 'global', posts: [], cursor: null, thread: null };
+
+  const MILESTONE_LABELS = {
+    debt_free:        'Paid off debt 💳',
+    savings_goal:     'Hit my savings goal 🎯',
+    investment_win:   'Investment win 📈',
+    income_milestone: 'Income milestone 💼',
+    emergency_fund:   'Emergency fund complete 🛡️',
+    net_worth:        'Net worth milestone 💰',
+    other_win:        'Other win 🏆',
+  };
+
   // AI Trade Helper composer badge state (lives across re-renders).
   const tickerCache = {};        // TICKER -> price (number) or 'err'
   let tickerDebounce = null;     // pending debounce timer
@@ -821,7 +841,8 @@ async function renderFeed(sec) {
   }
 
   function postCard(p) {
-    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
+    const isMilestone = !!p.milestone_type;
+    const cheerCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
     const body = isLockedForMe
       ? `<div class="relative rounded-lg overflow-hidden">
@@ -832,6 +853,12 @@ async function renderFeed(sec) {
            </div>
          </div>`
       : `<p class="text-sm text-[#8b95ab] leading-relaxed">${esc(p.content)}</p>`;
+    const milestoneBanner = isMilestone
+      ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
+      : '';
+    const likeBtn = isMilestone
+      ? `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">🎉 ${p.like_count}</button>`
+      : `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
@@ -844,9 +871,10 @@ async function renderFeed(sec) {
           </div>
         </div>
       </div>
+      ${milestoneBanner}
       ${body}
       <div class="flex items-center gap-4">
-        <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
+        ${likeBtn}
         <button class="text-[#4e5872] hover:text-[#8b95ab] flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
         ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
@@ -876,6 +904,16 @@ async function renderFeed(sec) {
       <div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
+        <select id="compose-milestone" class="inp text-xs py-1">
+          <option value="">— Just posting —</option>
+          <option value="debt_free">Paid off debt 💳</option>
+          <option value="savings_goal">Hit my savings goal 🎯</option>
+          <option value="investment_win">Investment win 📈</option>
+          <option value="income_milestone">Income milestone 💼</option>
+          <option value="emergency_fund">Emergency fund complete 🛡️</option>
+          <option value="net_worth">Net worth milestone 💰</option>
+          <option value="other_win">Other win 🏆</option>
+        </select>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-3">
             <span id="compose-count" class="text-xs text-[#4e5872]">0/280</span>
@@ -890,6 +928,7 @@ async function renderFeed(sec) {
       <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='wins'?'pill-active':'pill-inactive'}" onclick="switchTab('wins')">Wins 🏆</button>
       </div>
       <div id="feed-list" class="space-y-3">
         ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
@@ -913,9 +952,14 @@ async function renderFeed(sec) {
     const content = box?.value.trim();
     if (!content) return;
     const locked = !!document.getElementById('compose-lock')?.checked;
+    const milestoneEl = document.getElementById('compose-milestone');
+    const milestone_type = milestoneEl?.value || undefined;
     try {
-      const res = await api('POST', '/api/posts', { content, locked });
+      const body = { content, locked };
+      if (milestone_type) body.milestone_type = milestone_type;
+      const res = await api('POST', '/api/posts', body);
       box.value = '';
+      if (milestoneEl) milestoneEl.value = '';
       resetComposerTicker();
       feedState.cursor = null;
       await loadPosts();
@@ -2615,6 +2659,282 @@ async function renderMarketDetail(sec) {
   _activeInterval = setInterval(load, 10000);
 }
 
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+async function renderJournal(sec) {
+  let filterType = 'all', filterDir = 'all', filterStatus = 'all';
+  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+
+  function entryPnl(e) {
+    if (e.exit_price == null) return null;
+    return (parseFloat(e.exit_price) - parseFloat(e.entry_price)) * parseFloat(e.quantity) * (e.direction === 'long' ? 1 : -1);
+  }
+
+  async function load() {
+    const { entries } = await api('GET', '/api/journal');
+
+    const closed = entries.filter(e => e.exit_price != null);
+    const open = entries.filter(e => e.exit_price == null);
+    const totalPnl = closed.reduce((s, e) => s + (entryPnl(e) || 0), 0);
+    const wins = closed.filter(e => (entryPnl(e) || 0) > 0);
+    const winRate = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null;
+
+    let filtered = entries;
+    if (filterType !== 'all') filtered = filtered.filter(e => e.asset_type === filterType);
+    if (filterDir !== 'all') filtered = filtered.filter(e => e.direction === filterDir);
+    if (filterStatus === 'open') filtered = filtered.filter(e => e.exit_price == null);
+    if (filterStatus === 'closed') filtered = filtered.filter(e => e.exit_price != null);
+
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">&#x1f4d3; Trade Journal</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Total Trades</div>
+          <div class="text-2xl font-bold">${entries.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Open</div>
+          <div class="text-2xl font-bold">${open.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Win Rate</div>
+          <div class="text-2xl font-bold">${winRate !== null ? winRate + '%' : '&#x2014;'}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Realised P&amp;L</div>
+          <div class="text-2xl font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-4 items-center">
+        <select id="jf-type" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('type',this.value)">
+          <option value="all">All types</option>
+          <option value="crypto">Crypto</option>
+          <option value="stock">Stock</option>
+          <option value="etf">ETF</option>
+        </select>
+        <select id="jf-dir" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('dir',this.value)">
+          <option value="all">All directions</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+        <select id="jf-status" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('status',this.value)">
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+        <button class="btn btn-z text-sm px-3 py-1" onclick="jResetFilters()">Reset</button>
+        <button class="btn btn-v text-sm px-3 py-1 ml-auto" onclick="openLogTradeModal()">+ Log Trade</button>
+      </div>
+      ${filtered.length === 0
+        ? `<div class="card text-center py-8 text-[#8b95ab] text-sm">No trades yet. Click <strong>+ Log Trade</strong> to get started.</div>`
+        : `<div class="space-y-2">${filtered.map(e => {
+            const pnl = entryPnl(e);
+            const isOpen = e.exit_price == null;
+            const qty = parseFloat(e.quantity);
+            return `<div class="card flex flex-wrap gap-3 items-center text-sm">
+              <div class="shrink-0 min-w-[3.5rem]">
+                <div class="font-bold text-[#e8eaf0]">${esc(e.ticker)}</div>
+                <div class="text-xs text-[#8b95ab]">${esc(e.asset_type)}</div>
+              </div>
+              <span class="text-xs font-semibold px-1.5 py-0.5 rounded shrink-0 ${e.direction === 'long' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/40 text-red-400'}">${e.direction.toUpperCase()}</span>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">&times;${qty < 1 ? qty.toFixed(4) : qty.toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">qty</div>
+              </div>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.entry_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">entry</div>
+              </div>
+              ${!isOpen ? `<div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.exit_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">exit</div>
+              </div>` : ''}
+              ${pnl !== null ? `<div class="shrink-0">
+                <div class="font-mono text-xs font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">P&amp;L</div>
+              </div>` : ''}
+              <div class="ml-auto flex items-center gap-2 shrink-0">
+                <span class="text-xs ${isOpen ? 'text-amber-400' : 'text-[#4e5872]'}">${isOpen ? 'open' : 'closed'}</span>
+                ${isOpen ? `<button class="btn btn-z text-xs px-2 py-0.5" onclick="openEditTradeModal(${e.id},${parseFloat(e.entry_price)})">Edit</button>` : ''}
+                <button class="btn text-xs px-2 py-0.5 border-red-900/40 hover:border-red-500/40 text-red-400" onclick="deleteTradeEntry(${e.id})">&#x2715;</button>
+              </div>
+            </div>`;
+          }).join('')}</div>`
+      }`;
+
+    const selType = document.getElementById('jf-type');
+    const selDir = document.getElementById('jf-dir');
+    const selStatus = document.getElementById('jf-status');
+    if (selType) selType.value = filterType;
+    if (selDir) selDir.value = filterDir;
+    if (selStatus) selStatus.value = filterStatus;
+
+    window.jSetFilter = (key, val) => {
+      if (key === 'type') filterType = val;
+      else if (key === 'dir') filterDir = val;
+      else if (key === 'status') filterStatus = val;
+      load();
+    };
+    window.jResetFilters = () => { filterType = 'all'; filterDir = 'all'; filterStatus = 'all'; load(); };
+    window.deleteTradeEntry = async (id) => {
+      if (!confirm('Delete this trade entry?')) return;
+      try { await api('DELETE', `/api/journal/${id}`); load(); } catch (e) { alert(e.message); }
+    };
+  }
+
+  window.openLogTradeModal = () => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3 max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Log Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Asset Type</label>
+          <select id="jt-type" class="inp w-full" onchange="jClearLivePrice()">
+            <option value="crypto">Crypto</option>
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Ticker</label>
+          <input id="jt-ticker" type="text" class="inp w-full" placeholder="e.g. BTC, ETH, AAPL" autocomplete="off">
+          <span id="journal-live-price" style="font-size:0.85em;color:#aaa;" class="mt-0.5 block min-h-[1.2em]"></span>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Direction</label>
+          <select id="jt-direction" class="inp w-full">
+            <option value="long">Long &#x25b2;</option>
+            <option value="short">Short &#x25bc;</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Quantity</label>
+          <input id="jt-qty" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Entry Price ($)</label>
+          <input id="jt-entry" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Date</label>
+          <input id="jt-date" type="date" class="inp w-full" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="jt-notes" class="inp w-full" rows="2" placeholder="Strategy, reasoning…" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitLogTrade()">Log trade</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="jt-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    let _jpDebounce = null;
+    const tickerInput = document.getElementById('jt-ticker');
+    const typeSelect = document.getElementById('jt-type');
+    const liveLabel = document.getElementById('journal-live-price');
+    const entryInput = document.getElementById('jt-entry');
+
+    window.jClearLivePrice = () => { if (liveLabel) liveLabel.textContent = ''; };
+
+    function lookupLivePrice() {
+      clearTimeout(_jpDebounce);
+      _jpDebounce = setTimeout(async () => {
+        const ticker = tickerInput.value.trim().toUpperCase();
+        if (!ticker || typeSelect.value !== 'crypto' || !JOURNAL_LIVE_TICKERS.has(ticker)) {
+          if (liveLabel) liveLabel.textContent = '';
+          return;
+        }
+        try {
+          const { prices } = await api('GET', `/api/ticker-prices?symbols=${ticker}`);
+          const p = prices[ticker];
+          if (p != null) {
+            if (liveLabel) liveLabel.textContent = `Live: $${p >= 1 ? p.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : p.toFixed(4)}`;
+            if (entryInput && !entryInput.value) entryInput.value = p.toString();
+          } else {
+            if (liveLabel) liveLabel.textContent = '';
+          }
+        } catch { if (liveLabel) liveLabel.textContent = ''; }
+      }, 500);
+    }
+
+    if (tickerInput) tickerInput.addEventListener('input', lookupLivePrice);
+
+    window.submitLogTrade = async () => {
+      const msg = document.getElementById('jt-msg');
+      try {
+        await api('POST', '/api/journal', {
+          asset_type: typeSelect.value,
+          ticker: tickerInput.value.trim().toUpperCase(),
+          direction: document.getElementById('jt-direction').value,
+          quantity: document.getElementById('jt-qty').value,
+          entry_price: document.getElementById('jt-entry').value,
+          trade_date: document.getElementById('jt-date').value,
+          notes: document.getElementById('jt-notes').value,
+        });
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  window.openEditTradeModal = (id, entryPrice) => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Close Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <p class="text-sm text-[#8b95ab]">Entry price: <span class="font-mono text-[#e8eaf0]">$${parseFloat(entryPrice).toFixed(2)}</span></p>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Exit Price ($)</label>
+          <input id="je-exit" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="je-notes" class="inp w-full" rows="2" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitEditTrade(${id})">Save</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="je-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    window.submitEditTrade = async (tid) => {
+      const msg = document.getElementById('je-msg');
+      try {
+        const exitVal = document.getElementById('je-exit')?.value;
+        const notesVal = document.getElementById('je-notes')?.value;
+        const body = {};
+        if (exitVal) body.exit_price = exitVal;
+        if (notesVal) body.notes = notesVal;
+        await api('PATCH', `/api/journal/${tid}`, body);
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  await load();
+}
+
 // ── Messages ──────────────────────────────────────────────────────────────────
 // Inbox + thread live in one section; S.msgOpenConv decides which renders.
 // Thread polling reuses the shared _activeInterval (navigate clears it).
@@ -3524,6 +3844,313 @@ async function renderAdmin(sec) {
     try { await api('POST', `/api/admin/nfts/${id}/burn`); fullRender(); } catch (e) { alert(e.message); }
   };
   await fullRender();
+}
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+let journalEntries = [];
+let journalFilters = { asset_type: '', direction: '', status: '' };
+
+function calcPnl(entry) {
+  const ep = parseFloat(entry.entry_price);
+  const xp = entry.exit_price != null ? parseFloat(entry.exit_price) : null;
+  const qty = parseFloat(entry.quantity);
+  if (xp == null) return null;
+  const pnl = entry.direction === 'buy' ? (xp - ep) * qty : (ep - xp) * qty;
+  const pct = ep > 0 ? (pnl / (ep * qty)) * 100 : 0;
+  return { pnl, pct };
+}
+
+function fmtQty(q) {
+  const n = parseFloat(q);
+  if (n < 1) return n.toFixed(6);
+  if (n < 10) return n.toFixed(4);
+  return n.toFixed(2);
+}
+
+function fmtPrice(p) {
+  const n = parseFloat(p);
+  if (n < 1) return n.toFixed(4);
+  return n.toFixed(2);
+}
+
+function journalAssetPill(at) {
+  if (at === 'stock') return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-900/40 text-blue-300">Stock</span>';
+  if (at === 'etf')   return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300">ETF</span>';
+  return '<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-900/40 text-amber-300">Crypto</span>';
+}
+
+function renderJournalList() {
+  const filtered = journalEntries.filter(e => {
+    if (journalFilters.asset_type && e.asset_type !== journalFilters.asset_type) return false;
+    if (journalFilters.direction && e.direction !== journalFilters.direction) return false;
+    if (journalFilters.status === 'open' && e.exit_price != null) return false;
+    if (journalFilters.status === 'closed' && e.exit_price == null) return false;
+    return true;
+  });
+
+  if (!filtered.length) {
+    return `<div class="card text-center py-8 text-zinc-500 text-sm">No trades match these filters.</div>`;
+  }
+
+  return filtered.map(e => {
+    const p = calcPnl(e);
+    const dirLabel = e.direction === 'buy'
+      ? '<span class="text-emerald-400 font-semibold">Buy ↑</span>'
+      : '<span class="text-red-400 font-semibold">Sell ↓</span>';
+    const statusBadge = e.exit_price == null
+      ? '<span class="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-300">Open</span>'
+      : '';
+    const pnlHtml = p != null
+      ? `<span class="${p.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'} font-mono text-sm">${p.pnl >= 0 ? '+' : ''}$${Math.abs(p.pnl).toFixed(2)} (${p.pnl >= 0 ? '+' : ''}${p.pct.toFixed(1)}%)</span>`
+      : '';
+    const notesHtml = e.notes ? `<div class="mt-2 text-xs text-zinc-400 italic border-t border-zinc-800 pt-2">${esc(e.notes)}</div>` : '';
+    return `
+      <div class="card space-y-2">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2 flex-wrap">
+            ${journalAssetPill(e.asset_type)}
+            <span class="font-semibold font-mono text-sm">${esc(e.ticker)}</span>
+            ${dirLabel}
+            ${statusBadge}
+          </div>
+          <div class="flex items-center gap-2">
+            ${pnlHtml}
+            <button class="text-zinc-500 hover:text-zinc-200 text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+              onclick="openTradeModal(${e.id})">Edit</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div><div class="text-zinc-500">Qty</div><div class="font-mono">${fmtQty(e.quantity)}</div></div>
+          <div><div class="text-zinc-500">Entry</div><div class="font-mono">$${fmtPrice(e.entry_price)}</div></div>
+          <div><div class="text-zinc-500">Exit</div><div class="font-mono">${e.exit_price != null ? '$'+fmtPrice(e.exit_price) : '<span class="text-zinc-600">—</span>'}</div></div>
+          <div><div class="text-zinc-500">Date</div><div class="font-mono">${String(e.trade_date).slice(0,10)}</div></div>
+        </div>
+        ${notesHtml}
+      </div>`;
+  }).join('');
+}
+
+window.applyJournalFilters = function() {
+  journalFilters.asset_type = document.getElementById('jf-asset')?.value || '';
+  journalFilters.direction  = document.getElementById('jf-dir')?.value || '';
+  journalFilters.status     = document.getElementById('jf-status')?.value || '';
+  const list = document.getElementById('journal-list');
+  if (list) list.innerHTML = renderJournalList();
+};
+
+window.resetJournalFilters = function() {
+  journalFilters = { asset_type: '', direction: '', status: '' };
+  const fa = document.getElementById('jf-asset');   if (fa) fa.value = '';
+  const fd = document.getElementById('jf-dir');     if (fd) fd.value = '';
+  const fs = document.getElementById('jf-status');  if (fs) fs.value = '';
+  const list = document.getElementById('journal-list');
+  if (list) list.innerHTML = renderJournalList();
+};
+
+window.openTradeModal = function(idOrNull) {
+  const existing = typeof idOrNull === 'number' ? journalEntries.find(e => e.id === idOrNull) : null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const modal = document.createElement('div');
+  modal.id = 'trade-journal-modal';
+  modal.className = 'fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4';
+  modal.onclick = (ev) => { if (ev.target === modal) modal.remove(); };
+
+  const title = existing ? 'Edit Trade' : 'Log a Trade';
+  const deleteBtn = existing
+    ? `<button class="btn btn-r text-sm" onclick="deleteTradeEntry(${existing.id})">Delete</button>`
+    : '';
+
+  modal.innerHTML = `
+    <div class="bg-zinc-900 border border-zinc-700 rounded-xl p-5 w-full max-w-lg space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold">${title}</h2>
+        <button onclick="document.getElementById('trade-journal-modal')?.remove()" class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+      <div id="trade-modal-err" class="hidden text-red-400 text-sm"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Asset type</label>
+          <select id="tm-asset" class="inp">
+            <option value="stock" ${existing?.asset_type==='stock'?'selected':''}>Stock</option>
+            <option value="etf"   ${existing?.asset_type==='etf'  ?'selected':''}>ETF</option>
+            <option value="crypto"${existing?.asset_type==='crypto'?'selected':''}>Crypto</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Direction</label>
+          <select id="tm-direction" class="inp">
+            <option value="buy"  ${existing?.direction==='buy' ?'selected':''}>Buy</option>
+            <option value="sell" ${existing?.direction==='sell'?'selected':''}>Sell</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Ticker / Symbol</label>
+        <input id="tm-ticker" class="inp" placeholder="e.g. BTC, AAPL, SPY" maxlength="20"
+          value="${esc(existing?.ticker||'')}" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Quantity</label>
+          <input id="tm-qty" type="number" step="any" min="0" class="inp" placeholder="0.00"
+            value="${existing ? parseFloat(existing.quantity) : ''}">
+        </div>
+        <div>
+          <label class="text-xs text-zinc-400 block mb-1">Entry price (USD)</label>
+          <input id="tm-entry" type="number" step="any" min="0" class="inp" placeholder="0.00"
+            value="${existing ? parseFloat(existing.entry_price) : ''}">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Trade date</label>
+        <input id="tm-date" type="date" class="inp" value="${existing ? String(existing.trade_date).slice(0,10) : today}">
+      </div>
+      <div class="border-t border-zinc-800 pt-3">
+        <div class="text-xs text-zinc-500 mb-2">Close trade (optional)</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs text-zinc-400 block mb-1">Exit price (USD)</label>
+            <input id="tm-exit" type="number" step="any" min="0" class="inp" placeholder="leave blank if open"
+              value="${existing?.exit_price != null ? parseFloat(existing.exit_price) : ''}">
+          </div>
+          <div>
+            <label class="text-xs text-zinc-400 block mb-1">Exit date</label>
+            <input id="tm-exitdate" type="date" class="inp"
+              value="${existing?.exit_date ? String(existing.exit_date).slice(0,10) : ''}">
+          </div>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Notes (optional)</label>
+        <textarea id="tm-notes" class="inp" rows="2" maxlength="500" placeholder="Trade rationale, lessons…">${esc(existing?.notes||'')}</textarea>
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button class="btn btn-v flex-1 text-sm" onclick="saveTradeEntry(${existing ? existing.id : 'null'})">
+          ${existing ? 'Save changes' : 'Log trade'}
+        </button>
+        ${deleteBtn}
+        <button class="btn btn-z text-sm" onclick="document.getElementById('trade-journal-modal')?.remove()">Cancel</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+};
+
+window.saveTradeEntry = async function(idOrNull) {
+  const errEl = document.getElementById('trade-modal-err');
+  if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  const payload = {
+    asset_type:  document.getElementById('tm-asset')?.value,
+    ticker:      document.getElementById('tm-ticker')?.value.trim(),
+    direction:   document.getElementById('tm-direction')?.value,
+    quantity:    document.getElementById('tm-qty')?.value,
+    entry_price: document.getElementById('tm-entry')?.value,
+    trade_date:  document.getElementById('tm-date')?.value,
+    exit_price:  document.getElementById('tm-exit')?.value || null,
+    exit_date:   document.getElementById('tm-exitdate')?.value || null,
+    notes:       document.getElementById('tm-notes')?.value || null,
+  };
+  try {
+    if (idOrNull) {
+      await api('PATCH', `/api/journal/${idOrNull}`, payload);
+    } else {
+      await api('POST', '/api/journal', payload);
+    }
+    document.getElementById('trade-journal-modal')?.remove();
+    const sec = document.getElementById('section-journal');
+    if (sec) await renderJournal(sec);
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+    else alert(e.message);
+  }
+};
+
+window.deleteTradeEntry = async function(id) {
+  if (!confirm('Delete this trade entry? This cannot be undone.')) return;
+  try {
+    await api('DELETE', `/api/journal/${id}`);
+    document.getElementById('trade-journal-modal')?.remove();
+    const sec = document.getElementById('section-journal');
+    if (sec) await renderJournal(sec);
+  } catch (e) { alert(e.message); }
+};
+
+async function renderJournal(sec) {
+  sec.innerHTML = spin();
+  try {
+    const [summaryData, listData] = await Promise.all([
+      api('GET', '/api/journal/summary'),
+      api('GET', '/api/journal'),
+    ]);
+    journalEntries = listData.entries || [];
+    const s = summaryData;
+    const pnlCls = s.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+    const pnlSign = s.realized_pnl >= 0 ? '+' : '';
+    const winRate = s.closed_count > 0
+      ? `${s.profitable_count} of ${s.closed_count} (${Math.round(s.profitable_count/s.closed_count*100)}%)`
+      : '—';
+
+    sec.innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h1 class="text-xl font-bold">Trade Journal</h1>
+          <button class="btn btn-v text-sm" onclick="openTradeModal(null)">+ Log Trade</button>
+        </div>
+
+        <!-- Summary dashboard -->
+        <div class="card grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Realised P&amp;L</div>
+            <div class="text-lg font-bold font-mono ${pnlCls}">${pnlSign}$${Math.abs(s.realized_pnl).toFixed(2)}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Win rate</div>
+            <div class="text-lg font-bold text-zinc-100">${winRate}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Open positions</div>
+            <div class="text-lg font-bold text-zinc-100">${s.open_count}</div>
+          </div>
+          <div>
+            <div class="text-xs text-zinc-500 mb-1">Total trades</div>
+            <div class="text-lg font-bold text-zinc-100">${s.total_count}</div>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card flex flex-wrap items-center gap-3">
+          <select id="jf-asset" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All types</option>
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+            <option value="crypto">Crypto</option>
+          </select>
+          <select id="jf-dir" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All directions</option>
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+          </select>
+          <select id="jf-status" class="inp w-auto text-xs" onchange="applyJournalFilters()">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <button class="text-xs text-zinc-500 hover:text-zinc-300 underline" onclick="resetJournalFilters()">Reset</button>
+        </div>
+
+        <!-- Trade list -->
+        <div id="journal-list" class="space-y-3">
+          ${renderJournalList()}
+        </div>
+        ${journalEntries.length === 0 ? `
+          <div class="card text-center py-10 space-y-3">
+            <div class="text-zinc-500 text-sm">No trades logged yet.</div>
+            <button class="btn btn-v text-sm" onclick="openTradeModal(null)">Log your first trade</button>
+          </div>` : ''}
+      </div>`;
+  } catch (e) { sec.innerHTML = err(e.message); }
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────

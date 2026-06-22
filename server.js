@@ -75,7 +75,7 @@ app.use((req, res, next) => {
   // CSP compatible with the Tailwind CDN + the hosted Usernode bridge origin.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
     "connect-src 'self' https://social-vibecoding.usernodelabs.org",
     "img-src 'self' data: https:",
@@ -373,6 +373,16 @@ setInterval(async () => {
           funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
+    // Anchor ETH-PERP and BTC-PERP to real CoinGecko prices (BLOOM-PERP stays synthetic).
+    const _perpPrices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices();
+    for (const [perp, ticker] of [['ETH-PERP', 'ETH'], ['BTC-PERP', 'BTC']]) {
+      if (_perpPrices[ticker] != null) {
+        await pool.query(
+          'UPDATE futures_markets SET mark_price=$1, index_price=$1, updated_at=NOW() WHERE symbol=$2',
+          [_perpPrices[ticker], perp]
+        );
+      }
+    }
     await pool.query(`INSERT INTO futures_price_snapshots(market_id, mark_price) SELECT id, mark_price FROM futures_markets`);
     await pool.query(`DELETE FROM futures_price_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM futures_price_snapshots) r WHERE rn > 200)`);
     await pool.query(`UPDATE opinion_markets SET status='closed' WHERE is_daily=true AND status='open' AND closes_at <= NOW()`);
@@ -561,6 +571,15 @@ app.get('/api/feed', async (req, res) => {
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
       `, params));
+    } else if (tab === 'wins') {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
     } else {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
@@ -593,18 +612,22 @@ app.get('/api/feed', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const MILESTONE_TYPES = new Set(['debt_free','savings_goal','investment_win','income_milestone','emergency_fund','net_worth','other_win']);
+
 app.post('/api/posts', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { content, parent_id, locked } = req.body;
+    const { content, parent_id, locked, milestone_type } = req.body;
     if (!content || content.length > 280) return res.status(400).json({ error: 'Invalid content' });
     const isTopLevel = !parent_id;
     // Only top-level posts can be locked; replies are never lockable.
     const isLocked = !!locked && !parent_id;
+    // Only top-level posts can be milestones; replies cannot.
+    const milestoneType = isTopLevel && milestone_type && MILESTONE_TYPES.has(milestone_type) ? milestone_type : null;
     await client.query('BEGIN');
     const { rows: [post] } = await client.query(`
-      INSERT INTO posts (user_id, username, content, parent_id, locked) VALUES ($1,$2,$3,$4,$5) RETURNING *
-    `, [req.user.id, req.user.username, content, parent_id || null, isLocked]);
+      INSERT INTO posts (user_id, username, content, parent_id, locked, milestone_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [req.user.id, req.user.username, content, parent_id || null, isLocked, milestoneType]);
     if (parent_id) {
       await client.query('UPDATE posts SET reply_count=reply_count+1 WHERE id=$1', [parent_id]);
     }
@@ -885,6 +908,138 @@ app.delete('/api/social/link/:provider', async (req, res) => {
       'DELETE FROM social_accounts WHERE user_id=$1 AND provider=$2',
       [req.user.id, provider]
     );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+const JOURNAL_ASSET_TYPES = new Set(['stock', 'etf', 'crypto']);
+const JOURNAL_DIRECTIONS   = new Set(['buy', 'sell']);
+
+app.get('/api/journal/summary', async (req, res) => {
+  try {
+    const { rows: [s] } = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total_count,
+        SUM(CASE WHEN exit_price IS NOT NULL THEN 1 ELSE 0 END)::int AS closed_count,
+        SUM(CASE WHEN exit_price IS NULL THEN 1 ELSE 0 END)::int AS open_count,
+        SUM(CASE WHEN exit_price IS NOT NULL AND
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity > 0
+          THEN 1 ELSE 0 END)::int AS profitable_count,
+        COALESCE(SUM(CASE WHEN exit_price IS NOT NULL THEN
+          CASE WHEN direction='buy' THEN (exit_price - entry_price) ELSE (entry_price - exit_price) END * quantity
+        ELSE 0 END), 0)::float AS realized_pnl
+      FROM trade_journal_entries WHERE user_id=$1
+    `, [req.user.id]);
+    res.json(s);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, direction, status } = req.query;
+    const params = [req.user.id];
+    const conds = ['user_id=$1'];
+    if (asset_type && JOURNAL_ASSET_TYPES.has(asset_type)) {
+      params.push(asset_type); conds.push(`asset_type=$${params.length}`);
+    }
+    if (direction && JOURNAL_DIRECTIONS.has(direction)) {
+      params.push(direction); conds.push(`direction=$${params.length}`);
+    }
+    if (status === 'open') conds.push('exit_price IS NULL');
+    else if (status === 'closed') conds.push('exit_price IS NOT NULL');
+    const { rows } = await pool.query(
+      `SELECT * FROM trade_journal_entries WHERE ${conds.join(' AND ')} ORDER BY trade_date DESC, created_at DESC`,
+      params
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!trade_date) return res.status(400).json({ error: 'trade_date required' });
+    const qty = parseAmount(quantity);
+    const ep  = parseAmount(entry_price);
+    if (!qty || !ep) return res.status(400).json({ error: 'quantity and entry_price must be positive numbers' });
+    const xp = exit_price != null && exit_price !== '' ? parseAmount(exit_price) : null;
+    if (exit_price != null && exit_price !== '' && !xp) return res.status(400).json({ error: 'Invalid exit_price' });
+    if (notes && typeof notes === 'string' && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_journal_entries(user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0, 20), direction, qty, ep, xp,
+       trade_date, (xp && exit_date) ? exit_date : null, notes || null]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, exit_price, exit_date, notes } = req.body;
+    const sets = [], params = [id, req.user.id];
+    const push = (col, val) => { params.push(val); sets.push(`${col}=$${params.length}`); };
+    if (asset_type !== undefined) {
+      if (!JOURNAL_ASSET_TYPES.has(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+      push('asset_type', asset_type);
+    }
+    if (ticker !== undefined) {
+      if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+      push('ticker', ticker.toUpperCase().slice(0, 20));
+    }
+    if (direction !== undefined) {
+      if (!JOURNAL_DIRECTIONS.has(direction)) return res.status(400).json({ error: 'Invalid direction' });
+      push('direction', direction);
+    }
+    if (quantity !== undefined) {
+      const v = parseAmount(quantity); if (!v) return res.status(400).json({ error: 'Invalid quantity' });
+      push('quantity', v);
+    }
+    if (entry_price !== undefined) {
+      const v = parseAmount(entry_price); if (!v) return res.status(400).json({ error: 'Invalid entry_price' });
+      push('entry_price', v);
+    }
+    if (trade_date !== undefined) push('trade_date', trade_date);
+    if (exit_price !== undefined) {
+      if (exit_price === null || exit_price === '') { push('exit_price', null); push('exit_date', null); }
+      else {
+        const v = parseAmount(exit_price); if (!v) return res.status(400).json({ error: 'Invalid exit_price' });
+        push('exit_price', v);
+        push('exit_date', exit_date || null);
+      }
+    }
+    if (notes !== undefined) {
+      if (notes && notes.length > 500) return res.status(400).json({ error: 'notes max 500 chars' });
+      push('notes', notes || null);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    sets.push(`updated_at=NOW()`);
+    const { rows } = await pool.query(
+      `UPDATE trade_journal_entries SET ${sets.join(',')} WHERE id=$1 AND user_id=$2 RETURNING *`,
+      params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/journal/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid id' });
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_journal_entries WHERE id=$1 AND user_id=$2',
+      [id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1601,6 +1756,69 @@ app.post('/api/wallet/transfer', requireWallet, async (req, res) => {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
+});
+
+// ── Trade Journal (trade_entries) ─────────────────────────────────────────────
+
+app.get('/api/trade-entries', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM trade_entries WHERE user_id=$1 ORDER BY trade_date DESC, id DESC',
+      [req.user.id]
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/trade-entries', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, notes } = req.body;
+    if (!['crypto','stock','etf'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!['long','short'].includes(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    const qty = parseAmount(quantity);
+    if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
+    const ep = parseAmount(entry_price);
+    if (!ep) return res.status(400).json({ error: 'Invalid entry_price' });
+    const td = trade_date ? new Date(trade_date) : new Date();
+    if (isNaN(td.getTime())) return res.status(400).json({ error: 'Invalid trade_date' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_entries(user_id,asset_type,ticker,direction,quantity,entry_price,trade_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0,20), direction, qty, ep, td, (notes||'').slice(0,500)]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/trade-entries/:id', async (req, res) => {
+  try {
+    const { exit_price, notes } = req.body;
+    const ep = exit_price != null ? parseAmount(exit_price) : null;
+    if (exit_price != null && !ep) return res.status(400).json({ error: 'Invalid exit_price' });
+    const { rows: [entry] } = await pool.query(
+      `UPDATE trade_entries
+       SET exit_price = COALESCE($1, exit_price),
+           notes = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE notes END,
+           updated_at = NOW()
+       WHERE id=$3 AND user_id=$4
+       RETURNING *`,
+      [ep, notes !== undefined ? (notes||'').slice(0,500) : null, req.params.id, req.user.id]
+    );
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/trade-entries/:id', async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_entries WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── NFT ───────────────────────────────────────────────────────────────────────
@@ -3120,6 +3338,7 @@ async function start() {
       UNIQUE(post_id, user_id)
     );
     ALTER TABLE posts ADD COLUMN IF NOT EXISTS locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS milestone_type VARCHAR(50);
     CREATE TABLE IF NOT EXISTS post_unlocks (
       id SERIAL PRIMARY KEY,
       post_id INTEGER NOT NULL REFERENCES posts(id),
@@ -3335,6 +3554,22 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS trade_journal_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(10) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(4) NOT NULL,
+      quantity NUMERIC(24,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date DATE NOT NULL,
+      exit_date DATE,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_journal_user_idx ON trade_journal_entries (user_id, trade_date DESC);
     CREATE TABLE IF NOT EXISTS conversations (
       id SERIAL PRIMARY KEY,
       type VARCHAR(10) NOT NULL DEFAULT 'direct',
@@ -3392,6 +3627,25 @@ async function start() {
     ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS icon_url TEXT;
   `);
 
+  // trade_entries — personal trade journal (private: individual P&L data).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trade_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(20) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(10) NOT NULL,
+      quantity NUMERIC(20,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_entries_user_idx ON trade_entries (user_id, trade_date DESC);
+  `);
+
   // funding_payments — per-position funding settlements (Phase 3, private).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS funding_payments (
@@ -3435,6 +3689,8 @@ async function start() {
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
+    COMMENT ON TABLE trade_journal_entries IS 'staging:private';
+    COMMENT ON TABLE trade_entries IS 'staging:private';
     COMMENT ON TABLE conversations IS 'staging:private';
     COMMENT ON TABLE conversation_members IS 'staging:private';
     COMMENT ON TABLE messages IS 'staging:private';
@@ -3575,6 +3831,17 @@ async function start() {
         (900016,9005,'staging-eve','Staging demo alpha — the secret BLOOM entry I''m not unblurring for free 🌸',TRUE)
       ON CONFLICT(id) DO NOTHING`
     );
+
+    // Seed milestone posts for the Wins 🏆 tab.
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,milestone_type) VALUES
+        (900017,9001,'staging-alice','Staging demo win — Just paid off my student loan after 4 years! Freedom! 🎉','debt_free'),
+        (900018,9002,'staging-bob','Staging demo win — Finally hit my $10k emergency fund goal. Took 18 months but we made it.','emergency_fund'),
+        (900019,9003,'staging-carol','Staging demo win — My ETH position is up 40% since last year. Best investment I''ve made.','investment_win'),
+        (900020,9004,'staging-dave','Staging demo win — Got a 25% raise at my new job. Time to max out the savings rate!','income_milestone'),
+        (900021,9005,'staging-eve','Staging demo win — Hit $50k net worth at 28. Slow and steady wins the race. 💰','net_worth')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed follows
     await pool.query(`
@@ -3779,6 +4046,26 @@ async function start() {
 
     }
 
+    // Seed trade journal entries for staging users
+    await pool.query(`
+      INSERT INTO trade_journal_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,exit_date,notes) VALUES
+        (9010001,9001,'crypto','BTC','buy',0.5,58000,63000,'2026-05-01','2026-05-15','Staging demo — BTC swing long, closed +$2,500'),
+        (9010002,9001,'stock','AAPL','buy',10,178.50,null,'2026-06-01',null,'Staging demo — AAPL open position, waiting for earnings'),
+        (9010003,9001,'etf','SPY','buy',5,511.00,495.50,'2026-04-10','2026-04-20','Staging demo — SPY losing trade, cut early'),
+        (9010004,9001,'crypto','ETH','buy',2.0,2200,2680,'2026-05-20','2026-06-05','Staging demo — ETH long, rode the breakout'),
+        (9010005,9002,'stock','TSLA','sell',3,195.00,182.00,'2026-04-15','2026-04-28','Staging demo — TSLA short, covered at support'),
+        (9010006,9002,'etf','QQQ','buy',8,430.00,null,'2026-06-10',null,'Staging demo — QQQ position open, tech momentum'),
+        (9010007,9002,'crypto','SOL','buy',20,145.00,138.50,'2026-05-05','2026-05-12','Staging demo — SOL scalp, stopped out'),
+        (9010008,9002,'stock','NVDA','buy',2,875.00,921.00,'2026-05-18','2026-06-02','Staging demo — NVDA pre-earnings run'),
+        (9010009,9003,'etf','GLD','buy',15,210.00,225.50,'2026-04-01','2026-04-22','Staging demo — Gold ETF long, inflation hedge paid off'),
+        (9010010,9003,'crypto','BTC','sell',0.1,67000,71000,'2026-05-28','2026-06-08','Staging demo — BTC short, bad timing, covered at loss'),
+        (9010011,9003,'stock','AMZN','buy',5,185.00,null,'2026-06-15',null,'Staging demo — AMZN open, watching AWS segment'),
+        (9010012,9004,'crypto','DOGE','buy',5000,0.155,0.182,'2026-04-20','2026-05-01','Staging demo — DOGE meme run, quick profit'),
+        (9010013,9004,'etf','IWM','sell',10,198.00,204.50,'2026-05-10','2026-05-22','Staging demo — IWM short, wrong direction, loss'),
+        (9010014,9004,'stock','MSFT','buy',4,415.00,null,'2026-06-12',null,'Staging demo — MSFT open, Copilot growth thesis')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
     // Seed opinion market snapshots
     {
       const { rows: [cnt] } = await pool.query('SELECT COUNT(*)::int AS n FROM opinion_market_snapshots WHERE market_id IN (9001,9002,9003)');
@@ -3848,6 +4135,17 @@ async function start() {
       await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
       await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
     }
+
+    // Seed trade journal entries (staging:private table — always empty in prod copy).
+    await pool.query(`
+      INSERT INTO trade_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,notes) VALUES
+        (900001,9001,'crypto','ETH','long',1.5,3200,3450,NOW()-INTERVAL '30 days','Staging demo trade — ETH breakout long, closed for profit'),
+        (900002,9001,'crypto','BTC','long',0.05,64000,NULL,NOW()-INTERVAL '14 days','Staging demo trade — BTC accumulation, still open'),
+        (900003,9004,'crypto','SOL','short',10,155,140,NOW()-INTERVAL '10 days','Staging demo trade — SOL overextended, shorted into resistance'),
+        (900004,9004,'crypto','ETH','short',2,3300,NULL,NOW()-INTERVAL '5 days','Staging demo trade — ETH short, still open'),
+        (900005,9002,'stock','AAPL','long',5,185,178,NOW()-INTERVAL '20 days','Staging demo trade — AAPL earnings play, small loss')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed daily opinion market snapshots
     {
