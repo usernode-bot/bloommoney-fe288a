@@ -4354,6 +4354,70 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
+    // Seed 17 additional NFT collections (ids 9004-9020) so there are 20 total,
+    // each with 2-3 NFTs, one active listing, mint history, and (on ~half) a
+    // sale, so /api/nft-collections renders item_count, floor_price, and volume.
+    // Deterministic ids keep the block idempotent across container rebuilds.
+    const demoCollections = [
+      { id: 9004, name: 'Pixel Pioneers',        hex: 'ec4899', creator: 'staging-alice', blurb: 'Retro pixel-art trailblazers of the chain.' },
+      { id: 9005, name: 'Neon Degens',           hex: '22d3ee', creator: 'staging-bob',   blurb: 'High-octane neon traders who never sleep.' },
+      { id: 9006, name: 'Moon Apes',             hex: 'a3e635', creator: 'staging-carol', blurb: 'Apes bound for the moon, one banana at a time.' },
+      { id: 9007, name: 'Diamond Hands Club',    hex: '38bdf8', creator: 'staging-dave',  blurb: 'For holders who never let go.' },
+      { id: 9008, name: 'Crypto Kitties Reborn', hex: 'f472b6', creator: 'staging-eve',   blurb: 'The classic collectible cats, reimagined.' },
+      { id: 9009, name: 'DeFi Legends',          hex: '34d399', creator: 'staging-alice', blurb: 'Portraits of the protocols that built DeFi.' },
+      { id: 9010, name: 'Bloom Botanica',        hex: '10b981', creator: 'staging-carol', blurb: 'Rare on-chain flora from the Bloom garden.' },
+      { id: 9011, name: 'Genesis Whales',        hex: '6366f1', creator: 'staging-bob',   blurb: 'The biggest bags from the genesis era.' },
+      { id: 9012, name: 'Cyber Samurai',         hex: 'ef4444', creator: 'staging-dave',  blurb: 'Blade-wielding warriors of the metaverse.' },
+      { id: 9013, name: 'Vapor Dreams',          hex: '8b5cf6', creator: 'staging-eve',   blurb: 'Vaporwave aesthetics minted forever.' },
+      { id: 9014, name: 'Golden Bulls',          hex: 'f59e0b', creator: 'staging-alice', blurb: 'Gilded bulls commemorating every green candle.' },
+      { id: 9015, name: 'Frosty Penguins',       hex: '60a5fa', creator: 'staging-bob',   blurb: 'Chill penguins waddling across the blockchain.' },
+      { id: 9016, name: 'Solar Flares',          hex: 'fb923c', creator: 'staging-carol', blurb: 'Radiant bursts of cosmic energy.' },
+      { id: 9017, name: 'Phantom Hackers',       hex: '14b8a6', creator: 'staging-dave',  blurb: 'Shadowy coders of the dark forest.' },
+      { id: 9018, name: 'Retro Arcade',          hex: 'e879f9', creator: 'staging-eve',   blurb: 'Coin-op nostalgia, tokenized.' },
+      { id: 9019, name: 'Astro Voyagers',        hex: '818cf8', creator: 'staging-alice', blurb: 'Explorers charting the interstellar mainnet.' },
+      { id: 9020, name: 'Emerald Enclave',       hex: '059669', creator: 'staging-carol', blurb: 'A secret society of jade-clad collectors.' },
+    ];
+    const demoOwners = [
+      { id: 9001, username: 'staging-alice' },
+      { id: 9002, username: 'staging-bob' },
+      { id: 9003, username: 'staging-carol' },
+      { id: 9004, username: 'staging-dave' },
+      { id: 9005, username: 'staging-eve' },
+    ];
+    const demoRarities = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+    const colRows = [], nftRows = [], listingRows = [], transferRows = [];
+    let demoNftId = 9100, demoListingId = 9100, demoMintTxId = 9200, demoSaleTxId = 9400;
+    demoCollections.forEach((c, ci) => {
+      const slug = c.name.replace(/ /g, '+');
+      const banner = `https://placehold.co/1200x300/${c.hex}/ffffff?text=${slug}`;
+      colRows.push(`(${c.id},'${c.name}','Staging demo collection — ${c.blurb}','${banner}','${c.creator}')`);
+      const count = 2 + (ci % 2); // 2 or 3 NFTs per collection
+      const creator = demoOwners[ci % demoOwners.length];
+      let firstNftId = null;
+      for (let j = 0; j < count; j++) {
+        const id = demoNftId++;
+        if (firstNftId === null) firstNftId = id;
+        const owner = demoOwners[(ci + j) % demoOwners.length];
+        const rarity = demoRarities[(ci + j) % demoRarities.length];
+        const royalty = 300 + ((ci + j) % 5) * 100;
+        const img = `https://placehold.co/400x400/${c.hex}/ffffff?text=${c.name.split(' ')[0]}+${j + 1}`;
+        nftRows.push(`(${id},${owner.id},'${owner.username}',${creator.id},'${creator.username}','${c.name} #${j + 1}','Staging demo NFT — ${c.blurb}','${img}','BLOOM-S${id}','${c.name}',${royalty},'${rarity}')`);
+        transferRows.push(`(${demoMintTxId++},${id},NULL,NULL,${owner.id},'${owner.username}','mint',NULL,'BLOOM-TX-S${id}')`);
+      }
+      const seller = demoOwners[ci % demoOwners.length];
+      const price = (25 + ci * 7) * 1000000; // USDC, 6 decimals
+      listingRows.push(`(${demoListingId++},${firstNftId},${seller.id},'${seller.username}',${price},'active',NOW()+INTERVAL '14 days')`);
+      if (ci % 2 === 0) { // sale history on half the collections so volume_usdc > 0
+        const buyer = demoOwners[(ci + 2) % demoOwners.length];
+        const salePrice = (40 + ci * 9) * 1000000;
+        transferRows.push(`(${demoSaleTxId++},${firstNftId},${seller.id},'${seller.username}',${buyer.id},'${buyer.username}','sale',${salePrice},'BLOOM-TX-SALE-${firstNftId}')`);
+      }
+    });
+    await pool.query(`INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES ${colRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES ${nftRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_listings(id,nft_id,seller_user_id,seller_username,price_usdc,status,expires_at) VALUES ${listingRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+    await pool.query(`INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES ${transferRows.join(',')} ON CONFLICT(id) DO NOTHING`);
+
     // Seed auto-generated crypto portfolios for staging users (8-coin pool only)
     await pool.query(`
       INSERT INTO investment_holdings(id,user_id,asset_name,ticker,asset_type,quantity,purchase_price) VALUES
