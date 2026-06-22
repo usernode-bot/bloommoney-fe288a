@@ -69,27 +69,27 @@
   <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
 </head>
-<body class="bg-zinc-950 text-zinc-100 h-screen overflow-hidden flex flex-col">
+<body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
 <!-- ───── Wallet Gate ───── -->
-<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col items-center justify-center gap-6 p-8 text-center">
-  <div class="text-6xl">🌸</div>
-  <h1 class="text-3xl font-bold text-white">BloomMoney</h1>
-  <p class="text-zinc-400 max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
-  <button id="connect-wallet-btn" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-8 py-3 rounded-xl font-semibold text-lg">Connect Wallet</button>
-  <p id="wallet-status" class="text-zinc-600 text-sm"></p>
+<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-6 p-8 text-center" style="background: radial-gradient(ellipse at 50% 60%, rgba(124,92,252,0.12) 0%, transparent 70%), #0f1117;">
+  <div class="text-7xl">🌸</div>
+  <h1 class="text-3xl font-bold text-[#e8eaf0]">BloomMoney</h1>
+  <p class="text-[#8b95ab] max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
+  <button id="connect-wallet-btn" class="active:scale-95 transition-all text-white px-10 py-3 rounded-2xl font-semibold text-lg shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
+  <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
 </div>
 
 <!-- ───── Tip Modal ───── -->
-<div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
-  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
-    <h2 class="text-lg font-bold mb-4" id="tip-modal-title">Send TOK</h2>
+<div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
+  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+    <h2 class="text-xl font-bold mb-4" id="tip-modal-title">Send TOK</h2>
     <div class="space-y-4">
       <div>
-        <label class="text-sm text-zinc-400 block mb-2">Amount (TOK)</label>
+        <label class="text-sm text-[#8b95ab] block mb-2">Amount (TOK)</label>
         <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
       </div>
-      <div class="text-sm text-zinc-400">
+      <div class="text-sm text-[#8b95ab]">
         Your balance: <span id="tip-balance" class="text-amber-400 font-semibold">0 TOK</span>
       </div>
       <div id="tip-error" class="text-red-400 text-sm hidden"></div>
@@ -105,32 +105,32 @@
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
   <!-- Top Bar -->
-  <header class="h-14 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 shrink-0 z-30">
+  <header class="h-14 bg-[#131620] border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between px-4 shrink-0 z-30">
     <div class="flex items-center gap-3">
-      <button class="md:hidden text-zinc-400 hover:text-white p-1" onclick="toggleMobileSidebar()">
+      <button class="md:hidden text-[#8b95ab] hover:text-[#e8eaf0] p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <button class="font-bold text-violet-400 hover:text-violet-300 transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
+      <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
     <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Explore" onclick="navigate('explore')">🔭</button>
-      <button id="hdr-verify" class="hidden sm:inline-flex text-zinc-400 hover:text-white px-2 py-1 rounded-lg hover:bg-zinc-800" title="Verify" onclick="navigate('verify')">🪪</button>
-      <span id="hdr-wallet" class="text-zinc-500 font-mono hidden sm:block"></span>
+      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
+      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
       <!-- Mobile: single compact chip showing both balances -->
-      <div class="sm:hidden bg-zinc-800 px-2 py-1 rounded-lg flex gap-1.5 items-center">
-        <span class="text-violet-400 font-semibold" id="hdr-bloom">—</span>
-        <span class="text-zinc-600">/</span>
+      <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
+        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
+        <span class="text-[#4e5872]">/</span>
         <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
       </div>
       <!-- Desktop: separate labelled badges -->
       <div class="hidden sm:flex gap-1.5">
-        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-violet-400 font-semibold" id="hdr-bloom-lg">—</span>
-          <span class="text-zinc-500">BLOOM</span>
+        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
+          <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
+          <span class="text-[#4e5872]">BLOOM</span>
         </div>
-        <div class="bg-zinc-800 px-2 py-1 rounded-lg flex gap-1 items-center">
+        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
           <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-          <span class="text-zinc-500">USDC</span>
+          <span class="text-[#4e5872]">USDC</span>
         </div>
       </div>
     </div>
@@ -142,11 +142,11 @@
     <div id="mob-overlay" class="hidden fixed inset-0 z-40 bg-black/60" onclick="toggleMobileSidebar()"></div>
 
     <!-- Desktop Sidebar + Mobile Drawer -->
-    <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-zinc-900 border-r border-zinc-800 flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
+    <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-[#131620] border-r border-[rgba(255,255,255,0.06)] flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
       <!-- Mobile-only: user identity -->
-      <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-zinc-800 hidden">
-        <div id="drawer-username" class="text-sm font-semibold text-zinc-100"></div>
-        <div id="drawer-wallet" class="text-xs text-zinc-500 font-mono mt-0.5"></div>
+      <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-[rgba(255,255,255,0.06)] hidden">
+        <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0]"></div>
+        <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
@@ -154,21 +154,21 @@
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <div class="py-1 px-2 text-xs text-zinc-600 font-medium mt-2">Discover</div>
+      <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
-      <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-violet-600/10 border border-violet-500/20 flex items-center gap-2">
+      <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
         <span class="text-base leading-none">✨</span>
         <div class="min-w-0">
-          <div class="text-[0.65rem] uppercase tracking-wide text-zinc-500 leading-tight">Points available</div>
-          <div class="text-sm font-bold text-violet-300 leading-tight"><span id="points-value">0</span></div>
+          <div class="text-[0.65rem] uppercase tracking-wide text-[#4e5872] leading-tight">Points available</div>
+          <div class="text-sm font-bold text-[#7c5cfc] leading-tight"><span id="points-value">0</span></div>
         </div>
       </div>
       <!-- Mobile-only: logout -->
-      <div class="md:hidden pt-2 border-t border-zinc-800">
+      <div class="md:hidden pt-2 border-t border-[rgba(255,255,255,0.06)]">
         <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; showWalletGate();">🚪 Log out</button>
       </div>
     </nav>
@@ -228,53 +228,70 @@
   </div>
 
   <!-- Mobile Bottom Nav (six tabs) -->
-  <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 flex z-30">
-    <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
-    <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="futures" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
-    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
-    <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
-    <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-zinc-400 transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+  <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-[#131620] border-t border-[rgba(255,255,255,0.06)] flex z-30">
+    <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
+    <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
+    <button data-tab="futures" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
+    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
+    <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
+    <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
   </nav>
 </div><!-- /#app -->
 
 <style>
+:root {
+  --bg-deep:        #0f1117;
+  --bg-surface:     #131620;
+  --bg-card:        #161b2a;
+  --bg-card-hover:  #1c2236;
+  --bg-input:       #0d1021;
+  --border-subtle:  rgba(255,255,255,0.06);
+  --border-hover:   rgba(124,92,252,0.20);
+  --border-focus:   #7c5cfc;
+  --accent-purple:  #7c5cfc;
+  --accent-blue:    #4e9af1;
+  --text-primary:   #e8eaf0;
+  --text-secondary: #8b95ab;
+  --text-muted:     #4e5872;
+}
 .nav-item {
   width: 100%; text-align: left; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
-  font-size: 0.875rem; color: #a1a1aa; transition: color 0.15s, background 0.15s;
+  font-size: 0.875rem; color: var(--text-secondary); transition: color 0.15s, background 0.15s;
 }
-.nav-item:hover { background: #27272a; color: #fff; }
-.nav-item.active { background: #3f3f46; color: #fff; }
-.card { background: #18181b; border: 1px solid #27272a; border-radius: 0.75rem; padding: 1rem; }
-.inp { background: #27272a; border: 1px solid #3f3f46; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: #fff; width: 100%; outline: none; }
-.inp:focus { border-color: #7c3aed; }
-.btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
-.btn-v { background: #7c3aed; color: #fff; }
-.btn-v:hover { background: #6d28d9; }
-.btn-z { background: #3f3f46; color: #fff; }
-.btn-z:hover { background: #52525b; }
-.btn-r { background: #b91c1c; color: #fff; }
-.btn-r:hover { background: #991b1b; }
-.btn-g { background: #059669; color: #fff; }
-.btn-g:hover { background: #047857; }
-.tag-basic { background: rgba(59,130,246,0.15); color: #93c5fd; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
+.nav-item:hover { background: var(--bg-card); color: var(--text-primary); }
+.nav-item.active { background: linear-gradient(90deg, rgba(124,92,252,0.12), transparent); border-left: 2px solid var(--accent-purple); color: var(--text-primary); padding-left: calc(0.75rem - 2px); }
+.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: 1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+.card:hover { border-color: var(--border-hover); box-shadow: 0 0 16px rgba(124,92,252,0.08); }
+.inp { background: var(--bg-input); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: var(--text-primary); width: 100%; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+.inp:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(124,92,252,0.15); }
+.btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; transform: translateY(0); }
+.btn:hover { transform: translateY(-1px); }
+.btn-v { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff; }
+.btn-v:hover { opacity: 0.9; }
+.btn-z { background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border-subtle); }
+.btn-z:hover { border-color: var(--border-hover); }
+.btn-r { background: #dc2626; color: #fff; }
+.btn-r:hover { background: #b91c1c; }
+.btn-g { background: #10b981; color: #fff; }
+.btn-g:hover { background: #059669; }
+.tag-basic { background: rgba(78,154,241,0.15); color: #93c5fd; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-social { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-premium { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-verified { background: rgba(16,185,129,0.15); color: #6ee7b7; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-zk-verified { background: rgba(20,184,166,0.15); color: #5eead4; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
-.spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid #3f3f46; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.6s linear infinite; }
+.spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--accent-purple); border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Post-to-Earn points animations */
 .points-pulse { animation: pointsPulse 0.7s ease-out; }
 @keyframes pointsPulse {
-  0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(167,139,250,0.5); }
-  35%  { transform: scale(1.06); box-shadow: 0 0 16px 4px rgba(167,139,250,0.45); }
-  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(167,139,250,0); }
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(124,92,252,0.5); }
+  35%  { transform: scale(1.06); box-shadow: 0 0 16px 4px rgba(124,92,252,0.45); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(124,92,252,0); }
 }
 .points-float {
   position: absolute; right: 0.75rem; top: 0.25rem;
-  font-size: 0.85rem; font-weight: 700; color: #c4b5fd;
+  font-size: 0.85rem; font-weight: 700; color: #a78bfa;
   pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.5);
   animation: pointsFloat 0.9s ease-out forwards;
 }
@@ -283,7 +300,14 @@
   20%  { opacity: 1; transform: translateY(0) scale(1.1); }
   100% { opacity: 0; transform: translateY(-22px) scale(1); }
 }
-select.inp option { background: #18181b; }
+select.inp option { background: var(--bg-card); }
+/* Pill-style tab buttons */
+.pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff !important; border-radius: 9999px; border: none; }
+.pill-inactive { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 9999px; }
+.pill-inactive:hover { color: var(--text-primary); border-color: var(--border-hover); }
+/* Futures table zebra rows */
+#section-futures tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+/* Avatar hue override — purple/blue band */
 </style>
 
 <script>
@@ -398,10 +422,10 @@ function avatarDataUri(username) {
   const name = String(username || '?');
   const initial = (name.replace(/[^a-zA-Z0-9]/g, '')[0] || name[0] || '?').toUpperCase();
   const h = _avatarHash(name);
-  const hue = h % 360;
-  const hue2 = (hue + 48) % 360;
-  const c1 = `hsl(${hue},68%,58%)`;
-  const c2 = `hsl(${hue2},72%,42%)`;
+  const hue = 200 + (h % 80); // 200–280° = blue/purple band
+  const hue2 = (hue + 40) % 360;
+  const c1 = `hsl(${hue},72%,62%)`;
+  const c2 = `hsl(${hue2},78%,44%)`;
   const gid = 'g' + h;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
@@ -457,8 +481,8 @@ function navigate(view, opts) {
   });
   const tab = VIEW_TAB[view];
   document.querySelectorAll('.bottom-tab').forEach(b => {
-    b.classList.toggle('text-violet-400', b.dataset.tab === tab);
-    b.classList.toggle('text-zinc-400', b.dataset.tab !== tab);
+    b.classList.toggle('text-[#7c5cfc]', b.dataset.tab === tab);
+    b.classList.toggle('text-[#8b95ab]', b.dataset.tab !== tab);
   });
   hideMobileSidebar();
   loadView(view);
@@ -652,13 +676,13 @@ async function renderFeed(sec) {
     el.innerHTML = symbols.map(sym => {
       const v = tickerCache[sym];
       let body;
-      if (v === undefined) body = '<span class="text-zinc-500">…</span>';
-      else if (v === 'err') body = '<span class="text-zinc-500">price unavailable</span>';
-      else body = `<span class="text-emerald-400 font-semibold">${fmtTickerPrice(v)}</span>`;
-      return `<span class="inline-flex items-center gap-1 text-xs bg-zinc-800/70 border border-zinc-700 rounded-full px-2 py-0.5">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-        <span class="text-zinc-300 font-medium">$${sym}</span>
-        <span class="text-zinc-600">·</span>${body}</span>`;
+      if (v === undefined) body = '<span class="text-[#8b95ab]">…</span>';
+      else if (v === 'err') body = '<span class="text-[#8b95ab]">price unavailable</span>';
+      else body = `<span class="text-[#4e9af1] font-semibold">${fmtTickerPrice(v)}</span>`;
+      return `<span class="inline-flex items-center gap-1 text-xs bg-[#161b2a] border border-[rgba(78,154,241,0.3)] rounded-full px-2 py-0.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#4e9af1]"></span>
+        <span class="text-[#e8eaf0] font-medium">$${sym}</span>
+        <span class="text-[#4e5872]">·</span>${body}</span>`;
     }).join('');
   }
 
@@ -711,44 +735,44 @@ async function renderFeed(sec) {
   }
 
   function postCard(p) {
-    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-zinc-500 hover:text-rose-400';
+    const heartCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
     const body = isLockedForMe
       ? `<div class="relative rounded-lg overflow-hidden">
-           <p class="text-sm text-zinc-300 leading-relaxed select-none blur-sm pointer-events-none">Locked alpha — pay 5 TOK to reveal this premium post. Locked alpha — pay 5 TOK to reveal.</p>
-           <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/40 text-center px-2">
-             <span class="text-xs font-semibold text-violet-200">🔒 Pay 5 TOK to read alpha</span>
+           <p class="text-sm text-[#8b95ab] leading-relaxed select-none blur-sm pointer-events-none">Locked alpha — pay 5 TOK to reveal this premium post. Locked alpha — pay 5 TOK to reveal.</p>
+           <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-2" style="background: linear-gradient(to bottom, transparent, rgba(15,17,23,0.8));">
+             <span class="text-xs font-semibold text-[#7c5cfc]">🔒 Pay 5 TOK to read alpha</span>
              <button class="btn btn-v text-xs px-3 py-1" onclick="unlockPost(${p.id})">Pay 5 TOK</button>
            </div>
          </div>`
-      : `<p class="text-sm text-zinc-300 leading-relaxed">${esc(p.content)}</p>`;
+      : `<p class="text-sm text-[#8b95ab] leading-relaxed">${esc(p.content)}</p>`;
     return `<div class="card space-y-2" data-post-id="${p.id}">
       <div class="flex items-start justify-between gap-2">
         <div class="flex items-center gap-2.5 min-w-0">
           <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10')}</button>
           <div class="min-w-0">
-            <button class="text-sm font-semibold hover:text-violet-300 truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
+            <button class="text-sm font-semibold text-[#e8eaf0] hover:text-[#7c5cfc] truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
             ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
             ${p.locked ? '<span class="text-amber-400 text-xs ml-1" title="Premium locked post">🔒</span>' : ''}
-            <span class="text-zinc-600 text-xs ml-2">${tsAgo(p.created_at)}</span>
+            <span class="text-[#4e5872] text-xs ml-2">${tsAgo(p.created_at)}</span>
           </div>
         </div>
       </div>
       ${body}
       <div class="flex items-center gap-4">
         <button class="${heartCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>
-        <button class="text-zinc-500 hover:text-zinc-300 flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
-        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
-        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-zinc-600 hover:text-violet-400 text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
+        <button class="text-[#4e5872] hover:text-[#8b95ab] flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
+        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
       </div>
     </div>`;
   }
 
   function threadView(post, replies) {
     return `<div class="space-y-3">
-      <button class="text-sm text-zinc-400 hover:text-white flex items-center gap-1" onclick="backToFeed()">← Back to Feed</button>
+      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] flex items-center gap-1" onclick="backToFeed()">← Back to Feed</button>
       ${postCard(post)}
-      <div class="ml-4 border-l border-zinc-800 pl-4 space-y-3">
+      <div class="ml-4 border-l border-[rgba(255,255,255,0.06)] pl-4 space-y-3">
         ${replies.map(r => postCard(r)).join('')}
         <div class="card">
           <textarea id="reply-box" class="inp" rows="2" placeholder="Write a reply…" maxlength="280"></textarea>
@@ -768,8 +792,8 @@ async function renderFeed(sec) {
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <div class="flex justify-between items-center">
           <div class="flex items-center gap-3">
-            <span id="compose-count" class="text-xs text-zinc-600">0/280</span>
-            <label class="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none" title="Lock this post behind a 5 TOK paywall">
+            <span id="compose-count" class="text-xs text-[#4e5872]">0/280</span>
+            <label class="flex items-center gap-1.5 text-xs text-[#8b95ab] cursor-pointer select-none" title="Lock this post behind a 5 TOK paywall">
               <input id="compose-lock" type="checkbox" class="accent-violet-600 w-3.5 h-3.5">
               <span>🔒 Lock Post</span>
             </label>
@@ -777,12 +801,12 @@ async function renderFeed(sec) {
           <button class="btn btn-v" onclick="submitPost()">Post</button>
         </div>
       </div>
-      <div class="flex gap-2 border-b border-zinc-800 pb-2">
-        <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='global'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('global')">Global</button>
-        <button class="text-sm px-3 py-1 rounded-lg transition-colors ${feedState.tab==='following'?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchTab('following')">Following</button>
+      <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
       </div>
       <div id="feed-list" class="space-y-3">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-zinc-600 text-sm text-center py-4">No posts yet</p>'}
+        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
       </div>
       ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
     `;
@@ -962,11 +986,11 @@ async function renderProfile(sec) {
     return nfts.length
       ? `<div class="grid grid-cols-2 gap-3">${nfts.map(n => `
           <div class="card space-y-2">
-            <img src="${esc(n.image_url)}" class="w-full aspect-square object-cover rounded-lg bg-zinc-800" onerror="this.style.display='none'">
+            <img src="${esc(n.image_url)}" class="w-full aspect-square object-cover rounded-lg bg-[#1c2236]" onerror="this.style.display='none'">
             <p class="text-sm font-medium">${esc(n.name)}</p>
-            <p class="text-xs text-zinc-500 font-mono">${esc(n.token_id)}</p>
+            <p class="text-xs text-[#8b95ab] font-mono">${esc(n.token_id)}</p>
           </div>`).join('')}</div>`
-      : '<p class="text-zinc-600 text-sm">No NFTs yet</p>';
+      : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>';
   }
 
   async function renderPostTab(parent = null) {
@@ -975,11 +999,11 @@ async function renderProfile(sec) {
     const userPosts = d.posts.filter(p => p.username === username && (parent === null ? p.parent_id === null : p.parent_id !== null));
     return userPosts.length
       ? userPosts.map(p => `<div class="card space-y-1">
-          <span class="text-xs text-zinc-600">${p.locked ? '🔒 ' : ''}${tsAgo(p.created_at)}</span>
-          <p class="text-sm ${p.locked && !p.unlocked ? 'text-zinc-500 italic' : 'text-zinc-300'}">${p.locked && !p.unlocked ? 'Locked alpha — open the feed to pay 5 TOK and read.' : esc(p.content)}</p>
-          <div class="flex gap-3 text-xs text-zinc-500"><span>♥ ${p.like_count}</span><span>💬 ${p.reply_count}</span></div>
+          <span class="text-xs text-[#4e5872]">${p.locked ? '🔒 ' : ''}${tsAgo(p.created_at)}</span>
+          <p class="text-sm ${p.locked && !p.unlocked ? 'text-[#8b95ab] italic' : 'text-[#e8eaf0]'}">${p.locked && !p.unlocked ? 'Locked alpha — open the feed to pay 5 TOK and read.' : esc(p.content)}</p>
+          <div class="flex gap-3 text-xs text-[#8b95ab]"><span>♥ ${p.like_count}</span><span>💬 ${p.reply_count}</span></div>
         </div>`).join('')
-      : '<p class="text-zinc-600 text-sm">No posts yet</p>';
+      : '<p class="text-[#4e5872] text-sm">No posts yet</p>';
   }
 
   async function renderPortfolioTab() {
@@ -1007,17 +1031,17 @@ async function renderProfile(sec) {
         <div class="card space-y-2">
           <div class="flex items-center gap-2 mb-1">
             <span class="font-semibold text-sm">${esc(h.asset_name)}</span>
-            ${h.ticker ? `<span class="text-zinc-500 font-mono text-xs bg-zinc-800 px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
+            ${h.ticker ? `<span class="text-[#8b95ab] font-mono text-xs bg-[#1c2236] px-1.5 py-0.5 rounded">${esc(h.ticker)}</span>` : ''}
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div><div class="text-zinc-500">Quantity</div><div class="font-mono">${qtyStr}</div></div>
-            <div><div class="text-zinc-500">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
-            <div><div class="text-zinc-500">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-zinc-600">—</span>'}</div></div>
+            <div><div class="text-[#8b95ab]">Quantity</div><div class="font-mono">${qtyStr}</div></div>
+            <div><div class="text-[#8b95ab]">Avg buy</div><div class="font-mono">$${buyPrice < 1 ? buyPrice.toFixed(4) : buyPrice.toFixed(2)}</div></div>
+            <div><div class="text-[#8b95ab]">Live price</div><div class="font-mono">${livePrice != null ? `$${livePrice < 1 ? livePrice.toFixed(4) : livePrice.toFixed(2)}` : '<span class="text-[#4e5872]">—</span>'}</div></div>
             <div>
-              <div class="text-zinc-500">Value / P&amp;L</div>
+              <div class="text-[#8b95ab]">Value / P&amp;L</div>
               ${currentValue != null
                 ? `<div class="font-mono">$${currentValue.toFixed(2)} <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span></div>`
-                : `<div class="text-zinc-600">—</div>`}
+                : `<div class="text-[#4e5872]">—</div>`}
             </div>
           </div>
         </div>`;
@@ -1028,20 +1052,20 @@ async function renderProfile(sec) {
     const totalPnlCls = totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400';
 
     return `
-      <div class="card bg-zinc-900/50 space-y-1">
-        <div class="text-xs text-zinc-500">Portfolio value</div>
-        <div class="text-2xl font-bold text-violet-300">$${totalValue.toFixed(2)}</div>
+      <div class="card bg-[#161b2a]/80 space-y-1">
+        <div class="text-xs text-[#8b95ab]">Portfolio value</div>
+        <div class="text-2xl font-bold text-[#7c5cfc]">$${totalValue.toFixed(2)}</div>
         ${totalCost > 0 ? `<div class="text-sm ${totalPnlCls} font-mono">${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)} (${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(1)}%) overall P&L</div>` : ''}
       </div>
       ${holdings.length
         ? `<div class="space-y-3">${rows.join('')}</div>`
-        : `<div class="card text-center py-6 text-zinc-500 text-sm">Portfolio not yet generated.</div>`}`;
+        : `<div class="card text-center py-6 text-[#4e5872] text-sm">Portfolio not yet generated.</div>`}`;
   }
 
   async function renderActivityTab() {
     const typeConfig = {
-      swap:         { label: 'Swap',              color: 'text-blue-400',   bg: 'bg-blue-900/30' },
-      market_trade: { label: 'Prediction Market', color: 'text-violet-400', bg: 'bg-violet-900/30' },
+      swap:         { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
+      market_trade: { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
       futures_open: { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
       futures_pnl:  { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
       funding:      { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
@@ -1050,7 +1074,7 @@ async function renderProfile(sec) {
 
     function activityRows(items) {
       return items.map(a => {
-        const cfg = typeConfig[a.type] || { label: esc(a.type), color: 'text-zinc-400', bg: 'bg-zinc-800/30' };
+        const cfg = typeConfig[a.type] || { label: esc(a.type), color: 'text-[#8b95ab]', bg: 'bg-[#1c2236]/60' };
         const rawAmt = Number(a.amount);
         const formatted = fmtAmt(a.token_symbol || 'USDC', Math.abs(rawAmt));
         const sign = rawAmt >= 0 ? '+' : '-';
@@ -1059,11 +1083,11 @@ async function renderProfile(sec) {
           <div class="card flex items-start justify-between gap-3">
             <div class="flex items-start gap-2 min-w-0 flex-1">
               <span class="text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${cfg.color} ${cfg.bg}">${cfg.label}</span>
-              <span class="text-sm text-zinc-300 leading-tight">${esc(a.description)}</span>
+              <span class="text-sm text-[#e8eaf0] leading-tight">${esc(a.description)}</span>
             </div>
             <div class="shrink-0 text-right">
               <div class="text-sm font-mono ${amtColor}">${sign}${formatted} ${esc(a.token_symbol || '')}</div>
-              <div class="text-xs text-zinc-600">${tsAgo(a.created_at)} ago</div>
+              <div class="text-xs text-[#4e5872]">${tsAgo(a.created_at)} ago</div>
             </div>
           </div>`;
       }).join('');
@@ -1072,7 +1096,7 @@ async function renderProfile(sec) {
     const { activities, nextCursor } = await api('GET', '/api/activity?limit=20');
 
     if (!activities.length) {
-      return `<div class="card text-center py-8 text-zinc-500 text-sm">No on-chain activity yet. Make a swap, trade a market, or open a futures position to get started.</div>`;
+      return `<div class="card text-center py-8 text-[#8b95ab] text-sm">No on-chain activity yet. Make a swap, trade a market, or open a futures position to get started.</div>`;
     }
 
     let actCursor = nextCursor;
@@ -1118,11 +1142,11 @@ async function renderProfile(sec) {
             </div>` : `
             <div class="flex items-start justify-between gap-3">
               <div class="flex items-center gap-3">
-                <div class="w-14 h-14 rounded-full bg-violet-700 flex items-center justify-center text-xl font-bold">${esc(username[0].toUpperCase())}</div>
+                <div class="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">${esc(username[0].toUpperCase())}</div>
                 <div>
                   <div class="font-bold text-lg flex items-center gap-2">${esc(user.display_name || username)}${roiData && roiData.closed_trade_count > 0 ? `<span class="${roiData.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} text-xs font-semibold">📈 ${roiData.all_time_roi_pct >= 0 ? '+' : ''}${roiData.all_time_roi_pct}%</span>` : ''}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
-                  <div class="text-zinc-500 text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-violet-400 hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
-                  ${user.usernode_pubkey ? `<div class="text-zinc-600 text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
+                  <div class="text-[#8b95ab] text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-[#7c5cfc] hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
+                  ${user.usernode_pubkey ? `<div class="text-[#4e5872] text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
                   <div class="flex gap-1 flex-wrap mt-0.5">${kyc?.level ? kycTag(kyc.level) : ''}</div>
                 </div>
               </div>
@@ -1132,16 +1156,16 @@ async function renderProfile(sec) {
                    <button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
               </div>
             </div>
-            ${user.bio ? `<p class="text-sm text-zinc-400 mt-2">${esc(user.bio)}</p>` : ''}
+            ${user.bio ? `<p class="text-sm text-[#8b95ab] mt-2">${esc(user.bio)}</p>` : ''}
             <div class="flex gap-4 mt-3 text-sm">
-              <span><strong>${counts.followers}</strong> <span class="text-zinc-500">followers</span></span>
-              <span><strong>${counts.following}</strong> <span class="text-zinc-500">following</span></span>
-              <span><strong>${counts.post_count}</strong> <span class="text-zinc-500">posts</span></span>
+              <span><strong>${counts.followers}</strong> <span class="text-[#8b95ab]">followers</span></span>
+              <span><strong>${counts.following}</strong> <span class="text-[#8b95ab]">following</span></span>
+              <span><strong>${counts.post_count}</strong> <span class="text-[#8b95ab]">posts</span></span>
             </div>`}
         </div>
         ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
-        <div class="flex gap-2 border-b border-zinc-800 pb-2">
-          ${['posts','replies','nfts','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${activeTab===t?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+        <div class="flex gap-2 flex-wrap border-b border-[rgba(255,255,255,0.06)] pb-3">
+          ${['posts','replies','nfts','portfolio', ...(isMe ? ['activity'] : [])].map(t => `<button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab===t?'pill-active':'pill-inactive'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
         <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
       </div>`;
@@ -1214,31 +1238,31 @@ window.openCopyTradeModal = async (username) => {
 
     const modal = document.createElement('div');
     modal.id = 'copy-trade-modal';
-    modal.className = 'fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
     modal.innerHTML = `
-      <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full max-h-96 overflow-y-auto space-y-4 p-6">
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-2xl w-full max-h-96 overflow-y-auto space-y-4 p-6">
         <div class="flex justify-between items-center">
-          <h2 class="font-bold text-lg">Copy Positions from @${esc(username)}</h2>
-          <button onclick="document.getElementById('copy-trade-modal')?.remove()" class="text-zinc-400 hover:text-white text-xl">✕</button>
+          <h2 class="font-bold text-xl">Copy Positions from @${esc(username)}</h2>
+          <button onclick="document.getElementById('copy-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl">✕</button>
         </div>
         <div class="space-y-3">
           ${positions.map(p => `
-            <div class="bg-zinc-800 rounded-lg p-3 space-y-2">
+            <div class="bg-[#0d1021] border border-[rgba(255,255,255,0.06)] rounded-lg p-3 space-y-2">
               <div class="flex justify-between items-start">
                 <div class="font-semibold">${esc(p.symbol)}</div>
-                <div class="text-xs text-zinc-400">${p.mode === 'live' ? '💰 Live' : '📄 Paper'}</div>
+                <div class="text-xs text-[#8b95ab]">${p.mode === 'live' ? '💰 Live' : '📄 Paper'}</div>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <div><span class="text-zinc-500">Side</span><div class="font-mono ${p.side === 'long' ? 'text-emerald-400' : 'text-red-400'}">${p.side.toUpperCase()} ${p.leverage}x</div></div>
-                <div><span class="text-zinc-500">Quantity</span><div class="font-mono">${parseFloat(p.quantity).toFixed(4)}</div></div>
-                <div><span class="text-zinc-500">Entry Price</span><div class="font-mono">$${parseFloat(p.entry_price).toFixed(2)}</div></div>
-                <div><span class="text-zinc-500">Current Price</span><div class="font-mono">$${p.mark_price}</div></div>
-                <div><span class="text-zinc-500">Unrealized P&L</span><div class="font-mono ${p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${(p.unrealized_pnl / 1000000).toFixed(2)} USDC</div></div>
+                <div><span class="text-[#8b95ab]">Side</span><div class="font-mono ${p.side === 'long' ? 'text-emerald-400' : 'text-red-400'}">${p.side.toUpperCase()} ${p.leverage}x</div></div>
+                <div><span class="text-[#8b95ab]">Quantity</span><div class="font-mono">${parseFloat(p.quantity).toFixed(4)}</div></div>
+                <div><span class="text-[#8b95ab]">Entry Price</span><div class="font-mono">$${parseFloat(p.entry_price).toFixed(2)}</div></div>
+                <div><span class="text-[#8b95ab]">Current Price</span><div class="font-mono">$${p.mark_price}</div></div>
+                <div><span class="text-[#8b95ab]">Unrealized P&L</span><div class="font-mono ${p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${(p.unrealized_pnl / 1000000).toFixed(2)} USDC</div></div>
               </div>
             </div>
           `).join('')}
         </div>
-        <div class="text-xs text-zinc-500 bg-zinc-800 p-2 rounded">
+        <div class="text-xs text-[#8b95ab] bg-[#1c2236] p-2 rounded">
           ℹ️ Positions will be copied in <strong>paper mode</strong> at current market price (${positions.length} position${positions.length !== 1 ? 's' : ''})
         </div>
         <div class="flex gap-2 pt-2">
@@ -1349,19 +1373,19 @@ async function renderSwap(sec) {
 
           <!-- Header -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;">
-            <span style="font-size:19px;font-weight:700;color:#fff;letter-spacing:-0.01em;">Swap Token</span>
+            <span style="font-size:19px;font-weight:700;color:#e8eaf0;letter-spacing:-0.01em;">Swap Token</span>
             <div style="position:relative;">
-              <button onclick="swapToggleSlippage()" style="display:flex;align-items:center;gap:5px;padding:6px 11px;background:#1a1a22;border-radius:9999px;border:none;cursor:pointer;">
+              <button onclick="swapToggleSlippage()" style="display:flex;align-items:center;gap:5px;padding:6px 11px;background:#1c2236;border-radius:9999px;border:1px solid rgba(255,255,255,0.06);cursor:pointer;">
                 ${svgGear}
-                <span style="font-size:12px;color:#a1a1aa;font-weight:500;">${swapState.slippage}%</span>
+                <span style="font-size:12px;color:#8b95ab;font-weight:500;">${swapState.slippage}%</span>
               </button>
               ${swapState.showSlippagePopover ? `
-                <div style="position:absolute;right:0;top:calc(100% + 6px);background:#1a1a22;border:1px solid #2e2e3a;border-radius:14px;padding:14px;z-index:20;width:176px;box-shadow:0 8px 24px rgba(0,0,0,0.6);">
-                  <div style="font-size:11px;color:#71717a;font-weight:500;margin-bottom:9px;">Slippage tolerance</div>
+                <div style="position:absolute;right:0;top:calc(100% + 6px);background:#131620;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;z-index:20;width:176px;box-shadow:0 8px 24px rgba(0,0,0,0.6);">
+                  <div style="font-size:11px;color:#4e5872;font-weight:500;margin-bottom:9px;">Slippage tolerance</div>
                   <div style="display:flex;gap:7px;align-items:center;">
                     <input id="slippage-inp" type="number" min="0.1" max="50" step="0.1" value="${swapState.slippage}"
-                      style="background:#0d0d11;border:1px solid #3a3a45;border-radius:8px;padding:6px 8px;color:#fff;font-size:13px;width:76px;outline:none;">
-                    <button onclick="swapSetSlippage()" style="flex:1;background:linear-gradient(90deg,#7fe5d9,#b59efa);color:#0d0d11;font-weight:700;font-size:12px;padding:7px 0;border-radius:8px;border:none;cursor:pointer;">Set</button>
+                      style="background:#0d1021;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 8px;color:#e8eaf0;font-size:13px;width:76px;outline:none;">
+                    <button onclick="swapSetSlippage()" style="flex:1;background:linear-gradient(135deg,#7c5cfc,#4e9af1);color:#fff;font-weight:700;font-size:12px;padding:7px 0;border-radius:8px;border:none;cursor:pointer;">Set</button>
                   </div>
                 </div>` : ''}
             </div>
@@ -1369,20 +1393,20 @@ async function renderSwap(sec) {
 
           <!-- From label + quick-select -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
-            <span style="font-size:12px;color:#71717a;font-weight:500;">From</span>
+            <span style="font-size:12px;color:#4e5872;font-weight:500;">From</span>
             <div style="display:flex;gap:5px;">
-              ${['25%','50%','75%','Max'].map(p => `<button onclick="swapQuickSelect('${p}')" style="font-size:11px;color:#52525b;padding:2px 7px;background:#1c1c24;border-radius:9999px;border:none;cursor:pointer;transition:color .15s;" onmouseover="this.style.color='#a1a1aa'" onmouseout="this.style.color='#52525b'">${p}</button>`).join('')}
+              ${['25%','50%','75%','Max'].map(p => `<button onclick="swapQuickSelect('${p}')" style="font-size:11px;color:#4e5872;padding:2px 7px;background:#1c2236;border:1px solid rgba(255,255,255,0.06);border-radius:9999px;cursor:pointer;transition:color .15s;" onmouseover="this.style.color='#8b95ab'" onmouseout="this.style.color='#4e5872'">${p}</button>`).join('')}
             </div>
           </div>
 
           <!-- From card -->
-          <div id="swap-from-card" style="background:#16161c;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:0;">
+          <div id="swap-from-card" style="background:#161b2a;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:0;border:1px solid rgba(255,255,255,0.06);">
             <div style="display:flex;align-items:center;gap:10px;">
               ${tokenBadge(swapState.from)}
               <div style="display:flex;align-items:center;gap:2px;cursor:pointer;">
                 <select id="swap-from-sel" onchange="swapFromChange(this.value)"
                   style="background:transparent;border:none;color:#fff;font-weight:600;font-size:15px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;padding-right:2px;min-width:48px;">
-                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.from?'selected':''} style="background:#16161c;">${t}</option>`).join('')}
+                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.from?'selected':''} style="background:#161b2a;">${t}</option>`).join('')}
                 </select>
                 ${svgChevron}
               </div>
@@ -1390,47 +1414,47 @@ async function renderSwap(sec) {
             <div style="text-align:right;flex:1;margin-left:8px;">
               <input id="swap-amt-inp" type="number" value="${swapState.fromAmt}" placeholder="0.00" min="0"
                 oninput="swapAmtChange(this.value)"
-                style="background:transparent;border:none;color:#fff;font-size:22px;font-weight:700;text-align:right;width:100%;outline:none;display:block;">
-              <div style="font-size:11px;color:#52525b;margin-top:3px;">Balance: ${fromBal}</div>
+                style="background:transparent;border:none;color:#e8eaf0;font-size:22px;font-weight:700;text-align:right;width:100%;outline:none;display:block;">
+              <div style="font-size:11px;color:#4e5872;margin-top:3px;">Balance: ${fromBal}</div>
             </div>
           </div>
 
           <!-- Floating switch button -->
           <div style="display:flex;justify-content:center;position:relative;z-index:2;margin:-1px 0;">
             <button id="swap-flip-btn" onclick="swapFlipTokens()"
-              style="width:38px;height:38px;border-radius:50%;background:#22222a;border:3px solid #0d0d11;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s,background .15s;"
-              onmouseover="this.style.background='#2e2e3a'" onmouseout="this.style.background='#22222a'">
+              style="width:38px;height:38px;border-radius:50%;background:#1c2236;border:3px solid #0f1117;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s,background .15s;"
+              onmouseover="this.style.background='#232c42'" onmouseout="this.style.background='#1c2236'">
               ${svgSwapArrows}
             </button>
           </div>
 
           <!-- To card -->
-          <div id="swap-to-card" style="background:#16161c;border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <div id="swap-to-card" style="background:#161b2a;border:1px solid rgba(255,255,255,0.06);border-radius:18px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
             <div style="display:flex;align-items:center;gap:10px;">
               ${tokenBadge(swapState.to)}
               <div style="display:flex;align-items:center;gap:2px;cursor:pointer;">
                 <select id="swap-to-sel" onchange="swapToChange(this.value)"
-                  style="background:transparent;border:none;color:#fff;font-weight:600;font-size:15px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;padding-right:2px;min-width:48px;">
-                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.to?'selected':''} style="background:#16161c;">${t}</option>`).join('')}
+                  style="background:transparent;border:none;color:#e8eaf0;font-weight:600;font-size:15px;cursor:pointer;outline:none;-webkit-appearance:none;appearance:none;padding-right:2px;min-width:48px;">
+                  ${tokens.map(t=>`<option value="${t}" ${t===swapState.to?'selected':''} style="background:#161b2a;">${t}</option>`).join('')}
                 </select>
                 ${svgChevron}
               </div>
             </div>
             <div style="text-align:right;flex:1;margin-left:8px;">
-              <div style="color:${toAmt?'#fff':'#3a3a45'};font-size:22px;font-weight:700;">${toAmt || '0.00'}</div>
-              <div style="font-size:11px;color:#52525b;margin-top:3px;">Balance: ${toBal}</div>
+              <div style="color:${toAmt?'#e8eaf0':'#4e5872'};font-size:22px;font-weight:700;">${toAmt || '0.00'}</div>
+              <div style="font-size:11px;color:#4e5872;margin-top:3px;">Balance: ${toBal}</div>
             </div>
           </div>
 
           <!-- Transaction breakdown -->
-          <div style="background:#16161c;border-radius:18px;padding:14px 16px;margin-bottom:14px;display:flex;flex-direction:column;gap:11px;">
+          <div style="background:#161b2a;border:1px solid rgba(255,255,255,0.06);border-radius:18px;padding:14px 16px;margin-bottom:14px;display:flex;flex-direction:column;gap:11px;">
             ${breakdownRows.map(row => `
               <div style="display:flex;align-items:center;justify-content:space-between;">
                 <div style="display:flex;align-items:center;gap:4px;">
-                  <span style="font-size:12px;color:#71717a;">${row.label}</span>
+                  <span style="font-size:12px;color:#8b95ab;">${row.label}</span>
                   ${row.info ? svgInfo : ''}
                 </div>
-                <span style="font-size:12px;color:#d4d4d8;font-weight:500;">${row.value}</span>
+                <span style="font-size:12px;color:#e8eaf0;font-weight:500;">${row.value}</span>
               </div>`).join('')}
           </div>
 
@@ -1439,7 +1463,7 @@ async function renderSwap(sec) {
 
           <!-- CTA -->
           <button onclick="execSwap()"
-            style="width:100%;padding:15px;border-radius:16px;border:none;background:linear-gradient(90deg,#7fe5d9,#b59efa);color:#0d0d11;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.01em;margin-bottom:18px;transition:opacity .15s;"
+            style="width:100%;padding:15px;border-radius:16px;border:none;background:linear-gradient(135deg,#7c5cfc,#4e9af1);color:#fff;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:0.01em;margin-bottom:18px;transition:opacity .15s;"
             onmouseover="this.style.opacity='.88'" onmouseout="this.style.opacity='1'">
             Create swap →
           </button>
@@ -1523,7 +1547,7 @@ async function renderSwap(sec) {
   const TOKEN_META = {
     ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'     },
     BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
     USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'  },
   };
   const MARKET_ORDER = ['ETH', 'BTC', 'BLOOM', 'USDC'];
@@ -1573,16 +1597,16 @@ async function renderSwap(sec) {
     const change = computeChange(hist);
     const changeStr = change === null ? '—' :
       (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
-    const changeClass = change === null ? 'text-zinc-500' :
-      change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-zinc-500';
+    const changeClass = change === null ? 'text-[#8b95ab]' :
+      change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
     const sparkline = buildSparkline(hist, meta.color);
     return `
-      <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-zinc-800/60 transition-colors py-3"
+      <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
            onclick="openTokenDetail('${sym}')">
         <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
         <div class="flex-1 min-w-0">
           <div class="text-sm font-semibold">${sym}</div>
-          <div class="text-xs text-zinc-500 truncate">${meta.name}</div>
+          <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
         </div>
         <div class="text-right shrink-0">
           <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
@@ -1593,7 +1617,7 @@ async function renderSwap(sec) {
   }).join('');
 
   mwrap.innerHTML = `
-    <h3 class="font-semibold mb-2 mt-6 text-zinc-300">Markets</h3>
+    <h3 class="font-semibold mb-2 mt-6 text-[#e8eaf0]">Markets</h3>
     <div class="space-y-2">${rows}</div>`;
 }
 
@@ -1603,7 +1627,7 @@ async function renderTokenDetail(sec) {
   const TOKEN_META_DETAIL = {
     ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'                         },
     BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',  desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-violet-400/10',  badgeText: 'text-violet-400',  btnCls: 'bg-violet-600 hover:bg-violet-500', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
     USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'           },
   };
   const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD' };
@@ -1624,7 +1648,7 @@ async function renderTokenDetail(sec) {
   async function renderChart() {
     const chartWrap = document.getElementById('token-detail-chart');
     if (!chartWrap) return;
-    chartWrap.innerHTML = `<div class="text-zinc-600 text-sm text-center py-6">${spin()}</div>`;
+    chartWrap.innerHTML = `<div class="text-[#4e5872] text-sm text-center py-6">${spin()}</div>`;
     let hist = [];
     try {
       const res = await api('GET', `/api/price-history?symbol=${sym}&hours=${chartHours}`);
@@ -1675,36 +1699,36 @@ async function renderTokenDetail(sec) {
 
     const change = computeChangePct(hist24);
     const changeStr = change === null ? '—' : (change >= 0 ? `+${change.toFixed(2)}%` : `${change.toFixed(2)}%`);
-    const changeCls = change === null ? 'text-zinc-500' : change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-zinc-500';
+    const changeCls = change === null ? 'text-[#8b95ab]' : change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
 
     const chartSection = useTradingView
       ? `<div id="tv-chart-container" class="tradingview-widget-container" style="height:400px;min-height:400px"></div>`
       : `<div>
           <div class="flex gap-2 mb-3">
-            <button id="btn-24h" class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(24)">24H</button>
-            <button id="btn-7d"  class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}" onclick="window._setTokenChartHours(168)">7D</button>
+            <button id="btn-24h" class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 24 ? 'pill-active' : 'pill-inactive'}" onclick="window._setTokenChartHours(24)">24H</button>
+            <button id="btn-7d"  class="text-xs px-3 py-1 rounded-full font-medium transition-colors ${chartHours === 168 ? 'pill-active' : 'pill-inactive'}" onclick="window._setTokenChartHours(168)">7D</button>
           </div>
           <div id="token-detail-chart"></div>
         </div>`;
 
     sec.innerHTML = `
-      <button class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('trade')">← Markets</button>
+      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('trade')">← Markets</button>
       <div class="card space-y-4 mb-4">
         <div class="flex items-center gap-3">
           <div class="w-12 h-12 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-sm font-bold shrink-0">${sym}</div>
           <div>
             <div class="font-bold text-lg leading-tight">${esc(meta.name)}</div>
-            <div class="text-sm text-zinc-500">${sym}</div>
+            <div class="text-sm text-[#8b95ab]">${sym}</div>
           </div>
           <div class="ml-auto text-right">
-            <div class="text-2xl font-bold">${fmtDetailPrice(sym)}</div>
-            <div class="text-sm font-medium ${changeCls}">${changeStr} <span class="text-zinc-600 font-normal">24h</span></div>
+            <div class="text-2xl font-bold text-[#e8eaf0]">${fmtDetailPrice(sym)}</div>
+            <div class="text-sm font-medium ${changeCls}">${changeStr} <span class="text-[#4e5872] font-normal">24h</span></div>
           </div>
         </div>
-        <p class="text-sm text-zinc-400">${esc(meta.desc)}</p>
+        <p class="text-sm text-[#8b95ab]">${esc(meta.desc)}</p>
         ${chartSection}
       </div>
-      <button class="w-full py-3 rounded-xl font-semibold text-white transition-colors ${meta.btnCls}" onclick="window._swapFromDetail('${sym}')">Swap ${esc(sym)} →</button>`;
+      <button class="btn btn-v w-full py-3 rounded-xl font-semibold" onclick="window._swapFromDetail('${sym}')">Swap ${esc(sym)} →</button>`;
 
     if (useTradingView) {
       mountTradingViewChart(sym);
@@ -1717,8 +1741,8 @@ async function renderTokenDetail(sec) {
     chartHours = h;
     const b24 = document.getElementById('btn-24h');
     const b7d  = document.getElementById('btn-7d');
-    if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 24 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`;
-    if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 168 ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`;
+    if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 24 ? 'pill-active' : 'pill-inactive'}`;
+    if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 168 ? 'pill-active' : 'pill-inactive'}`;
     await renderChart();
   };
 
@@ -1739,12 +1763,12 @@ async function renderStake(sec) {
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">BLOOM Staking</h2>
       <div class="card space-y-3 mb-4">
-        <p class="text-sm text-zinc-400">Stake BLOOM to earn <span class="text-violet-300 font-semibold">12% APY</span></p>
+        <p class="text-sm text-[#8b95ab]">Stake BLOOM to earn <span class="text-[#7c5cfc] font-semibold">12% APY</span></p>
         <div class="flex gap-2">
           <input id="stake-amt" type="number" class="inp flex-1" placeholder="Amount (BLOOM)" min="0">
           <button class="btn btn-v shrink-0" onclick="doStake()">Stake</button>
         </div>
-        <div class="text-xs text-zinc-500">Balance: ${getBal('BLOOM')} BLOOM</div>
+        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('BLOOM')} BLOOM</div>
         <p id="stake-msg" class="text-sm"></p>
       </div>
       <h3 class="font-semibold mb-2">Active Stakes</h3>
@@ -1752,10 +1776,10 @@ async function renderStake(sec) {
         <div class="card flex items-center justify-between gap-3">
           <div>
             <div class="text-sm font-semibold">${fmtAmt('BLOOM', s.amount)} BLOOM</div>
-            <div class="text-xs text-zinc-500">Staked ${tsAgo(s.staked_at)} ago · Reward: <span class="text-emerald-400">${fmtAmt('BLOOM', s.accrued_reward)} BLOOM</span></div>
+            <div class="text-xs text-[#8b95ab]">Staked ${tsAgo(s.staked_at)} ago · Reward: <span class="text-emerald-400">${fmtAmt('BLOOM', s.accrued_reward)} BLOOM</span></div>
           </div>
           <button class="btn btn-z shrink-0" onclick="doUnstake(${s.id})">Unstake</button>
-        </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No active stakes</p>'}`;
+        </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No active stakes</p>'}`;
   }
 
   window.doStake = async () => {
@@ -1794,14 +1818,14 @@ async function renderLiquidity(sec) {
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="text-xs text-zinc-500">${tA} Amount</label>
+            <label class="text-xs text-[#8b95ab]">${tA} Amount</label>
             <input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-zinc-500 mt-0.5">Bal: ${getBal(tA)}</div>
+            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tA)}</div>
           </div>
           <div>
-            <label class="text-xs text-zinc-500">${tB} Amount</label>
+            <label class="text-xs text-[#8b95ab]">${tB} Amount</label>
             <input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-zinc-500 mt-0.5">Bal: ${getBal(tB)}</div>
+            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tB)}</div>
           </div>
         </div>
         <button class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>
@@ -1814,12 +1838,12 @@ async function renderLiquidity(sec) {
           <div class="flex justify-between items-start">
             <div>
               <div class="font-semibold">${p.pool_id.replace('_','/')}</div>
-              <div class="text-xs text-zinc-500">${fmtAmt(a,p.token_a_amount)} ${a} + ${fmtAmt(b,p.token_b_amount)} ${b}</div>
+              <div class="text-xs text-[#8b95ab]">${fmtAmt(a,p.token_a_amount)} ${a} + ${fmtAmt(b,p.token_b_amount)} ${b}</div>
               <div class="text-xs text-emerald-400 mt-0.5">Fees: ${fmtAmt('USDC',p.accrued_fees)} USDC</div>
             </div>
             <button class="btn btn-z text-xs" onclick="removeLiq(${p.id})">Remove</button>
           </div>
-        </div>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm">No positions</p>'}`;
+        </div>`;}).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No positions</p>'}`;
   }
 
   window.addLiquidity = async () => {
@@ -1871,25 +1895,25 @@ async function renderICO(sec) {
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-start gap-2">
             <div class="min-w-0">
-              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
+              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
             </div>
             <span class="text-emerald-400 text-xs font-semibold shrink-0">LIVE</span>
           </div>
         </div>
       </div>
       <div class="text-sm space-y-0.5">
-        <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-zinc-500">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
       </div>
-      <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
-        <div class="bg-violet-600 h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%"></div>
+      <div class="bg-[#0d1021] rounded-full h-2 overflow-hidden">
+        <div class="h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#7c5cfc,#4e9af1)"></div>
       </div>
       <div class="flex gap-2">
         <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
         <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
       </div>
-      <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
+      <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
       <p id="ico-msg-${o.id}" class="text-sm"></p>
     </div>`;
   }
@@ -1905,20 +1929,20 @@ async function renderICO(sec) {
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-start gap-2">
             <div class="min-w-0">
-              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-zinc-500 text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-zinc-500 mt-0.5">${esc(o.description)}</p>` : ''}
+              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
             </div>
             <span class="text-amber-400 text-xs font-semibold shrink-0">UPCOMING</span>
           </div>
         </div>
       </div>
       <div class="text-sm space-y-0.5">
-        <div class="flex justify-between"><span class="text-zinc-500">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-zinc-500">Raise goal</span><span>${fmtUSD(o.hard_cap)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-zinc-500">Opens</span><span class="text-amber-300">${esc(startStr)}${countdown ? ` (${countdown})` : ''}</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Raise goal</span><span>${fmtUSD(o.hard_cap)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Opens</span><span class="text-amber-300">${esc(startStr)}${countdown ? ` (${countdown})` : ''}</span></div>
       </div>
       <div class="flex justify-end">
-        <span class="text-xs text-zinc-500 bg-zinc-800 px-3 py-1.5 rounded-lg">Coming soon</span>
+        <span class="text-xs text-[#4e5872] bg-[#1c2236] px-3 py-1.5 rounded-lg">Coming soon</span>
       </div>
     </div>`;
   }
@@ -1926,7 +1950,7 @@ async function renderICO(sec) {
   function completedCard(o) {
     const pct = Number(o.hard_cap) > 0 ? Math.min(100, Number(o.raised) / Number(o.hard_cap) * 100) : 0;
     const isSoldOut = o.status === 'sold_out';
-    const badgeCls = isSoldOut ? 'text-violet-400' : 'text-zinc-500';
+    const badgeCls = isSoldOut ? 'text-[#7c5cfc]' : 'text-[#4e5872]';
     const badgeLbl = isSoldOut ? 'SOLD OUT' : 'ENDED';
     return `<div class="card space-y-3 opacity-70">
       <div class="flex items-start gap-3">
@@ -1934,19 +1958,19 @@ async function renderICO(sec) {
         <div class="flex-1 min-w-0">
           <div class="flex justify-between items-start gap-2">
             <div class="min-w-0">
-              <h3 class="font-bold text-zinc-400 truncate">${esc(o.token_name)} <span class="text-zinc-600 text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-zinc-600 mt-0.5">${esc(o.description)}</p>` : ''}
+              <h3 class="font-bold text-[#8b95ab] truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
+              ${o.description ? `<p class="text-xs text-[#4e5872] mt-0.5">${esc(o.description)}</p>` : ''}
             </div>
             <span class="${badgeCls} text-xs font-semibold shrink-0">${badgeLbl}</span>
           </div>
         </div>
       </div>
       <div class="text-sm space-y-0.5">
-        <div class="flex justify-between"><span class="text-zinc-600">Price</span><span class="text-zinc-400">${fmtUSD(o.price_per_token)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-zinc-600">Raised</span><span class="text-zinc-400">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#4e5872]">Price</span><span class="text-[#8b95ab]">${fmtUSD(o.price_per_token)} USDC</span></div>
+        <div class="flex justify-between"><span class="text-[#4e5872]">Raised</span><span class="text-[#8b95ab]">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
       </div>
-      <div class="bg-zinc-800 rounded-full h-2 overflow-hidden">
-        <div class="${isSoldOut ? 'bg-violet-800' : 'bg-zinc-700'} h-full rounded-full" style="width:${pct.toFixed(1)}%"></div>
+      <div class="bg-[#0d1021] rounded-full h-2 overflow-hidden">
+        <div class="h-full rounded-full" style="width:${pct.toFixed(1)}%;background:${isSoldOut ? 'linear-gradient(90deg,#7c5cfc,#4e9af1)' : '#1c2236'}"></div>
       </div>
     </div>`;
   }
@@ -1954,7 +1978,7 @@ async function renderICO(sec) {
   function renderSection(title, cards) {
     if (!cards.length) return '';
     return `<div class="mb-6">
-      <h3 class="text-sm font-semibold text-zinc-400 mb-3">${title}</h3>
+      <h3 class="text-sm font-semibold text-[#8b95ab] mb-3">${title}</h3>
       <div class="space-y-3">${cards.join('')}</div>
     </div>`;
   }
@@ -1969,7 +1993,7 @@ async function renderICO(sec) {
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">Token Offerings</h2>
       ${empty
-        ? '<p class="text-zinc-600 text-sm">No ICO offerings</p>'
+        ? '<p class="text-[#4e5872] text-sm">No ICO offerings</p>'
         : renderSection('🟢 Live ICOs', live.map(liveCard)) +
           renderSection('🕐 Upcoming ICOs', upcoming.map(upcomingCard)) +
           renderSection('✅ Completed ICOs', completed.map(completedCard))
@@ -1993,9 +2017,9 @@ async function renderEarn(sec) {
   let tab = S.earnTab || 'stake';
   sec.innerHTML = `
     <h2 class="text-xl font-bold mb-4">🌱 Earn</h2>
-    <div class="flex gap-2 mb-4 border-b border-zinc-800 pb-2">
+    <div class="flex gap-2 mb-4 border-b border-[rgba(255,255,255,0.06)] pb-2">
       ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['ico','🚀 ICO']].map(([k,l])=>
-        `<button class="text-sm px-3 py-1 rounded-lg transition-colors ${tab===k?'bg-violet-600 text-white':'text-zinc-400 hover:text-white'}" onclick="setEarnTab('${k}')">${l}</button>`).join('')}
+        `<button class="text-sm px-3 py-1 rounded-full transition-colors ${tab===k?'pill-active':'pill-inactive'}" onclick="setEarnTab('${k}')">${l}</button>`).join('')}
     </div>
     <div id="earn-sub"></div>`;
   const sub = document.getElementById('earn-sub');
@@ -2033,37 +2057,37 @@ async function renderExplore(sec) {
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
         <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
-          <div class="w-8 h-8 rounded-full bg-violet-700 flex items-center justify-center text-xs font-bold">${esc((p.username||'?')[0].toUpperCase())}</div>
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1)">${esc((p.username||'?')[0].toUpperCase())}</div>
           <div class="text-left min-w-0">
             <div class="text-sm font-medium flex items-center gap-1 truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''} ${p.roi && p.roi.closed_trade_count > 0 ? `<span class="text-xs font-semibold ${p.roi.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} shrink-0">📈 ${p.roi.all_time_roi_pct >= 0 ? '+' : ''}${p.roi.all_time_roi_pct}%</span>` : ''}</div>
-            <div class="text-xs text-zinc-500">${p.followers} followers</div>
+            <div class="text-xs text-[#8b95ab]">${p.followers} followers</div>
           </div>
         </button>
         <button class="btn btn-v text-xs shrink-0" onclick="exploreFollow('${esc(p.username)}',this)">Follow</button>
-      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No suggestions right now</p>'}
+      </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No suggestions right now</p>'}
 
     <h3 class="font-semibold mb-2">Active markets</h3>
     ${activeMarkets.length ? `<div class="space-y-2 mb-5">${activeMarkets.map(m => {
       const yesPct = (Number(m.no_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(0);
-      return `<button class="card w-full text-left hover:border-zinc-600" onclick="S.marketId=${m.id};navigate('predict')">
+      return `<button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="S.marketId=${m.id};navigate('predict')">
         <div class="text-sm font-medium">${esc(m.title)}</div>
-        <div class="text-xs text-zinc-500">YES ${yesPct}% · ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC liquidity</div>
-      </button>`;}).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No active markets</p>'}
+        <div class="text-xs text-[#8b95ab]">YES ${yesPct}% · ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC liquidity</div>
+      </button>`;}).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No active markets</p>'}
 
     <h3 class="font-semibold mb-2">Live token sales</h3>
     ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
-      <button class="card w-full text-left hover:border-zinc-600" onclick="navigate('earn');S.earnTab='ico'">
-        <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-zinc-500">${esc(o.token_symbol)}</span></div>
-        <div class="text-xs text-zinc-500">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
-      </button>`).join('')}</div>` : '<p class="text-zinc-600 text-sm mb-5">No live sales</p>'}
+      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('earn');S.earnTab='ico'">
+        <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-[#8b95ab]">${esc(o.token_symbol)}</span></div>
+        <div class="text-xs text-[#8b95ab]">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
+      </button>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No live sales</p>'}
 
     <h3 class="font-semibold mb-2">Top NFTs</h3>
     ${topNfts.length ? `<div class="grid grid-cols-3 gap-3">${topNfts.map(n => `
       <div class="card space-y-1 overflow-hidden">
-        <div class="aspect-square overflow-hidden rounded-lg bg-zinc-800"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
+        <div class="aspect-square overflow-hidden rounded-lg bg-[#1c2236]"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
         <p class="text-xs font-medium truncate">${esc(n.name)}</p>
-        <p class="text-xs text-zinc-600 truncate">@${esc(n.owner_username)}</p>
-      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No NFTs yet</p>'}
+        <p class="text-xs text-[#4e5872] truncate">@${esc(n.owner_username)}</p>
+      </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>'}
   `;
   window.exploreFollow = async (username, btn) => {
     try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
@@ -2076,8 +2100,8 @@ async function renderExplore(sec) {
 function svgLineChart(points, opts = {}) {
   const { width = 480, height = 120, color = '#7c3aed', refLine = null } = opts;
   if (!points || points.length < 2) {
-    return `<svg viewBox="0 0 ${width} ${height}" width="100%" class="rounded-lg bg-zinc-900/50">
-      <text x="${width/2}" y="${height/2}" text-anchor="middle" fill="#52525b" font-size="11">No history yet</text></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%" class="rounded-lg bg-[#161b2a]/80">
+      <text x="${width/2}" y="${height/2}" text-anchor="middle" fill="#4e5872" font-size="11">No history yet</text></svg>`;
   }
   const pad = { top: 16, right: 10, bottom: 20, left: 38 };
   const W = width - pad.left - pad.right;
@@ -2096,17 +2120,17 @@ function svgLineChart(points, opts = {}) {
   let refLineEl = '';
   if (refLine != null && refLine >= yMin && refLine <= yMax) {
     const ry = yScale(refLine).toFixed(1);
-    refLineEl = `<line x1="${pad.left}" y1="${ry}" x2="${pad.left+W}" y2="${ry}" stroke="#52525b" stroke-width="1" stroke-dasharray="3,3"/>`;
+    refLineEl = `<line x1="${pad.left}" y1="${ry}" x2="${pad.left+W}" y2="${ry}" stroke="#4e5872" stroke-width="1" stroke-dasharray="3,3"/>`;
   }
-  return `<svg viewBox="0 0 ${width} ${height}" width="100%" class="rounded-lg bg-zinc-900/50">
-    <rect x="${pad.left}" y="${pad.top}" width="${W}" height="${H}" fill="#0a0a0b" rx="4"/>
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" class="rounded-lg bg-[#161b2a]/80">
+    <rect x="${pad.left}" y="${pad.top}" width="${W}" height="${H}" fill="#0d1021" rx="4"/>
     ${refLineEl}
     <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${xScale(xs[xs.length-1]).toFixed(1)}" cy="${yScale(ys[ys.length-1]).toFixed(1)}" r="3" fill="${color}"/>
-    <text x="${pad.left}" y="${pad.top-3}" fill="#71717a" font-size="9">${fmt(xMin)}</text>
-    <text x="${pad.left+W}" y="${pad.top-3}" fill="#71717a" font-size="9" text-anchor="end">${fmt(xMax)}</text>
-    <text x="${pad.left-3}" y="${pad.top+5}" fill="#71717a" font-size="9" text-anchor="end">${fmtY(yMax)}</text>
-    <text x="${pad.left-3}" y="${pad.top+H}" fill="#71717a" font-size="9" text-anchor="end">${fmtY(yMin)}</text>
+    <text x="${pad.left}" y="${pad.top-3}" fill="#8b95ab" font-size="9">${fmt(xMin)}</text>
+    <text x="${pad.left+W}" y="${pad.top-3}" fill="#8b95ab" font-size="9" text-anchor="end">${fmt(xMax)}</text>
+    <text x="${pad.left-3}" y="${pad.top+5}" fill="#8b95ab" font-size="9" text-anchor="end">${fmtY(yMax)}</text>
+    <text x="${pad.left-3}" y="${pad.top+H}" fill="#8b95ab" font-size="9" text-anchor="end">${fmtY(yMin)}</text>
   </svg>`;
 }
 
@@ -2128,25 +2152,25 @@ async function renderMarkets(sec) {
   function marketCard(m, opts = {}) {
     const yesPct = (Number(m.yes_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
     const noPct = (100 - parseFloat(yesPct)).toFixed(1);
-    const statusCls = { open:'text-emerald-400', closed:'text-zinc-500', resolved:'text-blue-400' };
-    return `<div class="card space-y-2 cursor-pointer hover:border-zinc-600 transition-colors" onclick="openMarket(${m.id})">
+    const statusCls = { open:'text-emerald-400', closed:'text-[#4e5872]', resolved:'text-[#4e9af1]' };
+    return `<div class="card space-y-2 cursor-pointer hover:border-[rgba(124,92,252,0.3)] transition-colors" onclick="openMarket(${m.id})">
       <div class="flex justify-between items-start gap-2">
         <div class="flex flex-wrap items-start gap-2 min-w-0">
           <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
           ${opts.daily ? '<span class="shrink-0 text-xs font-semibold bg-amber-900/40 border border-amber-700/50 text-amber-300 px-2 py-0.5 rounded-full">Daily</span>' : ''}
         </div>
-        <span class="${statusCls[m.status]||'text-zinc-400'} text-xs shrink-0 ml-1">${m.status}</span>
+        <span class="${statusCls[m.status]||'text-[#8b95ab]'} text-xs shrink-0 ml-1">${m.status}</span>
       </div>
       <div class="flex gap-2 text-xs">
-        <div class="flex-1 bg-emerald-900/40 border border-emerald-800/50 rounded px-2 py-1">YES <span class="font-bold text-emerald-300">${yesPct}%</span></div>
-        <div class="flex-1 bg-red-900/40 border border-red-800/50 rounded px-2 py-1">NO <span class="font-bold text-red-300">${noPct}%</span></div>
+        <div class="flex-1 bg-emerald-900/30 border border-emerald-800/40 rounded px-2 py-1">YES <span class="font-bold text-emerald-400">${yesPct}%</span></div>
+        <div class="flex-1 bg-red-900/30 border border-red-800/40 rounded px-2 py-1">NO <span class="font-bold text-red-400">${noPct}%</span></div>
       </div>
-      <div class="flex justify-between text-xs text-zinc-500">
+      <div class="flex justify-between text-xs text-[#4e5872]">
         <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
         ${opts.daily && m.closes_at ? `<span class="text-amber-400">&#x23f1; ${fmtCountdown(m.closes_at)}</span>` :
           m.closes_at ? `<span>Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : ''}
       </div>
-      ${m.resolved_outcome ? `<div class="text-xs text-blue-300">&#x2713; Resolved: ${m.resolved_outcome}</div>` : ''}
+      ${m.resolved_outcome ? `<div class="text-xs text-[#4e9af1]">&#x2713; Resolved: ${m.resolved_outcome}</div>` : ''}
     </div>`;
   }
 
@@ -2175,9 +2199,9 @@ async function renderMarkets(sec) {
         <p id="mk-msg" class="text-sm"></p>
       </div>
       ${otherMarkets.length ? `
-      ${dailyToday.length ? '<h3 class="font-semibold text-sm text-zinc-400 mb-2">Community Markets</h3>' : ''}
+      ${dailyToday.length ? '<h3 class="font-semibold text-sm text-[#8b95ab] mb-2">Community Markets</h3>' : ''}
       <div class="space-y-3">${otherMarkets.map(m => marketCard(m)).join('')}</div>` :
-      dailyToday.length ? '' : '<p class="text-zinc-600 text-sm">No markets</p>'}
+      dailyToday.length ? '' : '<p class="text-[#4e5872] text-sm">No markets</p>'}
     `;
 
     window.toggleCreate = () => { showCreate = !showCreate; load(); };
@@ -2214,22 +2238,22 @@ async function renderMarketDetail(sec) {
     const chartHtml = svgLineChart(chartPts, { color: '#10b981', yMin: 0, yMax: 100, refLine: parseFloat(yesPct) });
 
     sec.innerHTML = `
-      <button class="text-sm text-zinc-400 hover:text-white mb-4 flex items-center gap-1" onclick="S.marketId=null;clearInterval(_activeInterval);_activeInterval=null;navigate('markets')">← Markets</button>
+      <button class="text-sm text-[#8b95ab] hover:text-white mb-4 flex items-center gap-1" onclick="S.marketId=null;clearInterval(_activeInterval);_activeInterval=null;navigate('markets')">← Markets</button>
       <div class="card space-y-3 mb-4">
         <div class="flex justify-between items-start gap-2">
           <h2 class="font-bold text-lg leading-snug">${esc(market.title)}</h2>
-          <span class="text-xs ${market.status==='open'?'text-emerald-400':market.status==='resolved'?'text-blue-400':'text-zinc-500'}">${market.status}</span>
+          <span class="text-xs ${market.status==='open'?'text-emerald-400':market.status==='resolved'?'text-blue-400':'text-[#8b95ab]'}">${market.status}</span>
         </div>
-        ${market.description ? `<p class="text-sm text-zinc-400">${esc(market.description)}</p>` : ''}
-        ${market.resolution_criteria ? `<p class="text-xs text-zinc-500 italic">${esc(market.resolution_criteria)}</p>` : ''}
+        ${market.description ? `<p class="text-sm text-[#8b95ab]">${esc(market.description)}</p>` : ''}
+        ${market.resolution_criteria ? `<p class="text-xs text-[#8b95ab] italic">${esc(market.resolution_criteria)}</p>` : ''}
         <div class="space-y-1">
-          <div class="flex justify-between text-xs text-zinc-400"><span>YES ${yesPct}%</span><span>NO ${(100-parseFloat(yesPct)).toFixed(1)}%</span></div>
-          <div class="bg-zinc-800 rounded-full h-3 overflow-hidden flex">
+          <div class="flex justify-between text-xs text-[#8b95ab]"><span>YES ${yesPct}%</span><span>NO ${(100-parseFloat(yesPct)).toFixed(1)}%</span></div>
+          <div class="bg-[#1c2236] rounded-full h-3 overflow-hidden flex">
             <div class="bg-emerald-600 h-full transition-all" style="width:${yesPct}%"></div>
             <div class="bg-red-700 h-full flex-1"></div>
           </div>
         </div>
-        <div class="text-xs text-zinc-500">Total liquidity: ${fmtUSD(Number(market.yes_pool)+Number(market.no_pool))} USDC</div>
+        <div class="text-xs text-[#8b95ab]">Total liquidity: ${fmtUSD(Number(market.yes_pool)+Number(market.no_pool))} USDC</div>
         <div class="mt-2">${chartHtml}</div>
       </div>
 
@@ -2238,7 +2262,7 @@ async function renderMarketDetail(sec) {
         <h3 class="font-semibold">Trade</h3>
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="text-xs text-zinc-500">USDC Amount</label>
+            <label class="text-xs text-[#8b95ab]">USDC Amount</label>
             <input id="trade-amt" type="number" class="inp mt-1" placeholder="0.00" min="0">
           </div>
           <div class="flex flex-col justify-end gap-2">
@@ -2246,7 +2270,7 @@ async function renderMarketDetail(sec) {
             <button class="btn btn-r w-full" onclick="tradeMarket('NO')">Buy NO</button>
           </div>
         </div>
-        <div class="text-xs text-zinc-500">Balance: ${getBal('USDC')} USDC</div>
+        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
         <p id="trade-msg" class="text-sm"></p>
       </div>` : ''}
 
@@ -2272,9 +2296,9 @@ async function renderMarketDetail(sec) {
         <div class="space-y-2">${positions.map(p => `
           <div class="flex justify-between items-center text-sm">
             <span class="${p.outcome==='YES'?'text-emerald-400':'text-red-400'} font-medium">${p.outcome}</span>
-            <span class="text-zinc-400">${Number(p.shares).toFixed(4)} shares</span>
-            <span class="text-zinc-500">${fmtUSD(p.cost_basis)} USDC paid</span>
-            ${p.claimed ? `<span class="text-zinc-600 text-xs">Claimed</span>` : ''}
+            <span class="text-[#8b95ab]">${Number(p.shares).toFixed(4)} shares</span>
+            <span class="text-[#8b95ab]">${fmtUSD(p.cost_basis)} USDC paid</span>
+            ${p.claimed ? `<span class="text-[#4e5872] text-xs">Claimed</span>` : ''}
           </div>`).join('')}</div>
       </div>` : ''}`;
 
@@ -2354,16 +2378,16 @@ async function renderFutures(sec) {
         <button class="btn ${S.futuresMode==='live'?'btn-v':'btn-z'}" onclick="S.futuresMode='live';load()">⚡ Live Trading</button>
       </div>
       ${S.futuresMode==='paper'
-        ? `<div class="card mb-4 flex gap-4 items-center"><span class="text-zinc-400 text-sm">Paper Balance:</span><span class="text-violet-300 font-bold">${fmtUSD(paperBal)} USDC</span></div>`
+        ? `<div class="card mb-4 flex gap-4 items-center"><span class="text-[#8b95ab] text-sm">Paper Balance:</span><span class="text-[#7c5cfc] font-bold">${fmtUSD(paperBal)} USDC</span></div>`
         : `<div class="card mb-4 flex gap-4 items-center"><span class="text-amber-400 text-sm font-medium">⚠ LIVE MODE — real balance</span><span class="text-emerald-400 font-bold">${getBal('USDC')} USDC</span></div>`}
       ${S.futuresMode==='live' && futTier==='basic'
         ? `<div class="card mb-4 border-amber-700/50"><p class="text-sm text-amber-300">🔒 Live trading needs <b>Social</b> verification. <button class="underline" onclick="navigate('verify')">Verify to unlock →</button></p></div>`
         : S.futuresMode==='live' && futTier==='social'
-        ? `<div class="card mb-4 border-amber-700/50"><p class="text-xs text-zinc-400">Social tier: up to 5× leverage. <button class="underline text-violet-300" onclick="navigate('verify')">Go Premium for 20× →</button></p></div>` : ''}
+        ? `<div class="card mb-4 border-amber-700/50"><p class="text-xs text-[#8b95ab]">Social tier: up to 5× leverage. <button class="underline text-[#7c5cfc]" onclick="navigate('verify')">Go Premium for 20× →</button></p></div>` : ''}
       ${mkt && chartHtml ? `<div class="card mb-4">
         <div class="flex justify-between items-center mb-2">
           <span class="text-sm font-medium">${esc(mkt.symbol)}</span>
-          <span class="font-mono text-white">$${parseFloat(mkt.mark_price).toFixed(2)}</span>
+          <span class="font-mono text-[#e8eaf0]">$${parseFloat(mkt.mark_price).toFixed(2)}</span>
         </div>
         ${chartHtml}
       </div>` : ''}
@@ -2371,10 +2395,10 @@ async function renderFutures(sec) {
         <div class="card space-y-3">
           <h3 class="font-semibold">Place Order</h3>
           <div>
-            <label class="text-xs text-zinc-500">Market</label>
+            <label class="text-xs text-[#8b95ab]">Market</label>
             <div class="flex gap-1 mt-1">${markets.map(m=>`<button class="btn text-xs ${S.futuresMarket?.id===m.id?'btn-v':'btn-z'}" onclick="S.futuresMarket=${JSON.stringify(m).replace(/"/g,'&quot;')};load()">${m.symbol}</button>`).join('')}</div>
           </div>
-          ${mkt ? `<div class="text-xs text-zinc-400">Mark: <span class="text-white font-mono">$${parseFloat(mkt.mark_price).toFixed(2)}</span></div>` : ''}
+          ${mkt ? `<div class="text-xs text-[#8b95ab]">Mark: <span class="text-[#e8eaf0] font-mono">$${parseFloat(mkt.mark_price).toFixed(2)}</span></div>` : ''}
           <div>
             <div class="flex gap-2">
               <button id="side-long" class="btn flex-1 ${side==='long'?'btn-g':'btn-z'}" onclick="side='long';updateFutures()">Long ▲</button>
@@ -2382,15 +2406,15 @@ async function renderFutures(sec) {
             </div>
           </div>
           <div>
-            <label class="text-xs text-zinc-500">Leverage: <span id="lev-label">${leverage}×</span></label>
+            <label class="text-xs text-[#8b95ab]">Leverage: <span id="lev-label">${leverage}×</span></label>
             <input id="lev-slider" type="range" min="1" max="20" value="${leverage}" class="w-full mt-1" oninput="leverage=parseInt(this.value);document.getElementById('lev-label').textContent=leverage+'×';updateFutures()">
-            <div class="flex justify-between text-xs text-zinc-600"><span>1×</span><span>20×</span></div>
+            <div class="flex justify-between text-xs text-[#4e5872]"><span>1×</span><span>20×</span></div>
           </div>
           <div>
-            <label class="text-xs text-zinc-500">Quantity</label>
+            <label class="text-xs text-[#8b95ab]">Quantity</label>
             <input id="fut-qty" type="number" class="inp mt-1" placeholder="0.000" min="0" oninput="qty=this.value;updateFutures()">
           </div>
-          <div id="fut-preview" class="text-xs text-zinc-500 space-y-0.5">
+          <div id="fut-preview" class="text-xs text-[#8b95ab] space-y-0.5">
             ${typeof preview === 'object' ? `<div>Margin: ${preview.margin} USDC</div><div>Liq. Price: $${preview.liq}</div>` : ''}
           </div>
           <button class="btn btn-v w-full" onclick="placeFutures()">Place Order</button>
@@ -2401,23 +2425,23 @@ async function renderFutures(sec) {
           <div class="space-y-2">${markets.map(m => {
             const rate = (parseFloat(m.funding_rate||0)*100);
             const next = m.next_funding_at ? fundingCountdown(m.next_funding_at) : '—';
-            return `<div class="flex justify-between items-center text-sm py-1 border-b border-zinc-800 last:border-0">
+            return `<div class="flex justify-between items-center text-sm py-1 border-b border-[rgba(255,255,255,0.06)] last:border-0">
               <span class="font-medium">${m.symbol}</span>
               <span class="font-mono">$${parseFloat(m.mark_price).toFixed(2)}</span>
               <span class="text-xs ${rate>=0?'text-emerald-400':'text-red-400'}" title="funding rate">${rate>=0?'+':''}${rate.toFixed(4)}%</span>
-              <span class="text-xs text-zinc-500" title="next funding">⏱ ${next}</span>
+              <span class="text-xs text-[#4e5872]" title="next funding">⏱ ${next}</span>
             </div>`;}).join('')}</div>
-          <p class="text-xs text-zinc-600 mt-2">Longs pay shorts when funding is positive.</p>
+          <p class="text-xs text-[#4e5872] mt-2">Longs pay shorts when funding is positive.</p>
         </div>
       </div>
       <div class="card mb-4">
         <h3 class="font-semibold mb-3">Open Positions</h3>
         ${openPositions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
-          <thead><tr class="text-zinc-500 text-xs">${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+          <thead><tr class="text-[#4e5872] text-xs">${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
           <tbody>${openPositions.map(p => {
             const pnl = parseFloat(p.unrealized_pnl||0)/1e6;
             const fund = parseFloat(p.funding_paid||0)/1e6;
-            return `<tr class="border-t border-zinc-800">
+            return `<tr class="border-t border-[rgba(255,255,255,0.06)]">
               <td class="py-1.5 pr-3 font-medium">${p.symbol}</td>
               <td class="pr-3 text-xs">${p.mode==='paper'?'📄':'⚡'}</td>
               <td class="pr-3 ${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</td>
@@ -2429,15 +2453,15 @@ async function renderFutures(sec) {
               <td class="pr-3 ${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)}</td>
               <td><button class="btn btn-r text-xs px-2 py-1" onclick="closeFutures(${p.id})">Close</button></td>
             </tr>`;}).join('')}</tbody>
-        </table></div>` : '<p class="text-zinc-600 text-sm">No open positions</p>'}
+        </table></div>` : '<p class="text-[#4e5872] text-sm">No open positions</p>'}
       </div>
       ${closedPositions.length ? `<div class="card">
         <h3 class="font-semibold mb-3">Recent History</h3>
         <div class="space-y-1">${closedPositions.map(p => {
           const pnl = parseFloat(p.realized_pnl||0)/1e6;
-          return `<div class="flex justify-between text-sm py-1 border-b border-zinc-800 last:border-0">
+          return `<div class="flex justify-between text-sm py-1 border-b border-[rgba(255,255,255,0.06)] last:border-0">
             <span>${p.symbol} <span class="${p.side==='long'?'text-emerald-400':'text-red-400'}">${p.side}</span> ${p.leverage}×</span>
-            <span class="text-xs text-zinc-500">${p.status}</span>
+            <span class="text-xs text-[#8b95ab]">${p.status}</span>
             <span class="${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl>=0?'+':''}${pnl.toFixed(2)} USDC</span>
           </div>`;}).join('')}</div>
       </div>` : ''}`;
@@ -2487,12 +2511,12 @@ async function renderNFTs(sec) {
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">NFT Collection</h2>
       <div class="card space-y-3 mb-4">
-        <h3 class="font-semibold">Mint NFT <span class="text-zinc-500 text-sm font-normal">(costs 10 BLOOM)</span></h3>
+        <h3 class="font-semibold">Mint NFT <span class="text-[#8b95ab] text-sm font-normal">(costs 10 BLOOM)</span></h3>
         <input id="nft-name" class="inp" placeholder="Name">
         <input id="nft-desc" class="inp" placeholder="Description (optional)">
         <input id="nft-img" class="inp" placeholder="Image URL">
         <button class="btn btn-v" onclick="mintNFT()">Mint for 10 BLOOM</button>
-        <div class="text-xs text-zinc-500">Balance: ${getBal('BLOOM')} BLOOM</div>
+        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('BLOOM')} BLOOM</div>
         <p id="nft-msg" class="text-sm"></p>
       </div>
       <div class="flex gap-2 mb-3">
@@ -2501,13 +2525,13 @@ async function renderNFTs(sec) {
       </div>
       ${list.length ? `<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">${list.map(n => `
         <div class="card space-y-2 overflow-hidden">
-          <div class="aspect-square overflow-hidden rounded-lg bg-zinc-800">
+          <div class="aspect-square overflow-hidden rounded-lg bg-[#161b2a]">
             <img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'">
           </div>
           <p class="text-sm font-medium truncate">${esc(n.name)}</p>
-          <p class="text-xs text-zinc-500 font-mono truncate">${esc(n.token_id)}</p>
-          ${nftTab==='all' ? `<p class="text-xs text-zinc-600">@${esc(n.owner_username)}</p>` : ''}
-        </div>`).join('')}</div>` : `<p class="text-zinc-600 text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`}`;
+          <p class="text-xs text-[#8b95ab] font-mono truncate">${esc(n.token_id)}</p>
+          ${nftTab==='all' ? `<p class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</p>` : ''}
+        </div>`).join('')}</div>` : `<p class="text-[#4e5872] text-sm">No NFTs ${nftTab==='mine'?'in your collection':'yet'}</p>`}`;
 
     window.mintNFT = async () => {
       const name = document.getElementById('nft-name')?.value;
@@ -2541,12 +2565,12 @@ async function renderVerify(sec) {
   const isPremium = level === 'premium';
 
   function tierCard(name, badge, active, unlocks, action) {
-    return `<div class="card space-y-2 ${active ? 'border-violet-600' : ''}">
+    return `<div class="card space-y-2 ${active ? 'border-[#7c5cfc]' : ''}">
       <div class="flex items-center justify-between">
         <h3 class="font-semibold">${badge} ${name}</h3>
-        ${active ? '<span class="tag-social">Active</span>' : '<span class="text-xs text-zinc-500">Locked</span>'}
+        ${active ? '<span class="tag-social">Active</span>' : '<span class="text-xs text-[#4e5872]">Locked</span>'}
       </div>
-      <ul class="text-xs text-zinc-400 list-disc pl-4 space-y-0.5">${unlocks.map(u => `<li>${u}</li>`).join('')}</ul>
+      <ul class="text-xs text-[#8b95ab] list-disc pl-4 space-y-0.5">${unlocks.map(u => `<li>${u}</li>`).join('')}</ul>
       ${action || ''}
     </div>`;
   }
@@ -2564,15 +2588,15 @@ async function renderVerify(sec) {
     : providers.premium_enabled
       ? `<button class="btn btn-v text-xs" onclick="startZkSession()">Verify with zkPassport</button>
          <div id="zk-qr-section" class="hidden space-y-2 mt-2">
-           <img id="zk-qr-img" src="" alt="ZK QR Code" class="w-48 h-48 rounded-lg mx-auto bg-zinc-800">
-           <p class="text-xs text-zinc-400 text-center">Scan with your zkPassport app</p>
+           <img id="zk-qr-img" src="" alt="ZK QR Code" class="w-48 h-48 rounded-lg mx-auto bg-[#161b2a]">
+           <p class="text-xs text-[#8b95ab] text-center">Scan with your zkPassport app</p>
            <p id="zk-session-msg" class="text-sm text-center"></p>
          </div>`
       : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
   sec.innerHTML = `
     <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
-    <p class="text-sm text-zinc-500 mb-4">Your tier: <span class="font-semibold text-zinc-200">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
+    <p class="text-sm text-[#8b95ab] mb-4">Your tier: <span class="font-semibold text-[#e8eaf0]">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
     <div class="space-y-3">
       ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
         '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
@@ -2617,7 +2641,7 @@ async function renderVerify(sec) {
     const msg = document.getElementById('zk-session-msg');
     if (!qrSection || !qrImg || !msg) return;
     try {
-      msg.className = 'text-zinc-400 text-sm text-center';
+      msg.className = 'text-[#8b95ab] text-sm text-center';
       msg.textContent = 'Starting session…';
       qrSection.classList.remove('hidden');
       const { sessionId, qrUrl } = await api('POST', '/api/zk/start', {});
@@ -2672,8 +2696,8 @@ async function renderAdmin(sec) {
          ['Swap Volume', fmtUSD(stats.swap_volume)+' USDC'],['Open Futures', stats.open_futures],
          ['Market Liquidity', fmtUSD(stats.market_liquidity)+' USDC']].map(([label,val]) => `
         <div class="card text-center">
-          <div class="text-2xl font-bold text-violet-300">${val}</div>
-          <div class="text-xs text-zinc-500 mt-1">${label}</div>
+          <div class="text-2xl font-bold text-[#7c5cfc]">${val}</div>
+          <div class="text-xs text-[#8b95ab] mt-1">${label}</div>
         </div>`).join('')}
     </div>`;
   }
@@ -2682,8 +2706,8 @@ async function renderAdmin(sec) {
     const { users } = await api('GET', `/api/admin/users?search=${encodeURIComponent(search)}`);
     return `<div class="mb-3"><input id="user-search" class="inp" placeholder="Search users…" value="${esc(search)}" oninput="adminSearch(this.value)"></div>
     <div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${users.map(u => `<tr class="border-t border-zinc-800">
+      <thead><tr class="text-[#4e5872] text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${users.map(u => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
         <td class="py-1.5 pr-3 font-medium">@${esc(u.username)}</td>
         <td class="pr-3 font-mono text-xs">${shortAddr(u.usernode_pubkey)}</td>
         <td class="pr-3">${kycTag(u.kyc_level||'')}</td>
@@ -2703,25 +2727,25 @@ async function renderAdmin(sec) {
       <div class="card flex items-center justify-between gap-3">
         <div>
           <div class="font-medium">@${esc(k.username)} → ${k.level}</div>
-          <div class="text-xs text-zinc-500">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
+          <div class="text-xs text-[#8b95ab]">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-g text-xs" onclick="approveKYC(${k.id})">Approve</button>
           <button class="btn btn-r text-xs" onclick="rejectKYC(${k.id})">Reject</button>
         </div>
-      </div>`).join('')}</div>` : '<p class="text-zinc-600 text-sm">No pending KYC requests</p>';
+      </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No pending KYC requests</p>';
   }
 
   async function loadPosts(search = '', showDeleted = false) {
     const { posts } = await api('GET', `/api/admin/posts?search=${encodeURIComponent(search)}&deleted=${showDeleted?'1':'0'}`);
     return `<div class="flex gap-2 mb-3 flex-wrap">
       <input id="post-search" class="inp flex-1" placeholder="Search posts…" value="${esc(search)}" oninput="adminPostSearch(this.value)">
-      <label class="flex items-center gap-1 text-sm text-zinc-400"><input type="checkbox" ${showDeleted?'checked':''} onchange="adminPostDeleted(this.checked)"> Show deleted</label>
+      <label class="flex items-center gap-1 text-sm text-[#8b95ab]"><input type="checkbox" ${showDeleted?'checked':''} onchange="adminPostDeleted(this.checked)"> Show deleted</label>
     </div>
     <div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['ID','User','Content','Del','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${posts.map(p => `<tr class="border-t border-zinc-800 ${p.deleted?'opacity-40':''}">
-        <td class="py-1 pr-3 text-zinc-500">${p.id}</td>
+      <thead><tr class="text-[#4e5872] text-xs">${['ID','User','Content','Del','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${posts.map(p => `<tr class="border-t border-[rgba(255,255,255,0.06)] ${p.deleted?'opacity-40':''}">
+        <td class="py-1 pr-3 text-[#8b95ab]">${p.id}</td>
         <td class="pr-3">@${esc(p.username)}</td>
         <td class="pr-3 max-w-xs truncate">${esc(p.content.slice(0,80))}</td>
         <td class="pr-3">${p.deleted?'🗑':''}</td>
@@ -2737,9 +2761,9 @@ async function renderAdmin(sec) {
   async function loadMarketsAdmin() {
     const { markets } = await api('GET', '/api/admin/markets');
     return `<div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['ID','Title','Status','Yes Pool','No Pool','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${markets.map(m => `<tr class="border-t border-zinc-800">
-        <td class="py-1 pr-3 text-zinc-500">${m.id}</td>
+      <thead><tr class="text-[#4e5872] text-xs">${['ID','Title','Status','Yes Pool','No Pool','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${markets.map(m => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
+        <td class="py-1 pr-3 text-[#8b95ab]">${m.id}</td>
         <td class="pr-3 max-w-xs truncate">${esc(m.title)}</td>
         <td class="pr-3">${esc(m.status)}</td>
         <td class="pr-3">${fmtUSD(m.yes_pool/1e6)}</td>
@@ -2757,8 +2781,8 @@ async function renderAdmin(sec) {
   async function loadICOAdmin() {
     const { offerings } = await api('GET', '/api/admin/ico');
     return `<div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['Symbol','Name','Status','Raised','Hard Cap','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${offerings.map(o => `<tr class="border-t border-zinc-800">
+      <thead><tr class="text-[#4e5872] text-xs">${['Symbol','Name','Status','Raised','Hard Cap','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${offerings.map(o => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
         <td class="py-1 pr-3 font-medium">${esc(o.token_symbol)}</td>
         <td class="pr-3">${esc(o.token_name)}</td>
         <td class="pr-3">${esc(o.status)}</td>
@@ -2776,23 +2800,23 @@ async function renderAdmin(sec) {
       api('GET', '/api/admin/prices').catch(() => ({ prices: [] })),
       api('GET', '/api/admin/futures').catch(() => ({ futures: [] })),
     ]);
-    const priceRows = (prices||[]).map(p => `<tr class="border-t border-zinc-800">
+    const priceRows = (prices||[]).map(p => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
       <td class="py-1 pr-3 font-medium">${esc(p.symbol)}</td>
       <td class="pr-3">$${parseFloat(p.price_usd).toFixed(4)}</td>
-      <td class="pr-3 text-zinc-500 text-xs">${new Date(p.updated_at).toISOString().slice(0,16).replace('T',' ')}</td>
+      <td class="pr-3 text-[#8b95ab] text-xs">${new Date(p.updated_at).toISOString().slice(0,16).replace('T',' ')}</td>
       <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminEditPrice('${esc(p.symbol)}',${p.price_usd})">Edit</button></td>
     </tr>`).join('');
-    const futRows = (futures||[]).map(f => `<tr class="border-t border-zinc-800">
+    const futRows = (futures||[]).map(f => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
       <td class="py-1 pr-3 font-medium">${esc(f.symbol)}</td>
       <td class="pr-3">$${parseFloat(f.mark_price).toFixed(2)}</td>
-      <td class="pr-3 text-zinc-500">${f.funding_rate}</td>
+      <td class="pr-3 text-[#8b95ab]">${f.funding_rate}</td>
       <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminEditFutures(${f.id},'${esc(f.symbol)}',${f.mark_price})">Edit</button></td>
     </tr>`).join('');
-    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Spot Prices</h3>
-      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['Symbol','Price','Updated',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-[#8b95ab] mb-2">Spot Prices</h3>
+      <table class="w-full text-sm"><thead><tr class="text-[#4e5872] text-xs">${['Symbol','Price','Updated',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${priceRows}</tbody></table></div>
-      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Futures Markets</h3>
-      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['Symbol','Mark Price','Funding Rate',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-[#8b95ab] mb-2">Futures Markets</h3>
+      <table class="w-full text-sm"><thead><tr class="text-[#4e5872] text-xs">${['Symbol','Mark Price','Funding Rate',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${futRows}</tbody></table></div>`;
   }
 
@@ -2801,38 +2825,38 @@ async function renderAdmin(sec) {
       api('GET', '/api/admin/balances'),
       api('GET', '/api/admin/transactions'),
     ]);
-    const balRows = balances.map(b => `<tr class="border-t border-zinc-800">
+    const balRows = balances.map(b => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
       <td class="py-1 pr-3">@${esc(b.username)}</td>
       <td class="pr-3">${esc(b.token_symbol)}</td>
       <td class="pr-3">${(b.balance/1e6).toFixed(4)}</td>
       <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminAdjustBalance(${b.user_id},'${esc(b.token_symbol)}')">Adjust</button></td>
     </tr>`).join('');
-    const txRows = transactions.map(t => `<tr class="border-t border-zinc-800">
-      <td class="py-1 pr-3 text-zinc-500">${t.id}</td>
+    const txRows = transactions.map(t => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
+      <td class="py-1 pr-3 text-[#8b95ab]">${t.id}</td>
       <td class="pr-3">@${esc(t.username||'?')}</td>
       <td class="pr-3">${esc(t.type)}</td>
       <td class="pr-3">${esc(t.token_symbol)}</td>
       <td class="pr-3">${(t.amount/1e6).toFixed(4)}</td>
-      <td class="pr-3 text-zinc-500 text-xs truncate max-w-xs">${esc(t.description||'')}</td>
+      <td class="pr-3 text-[#8b95ab] text-xs truncate max-w-xs">${esc(t.description||'')}</td>
     </tr>`).join('');
-    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Wallet Balances</h3>
-      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['User','Token','Balance',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+    return `<div class="overflow-x-auto mb-4"><h3 class="text-sm font-semibold text-[#8b95ab] mb-2">Wallet Balances</h3>
+      <table class="w-full text-sm"><thead><tr class="text-[#4e5872] text-xs">${['User','Token','Balance',''].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${balRows}</tbody></table></div>
-      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-zinc-400 mb-2">Transactions</h3>
-      <table class="w-full text-sm"><thead><tr class="text-zinc-500 text-xs">${['ID','User','Type','Token','Amount','Desc'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <div class="overflow-x-auto"><h3 class="text-sm font-semibold text-[#8b95ab] mb-2">Transactions</h3>
+      <table class="w-full text-sm"><thead><tr class="text-[#4e5872] text-xs">${['ID','User','Type','Token','Amount','Desc'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${txRows}</tbody></table></div>`;
   }
 
   async function loadNFTs() {
     const { nfts } = await api('GET', '/api/admin/nfts');
     return `<div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['ID','Token ID','Name','Owner','Collection','Burned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${nfts.map(n => `<tr class="border-t border-zinc-800 ${n.burned?'opacity-40':''}">
-        <td class="py-1 pr-3 text-zinc-500">${n.id}</td>
+      <thead><tr class="text-[#4e5872] text-xs">${['ID','Token ID','Name','Owner','Collection','Burned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${nfts.map(n => `<tr class="border-t border-[rgba(255,255,255,0.06)] ${n.burned?'opacity-40':''}">
+        <td class="py-1 pr-3 text-[#8b95ab]">${n.id}</td>
         <td class="pr-3 font-mono text-xs">${esc(n.token_id)}</td>
         <td class="pr-3">${esc(n.name)}</td>
         <td class="pr-3">@${esc(n.owner_username||'?')}</td>
-        <td class="pr-3 text-zinc-500">${esc(n.collection||'')}</td>
+        <td class="pr-3 text-[#8b95ab]">${esc(n.collection||'')}</td>
         <td class="pr-3">${n.burned?'🔥':''}</td>
         <td class="py-1">${!n.burned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminBurnNFT(${n.id})">Burn</button>` : ''}</td>
       </tr>`).join('')}</tbody>
@@ -2842,21 +2866,21 @@ async function renderAdmin(sec) {
   async function loadAudit() {
     const { actions } = await api('GET', '/api/admin/audit');
     return actions.length ? `<div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-zinc-500 text-xs">${['When','Admin','Action','Target','Note'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
-      <tbody>${actions.map(a => `<tr class="border-t border-zinc-800">
-        <td class="py-1 pr-3 text-zinc-500 text-xs">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td>
+      <thead><tr class="text-[#4e5872] text-xs">${['When','Admin','Action','Target','Note'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <tbody>${actions.map(a => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
+        <td class="py-1 pr-3 text-[#8b95ab] text-xs">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td>
         <td class="pr-3">@${esc(a.username||'?')}</td>
         <td class="pr-3">${esc(a.action_type)}</td>
         <td class="pr-3">${esc(String(a.target_user_id||a.target_market_id||a.target_post_id||''))}</td>
-        <td class="pr-3 text-zinc-500">${esc(a.reason||'')}</td>
+        <td class="pr-3 text-[#8b95ab]">${esc(a.reason||'')}</td>
       </tr>`).join('')}</tbody>
-    </table></div>` : '<p class="text-zinc-600 text-sm">No admin actions logged yet.</p>';
+    </table></div>` : '<p class="text-[#4e5872] text-sm">No admin actions logged yet.</p>';
   }
 
   async function fullRender() {
     sec.innerHTML = `
       <h2 class="text-xl font-bold mb-4">⚙️ Admin Dashboard</h2>
-      <div class="flex flex-wrap gap-2 mb-4 border-b border-zinc-800 pb-3">
+      <div class="flex flex-wrap gap-2 mb-4 border-b border-[rgba(255,255,255,0.06)] pb-3">
         ${ADMIN_TABS.map(t=>`<button class="btn ${adminTab===t?'btn-v':'btn-z'} text-xs" onclick="switchAdminTab('${t}')">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`).join('')}
       </div>
       <div id="admin-content">${spin()}</div>`;
