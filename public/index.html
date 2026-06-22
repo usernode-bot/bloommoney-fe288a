@@ -68,7 +68,6 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
@@ -142,7 +141,7 @@
       <div>
         <div class="text-xs text-[#8b95ab] mb-2">Scan QR code</div>
         <div class="flex justify-center">
-          <canvas id="receive-qr" class="rounded-lg" style="background:#fff;"></canvas>
+          <img id="receive-qr" class="rounded-lg" style="background:#fff;width:180px;height:180px;" alt="QR code" />
         </div>
       </div>
       <button class="btn btn-z w-full" onclick="closeReceiveModal()">Close</button>
@@ -1145,16 +1144,19 @@ window.submitSend = async () => {
   }
 };
 
-window.openReceiveModal = () => {
+window.openReceiveModal = async () => {
   const addr = S.user?.usernode_pubkey || '';
   document.getElementById('receive-address').textContent = addr;
   document.getElementById('receive-copy-btn').textContent = 'Copy Address';
+  const qrImg = document.getElementById('receive-qr');
+  qrImg.src = '';
   document.getElementById('receive-modal').classList.remove('hidden');
 
-  if (addr && window.QRCode) {
-    QRCode.toCanvas(document.getElementById('receive-qr'), addr, { width: 180, margin: 2 }, (err) => {
-      if (err) console.error('QR error', err);
-    });
+  if (addr) {
+    try {
+      const { dataUrl } = await api('GET', '/api/wallet/receive-qr');
+      qrImg.src = dataUrl;
+    } catch (e) { /* QR load failed silently */ }
   }
 };
 

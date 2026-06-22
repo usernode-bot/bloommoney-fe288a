@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
 const verify = require('./lib/verify');
 
 const app = express();
@@ -1522,6 +1523,17 @@ app.get('/api/activity', async (req, res) => {
     const activities = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? activities[activities.length - 1].id : null;
     res.json({ activities, nextCursor });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Wallet QR code ────────────────────────────────────────────────────────────
+
+app.get('/api/wallet/receive-qr', async (req, res) => {
+  try {
+    const address = req.user?.usernode_pubkey;
+    if (!address) return res.status(400).json({ error: 'No wallet address linked' });
+    const dataUrl = await QRCode.toDataURL(address, { width: 180, margin: 2 });
+    res.json({ dataUrl });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
