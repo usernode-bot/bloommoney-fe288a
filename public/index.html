@@ -151,6 +151,7 @@
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
+      <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
@@ -205,6 +206,9 @@
 
       <!-- Futures -->
       <section id="section-futures" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
+
+      <!-- Trade Journal -->
+      <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
 
       <!-- NFTs -->
       <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -456,6 +460,7 @@ const VIEW_SECTION = {
   home: 'app-feed', feed: 'app-feed',
   trade: 'section-swap', swap: 'section-swap',
   futures: 'section-futures',
+  journal: 'section-journal',
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -503,6 +508,7 @@ async function loadView(view) {
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'futures': await renderFutures(sec); break;
+      case 'journal': await renderJournal(sec); break;
       case 'nfts': await renderNFTs(sec); break;
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
@@ -2381,6 +2387,282 @@ async function renderMarketDetail(sec) {
 
   await load();
   _activeInterval = setInterval(load, 10000);
+}
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+async function renderJournal(sec) {
+  let filterType = 'all', filterDir = 'all', filterStatus = 'all';
+  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+
+  function entryPnl(e) {
+    if (e.exit_price == null) return null;
+    return (parseFloat(e.exit_price) - parseFloat(e.entry_price)) * parseFloat(e.quantity) * (e.direction === 'long' ? 1 : -1);
+  }
+
+  async function load() {
+    const { entries } = await api('GET', '/api/journal');
+
+    const closed = entries.filter(e => e.exit_price != null);
+    const open = entries.filter(e => e.exit_price == null);
+    const totalPnl = closed.reduce((s, e) => s + (entryPnl(e) || 0), 0);
+    const wins = closed.filter(e => (entryPnl(e) || 0) > 0);
+    const winRate = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null;
+
+    let filtered = entries;
+    if (filterType !== 'all') filtered = filtered.filter(e => e.asset_type === filterType);
+    if (filterDir !== 'all') filtered = filtered.filter(e => e.direction === filterDir);
+    if (filterStatus === 'open') filtered = filtered.filter(e => e.exit_price == null);
+    if (filterStatus === 'closed') filtered = filtered.filter(e => e.exit_price != null);
+
+    sec.innerHTML = `
+      <h2 class="text-xl font-bold mb-4">&#x1f4d3; Trade Journal</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Total Trades</div>
+          <div class="text-2xl font-bold">${entries.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Open</div>
+          <div class="text-2xl font-bold">${open.length}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Win Rate</div>
+          <div class="text-2xl font-bold">${winRate !== null ? winRate + '%' : '&#x2014;'}</div>
+        </div>
+        <div class="card text-center py-3">
+          <div class="text-[#8b95ab] text-xs mb-1">Realised P&amp;L</div>
+          <div class="text-2xl font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-4 items-center">
+        <select id="jf-type" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('type',this.value)">
+          <option value="all">All types</option>
+          <option value="crypto">Crypto</option>
+          <option value="stock">Stock</option>
+          <option value="etf">ETF</option>
+        </select>
+        <select id="jf-dir" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('dir',this.value)">
+          <option value="all">All directions</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+        <select id="jf-status" class="inp text-sm" style="width:auto;padding:4px 8px;height:auto" onchange="jSetFilter('status',this.value)">
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+        <button class="btn btn-z text-sm px-3 py-1" onclick="jResetFilters()">Reset</button>
+        <button class="btn btn-v text-sm px-3 py-1 ml-auto" onclick="openLogTradeModal()">+ Log Trade</button>
+      </div>
+      ${filtered.length === 0
+        ? `<div class="card text-center py-8 text-[#8b95ab] text-sm">No trades yet. Click <strong>+ Log Trade</strong> to get started.</div>`
+        : `<div class="space-y-2">${filtered.map(e => {
+            const pnl = entryPnl(e);
+            const isOpen = e.exit_price == null;
+            const qty = parseFloat(e.quantity);
+            return `<div class="card flex flex-wrap gap-3 items-center text-sm">
+              <div class="shrink-0 min-w-[3.5rem]">
+                <div class="font-bold text-[#e8eaf0]">${esc(e.ticker)}</div>
+                <div class="text-xs text-[#8b95ab]">${esc(e.asset_type)}</div>
+              </div>
+              <span class="text-xs font-semibold px-1.5 py-0.5 rounded shrink-0 ${e.direction === 'long' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/40 text-red-400'}">${e.direction.toUpperCase()}</span>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">&times;${qty < 1 ? qty.toFixed(4) : qty.toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">qty</div>
+              </div>
+              <div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.entry_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">entry</div>
+              </div>
+              ${!isOpen ? `<div class="shrink-0">
+                <div class="font-mono text-xs">$${parseFloat(e.exit_price).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">exit</div>
+              </div>` : ''}
+              ${pnl !== null ? `<div class="shrink-0">
+                <div class="font-mono text-xs font-semibold ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</div>
+                <div class="text-xs text-[#4e5872]">P&amp;L</div>
+              </div>` : ''}
+              <div class="ml-auto flex items-center gap-2 shrink-0">
+                <span class="text-xs ${isOpen ? 'text-amber-400' : 'text-[#4e5872]'}">${isOpen ? 'open' : 'closed'}</span>
+                ${isOpen ? `<button class="btn btn-z text-xs px-2 py-0.5" onclick="openEditTradeModal(${e.id},${parseFloat(e.entry_price)})">Edit</button>` : ''}
+                <button class="btn text-xs px-2 py-0.5 border-red-900/40 hover:border-red-500/40 text-red-400" onclick="deleteTradeEntry(${e.id})">&#x2715;</button>
+              </div>
+            </div>`;
+          }).join('')}</div>`
+      }`;
+
+    const selType = document.getElementById('jf-type');
+    const selDir = document.getElementById('jf-dir');
+    const selStatus = document.getElementById('jf-status');
+    if (selType) selType.value = filterType;
+    if (selDir) selDir.value = filterDir;
+    if (selStatus) selStatus.value = filterStatus;
+
+    window.jSetFilter = (key, val) => {
+      if (key === 'type') filterType = val;
+      else if (key === 'dir') filterDir = val;
+      else if (key === 'status') filterStatus = val;
+      load();
+    };
+    window.jResetFilters = () => { filterType = 'all'; filterDir = 'all'; filterStatus = 'all'; load(); };
+    window.deleteTradeEntry = async (id) => {
+      if (!confirm('Delete this trade entry?')) return;
+      try { await api('DELETE', `/api/journal/${id}`); load(); } catch (e) { alert(e.message); }
+    };
+  }
+
+  window.openLogTradeModal = () => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3 max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Log Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Asset Type</label>
+          <select id="jt-type" class="inp w-full" onchange="jClearLivePrice()">
+            <option value="crypto">Crypto</option>
+            <option value="stock">Stock</option>
+            <option value="etf">ETF</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Ticker</label>
+          <input id="jt-ticker" type="text" class="inp w-full" placeholder="e.g. BTC, ETH, AAPL" autocomplete="off">
+          <span id="journal-live-price" style="font-size:0.85em;color:#aaa;" class="mt-0.5 block min-h-[1.2em]"></span>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Direction</label>
+          <select id="jt-direction" class="inp w-full">
+            <option value="long">Long &#x25b2;</option>
+            <option value="short">Short &#x25bc;</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Quantity</label>
+          <input id="jt-qty" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Entry Price ($)</label>
+          <input id="jt-entry" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Date</label>
+          <input id="jt-date" type="date" class="inp w-full" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="jt-notes" class="inp w-full" rows="2" placeholder="Strategy, reasoning…" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitLogTrade()">Log trade</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="jt-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    let _jpDebounce = null;
+    const tickerInput = document.getElementById('jt-ticker');
+    const typeSelect = document.getElementById('jt-type');
+    const liveLabel = document.getElementById('journal-live-price');
+    const entryInput = document.getElementById('jt-entry');
+
+    window.jClearLivePrice = () => { if (liveLabel) liveLabel.textContent = ''; };
+
+    function lookupLivePrice() {
+      clearTimeout(_jpDebounce);
+      _jpDebounce = setTimeout(async () => {
+        const ticker = tickerInput.value.trim().toUpperCase();
+        if (!ticker || typeSelect.value !== 'crypto' || !JOURNAL_LIVE_TICKERS.has(ticker)) {
+          if (liveLabel) liveLabel.textContent = '';
+          return;
+        }
+        try {
+          const { prices } = await api('GET', `/api/ticker-prices?symbols=${ticker}`);
+          const p = prices[ticker];
+          if (p != null) {
+            if (liveLabel) liveLabel.textContent = `Live: $${p >= 1 ? p.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : p.toFixed(4)}`;
+            if (entryInput && !entryInput.value) entryInput.value = p.toString();
+          } else {
+            if (liveLabel) liveLabel.textContent = '';
+          }
+        } catch { if (liveLabel) liveLabel.textContent = ''; }
+      }, 500);
+    }
+
+    if (tickerInput) tickerInput.addEventListener('input', lookupLivePrice);
+
+    window.submitLogTrade = async () => {
+      const msg = document.getElementById('jt-msg');
+      try {
+        await api('POST', '/api/journal', {
+          asset_type: typeSelect.value,
+          ticker: tickerInput.value.trim().toUpperCase(),
+          direction: document.getElementById('jt-direction').value,
+          quantity: document.getElementById('jt-qty').value,
+          entry_price: document.getElementById('jt-entry').value,
+          trade_date: document.getElementById('jt-date').value,
+          notes: document.getElementById('jt-notes').value,
+        });
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  window.openEditTradeModal = (id, entryPrice) => {
+    document.getElementById('journal-trade-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'journal-trade-modal';
+    modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-md w-full p-6 space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="font-bold text-lg">Close Trade</h3>
+          <button onclick="document.getElementById('journal-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none">&#x2715;</button>
+        </div>
+        <p class="text-sm text-[#8b95ab]">Entry price: <span class="font-mono text-[#e8eaf0]">$${parseFloat(entryPrice).toFixed(2)}</span></p>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Exit Price ($)</label>
+          <input id="je-exit" type="number" class="inp w-full" placeholder="0.00" min="0" step="any">
+        </div>
+        <div>
+          <label class="text-xs text-[#8b95ab] block mb-1">Notes (optional)</label>
+          <textarea id="je-notes" class="inp w-full" rows="2" style="resize:vertical"></textarea>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button class="btn btn-v flex-1" onclick="submitEditTrade(${id})">Save</button>
+          <button class="btn btn-z flex-1" onclick="document.getElementById('journal-trade-modal')?.remove()">Cancel</button>
+        </div>
+        <p id="je-msg" class="text-sm"></p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    window.submitEditTrade = async (tid) => {
+      const msg = document.getElementById('je-msg');
+      try {
+        const exitVal = document.getElementById('je-exit')?.value;
+        const notesVal = document.getElementById('je-notes')?.value;
+        const body = {};
+        if (exitVal) body.exit_price = exitVal;
+        if (notesVal) body.notes = notesVal;
+        await api('PATCH', `/api/journal/${tid}`, body);
+        document.getElementById('journal-trade-modal')?.remove();
+        load();
+      } catch (e) {
+        if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
+      }
+    };
+  };
+
+  await load();
 }
 
 // ── Futures ───────────────────────────────────────────────────────────────────
