@@ -184,6 +184,10 @@
     { "name": "NFT activity API returns JSON", "path": "/api/nft-activity", "expectSelector": "body" },
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
-    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" }
+    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" },
+    { "name": "Wallet section in DOM", "path": "/?demo=1", "expectSelector": "#section-wallet" },
+    { "name": "Wallet nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"wallet\"]" },
+    { "name": "Wallet transfers API returns JSON", "path": "/api/wallet/transfers", "expectSelector": "body" },
+    { "name": "Wallet resolve API returns JSON", "path": "/api/wallet/resolve?username=staging-alice", "expectSelector": "body" }
   ]
 }

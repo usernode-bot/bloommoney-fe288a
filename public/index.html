@@ -162,6 +162,7 @@
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
+      <button class="nav-item" data-view="wallet">💸 Wallet</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
@@ -240,6 +241,9 @@
 
       <!-- Messages -->
       <section id="section-messages" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Wallet (real on-chain send / receive) -->
+      <section id="section-wallet" class="view hidden max-w-md mx-auto py-4 px-4"></section>
 
     </main>
   </div>
@@ -551,6 +555,7 @@ const VIEW_SECTION = {
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
   admin: 'section-admin',
+  wallet: 'section-wallet',
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
@@ -597,6 +602,7 @@ async function loadView(view) {
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
       case 'admin': await renderAdmin(sec); break;
+      case 'wallet': await renderWallet(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
 }
@@ -773,6 +779,250 @@ async function connectWallet() {
   btn.textContent = 'Connect Wallet';
 }
 document.getElementById('connect-wallet-btn').addEventListener('click', connectWallet);
+
+// ── Wallet: real on-chain send / receive ────────────────────────────────────
+// Operates on the user's REAL Usernode wallet via the bridge — kept visually
+// and functionally separate from the simulated BLOOM/USDC trading balances.
+let _walletTab = 'send';
+let _walletResolved = null; // { address, username, display_name } for a resolved @username
+
+// Hand a transfer to the bridge. The bridge prompts for signing and resolves
+// after inclusion with a tx id/hash (string or object). Amount is smallest-unit
+// integer, consistent with how this app represents all balances.
+async function bridgeSendTx(to, amountSmallest, memo) {
+  const u = window.usernode;
+  if (!u) throw new Error('Wallet bridge unavailable — open inside Usernode.');
+  let r;
+  if (typeof u.sendTransaction === 'function') {
+    r = await u.sendTransaction({ to, amount: amountSmallest, memo: memo || '' });
+  } else if (typeof u.qrSendTransaction === 'function') {
+    r = await u.qrSendTransaction(to, amountSmallest, memo || '');
+  } else {
+    throw new Error('This wallet build does not support sending.');
+  }
+  if (typeof r === 'string') return r;
+  return (r && (r.tx_hash || r.txHash || r.txId || r.hash || r.id)) || null;
+}
+
+function walletTabBar(active) {
+  const tabs = [['send', 'Send'], ['receive', 'Receive'], ['history', 'History']];
+  return `<div class="flex gap-2 mb-4">${tabs.map(([k, l]) =>
+    `<button onclick="window.walletSwitchTab('${k}')" class="text-sm px-4 py-1.5 font-medium transition-colors ${active === k ? 'pill-active' : 'pill-inactive'}">${l}</button>`
+  ).join('')}</div>`;
+}
+
+async function renderWallet(sec) {
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-1">Wallet</h2>
+    <div class="card mb-4 !p-3 border border-amber-500/30 bg-amber-900/10 text-xs text-amber-300/90">
+      ⚠️ This moves <b>real on-chain funds</b> from your linked Usernode wallet — separate from the simulated BLOOM / USDC trading balances shown elsewhere in BloomMoney.
+    </div>
+    ${walletTabBar(_walletTab)}
+    <div id="wallet-body">${spin()}</div>`;
+  window.walletSwitchTab = (t) => { _walletTab = t; renderWallet(sec); };
+  const body = document.getElementById('wallet-body');
+  try {
+    if (_walletTab === 'send') { body.innerHTML = walletSendView(); wireWalletSend(); }
+    else if (_walletTab === 'receive') { body.innerHTML = walletReceiveView(); wireWalletReceive(); }
+    else { body.innerHTML = await walletHistoryView(); }
+  } catch (e) { body.innerHTML = err(e.message); }
+}
+
+function walletSendView() {
+  if (!S.user || !S.user.usernode_pubkey) {
+    return `<div class="card text-center py-8">
+      <p class="text-[#8b95ab] text-sm mb-4">Connect your Usernode wallet to send funds.</p>
+      <button class="btn btn-v" onclick="connectWallet()">Connect Wallet</button></div>`;
+  }
+  return `
+    <div class="card space-y-3">
+      <div>
+        <label class="text-xs text-[#8b95ab]">Recipient — ut1… address or @username</label>
+        <input id="wsend-to" class="inp w-full mt-1" placeholder="ut1… or @alice" autocomplete="off" spellcheck="false">
+        <div id="wsend-resolve" class="text-xs mt-1 min-h-[1.1rem]"></div>
+      </div>
+      <div>
+        <label class="text-xs text-[#8b95ab]">Amount</label>
+        <input id="wsend-amount" type="number" min="0" step="any" class="inp w-full mt-1" placeholder="0.00">
+      </div>
+      <div>
+        <label class="text-xs text-[#8b95ab]">Memo (optional)</label>
+        <input id="wsend-memo" class="inp w-full mt-1" maxlength="200" placeholder="What's this for?">
+      </div>
+      <button id="wsend-btn" class="btn btn-v w-full">Send</button>
+      <div id="wsend-status" class="text-sm text-center min-h-[1.1rem]"></div>
+    </div>`;
+}
+
+function wireWalletSend() {
+  const toEl = document.getElementById('wsend-to');
+  if (!toEl) return;
+  _walletResolved = null;
+  const resolveEl = document.getElementById('wsend-resolve');
+
+  const looksLikeAddress = (v) => /^(ut1|0x)/i.test(v.trim());
+
+  async function onRecipientChange() {
+    _walletResolved = null;
+    const raw = toEl.value.trim();
+    if (!raw) { resolveEl.textContent = ''; return; }
+    if (looksLikeAddress(raw)) {
+      resolveEl.innerHTML = `<span class="text-[#8b95ab]">Sending to address <span class="font-mono text-[#e8eaf0]">${esc(shortAddr(raw))}</span></span>`;
+      return;
+    }
+    resolveEl.innerHTML = `<span class="text-[#8b95ab]">Resolving @${esc(raw.replace(/^@/, ''))}…</span>`;
+    try {
+      const r = await api('GET', `/api/wallet/resolve?username=${encodeURIComponent(raw.replace(/^@/, ''))}`);
+      _walletResolved = r;
+      resolveEl.innerHTML = `<span class="text-emerald-400">✓ ${esc(r.display_name || r.username)} — <span class="font-mono">${esc(shortAddr(r.address))}</span></span>`;
+    } catch (e) {
+      const msg = e.message === 'wallet_not_linked' ? 'That user has not linked a wallet.'
+        : e.message === 'user_not_found' ? 'No Usernode user with that username.'
+        : 'Could not resolve recipient.';
+      resolveEl.innerHTML = `<span class="text-red-400">${msg}</span>`;
+    }
+  }
+  toEl.addEventListener('change', onRecipientChange);
+  toEl.addEventListener('blur', onRecipientChange);
+
+  document.getElementById('wsend-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('wsend-btn');
+    const status = document.getElementById('wsend-status');
+    const raw = toEl.value.trim();
+    const amtInput = parseFloat(document.getElementById('wsend-amount').value);
+    const memo = document.getElementById('wsend-memo').value.trim();
+
+    if (!raw) { status.className = 'text-sm text-center text-red-400'; status.textContent = 'Enter a recipient.'; return; }
+    if (!Number.isFinite(amtInput) || amtInput <= 0) { status.className = 'text-sm text-center text-red-400'; status.textContent = 'Enter a valid amount.'; return; }
+
+    let toAddress, recipientUsername = null;
+    if (looksLikeAddress(raw)) {
+      toAddress = raw;
+    } else {
+      if (!_walletResolved) { await onRecipientChange(); }
+      if (!_walletResolved) { status.className = 'text-sm text-center text-red-400'; status.textContent = 'Could not resolve that username.'; return; }
+      toAddress = _walletResolved.address;
+      recipientUsername = _walletResolved.username;
+    }
+
+    const amountSmallest = Math.round(amtInput * U);
+    btn.disabled = true; btn.textContent = 'Waiting for confirmation…';
+    status.className = 'text-sm text-center text-[#8b95ab]'; status.textContent = 'Approve the transfer in your wallet…';
+    try {
+      const txHash = await bridgeSendTx(toAddress, amountSmallest, memo);
+      const rec = await api('POST', '/api/wallet/transfers', {
+        to_address: toAddress, amount: String(amountSmallest), memo, tx_hash: txHash, recipient_username: recipientUsername,
+      });
+      await api('POST', `/api/wallet/transfers/${rec.id}/confirm`, { status: 'confirmed', tx_hash: txHash }).catch(() => {});
+      status.className = 'text-sm text-center text-emerald-400';
+      status.textContent = `✓ Sent ${amtInput} • ${txHash ? shortAddr(txHash) : 'confirmed'}`;
+      toEl.value = ''; document.getElementById('wsend-amount').value = ''; document.getElementById('wsend-memo').value = '';
+      document.getElementById('wsend-resolve').textContent = ''; _walletResolved = null;
+    } catch (e) {
+      status.className = 'text-sm text-center text-red-400';
+      status.textContent = e.message || 'Transfer failed or was rejected.';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Send';
+    }
+  });
+}
+
+function walletReceiveView() {
+  if (!S.user || !S.user.usernode_pubkey) {
+    return `<div class="card text-center py-8">
+      <p class="text-[#8b95ab] text-sm mb-4">Connect your Usernode wallet to receive funds.</p>
+      <button class="btn btn-v" onclick="connectWallet()">Connect Wallet</button></div>`;
+  }
+  const addr = S.user.usernode_pubkey;
+  return `
+    <div class="card text-center space-y-4">
+      <p class="text-xs text-[#8b95ab]">Share your address to receive funds</p>
+      <div id="wrecv-qr" class="flex justify-center"></div>
+      <div class="font-mono text-xs break-all text-[#e8eaf0] bg-[#0d1021] rounded-lg p-3">${esc(addr)}</div>
+      <button id="wrecv-copy" class="btn btn-z w-full">Copy address</button>
+    </div>`;
+}
+
+async function wireWalletReceive() {
+  if (!S.user || !S.user.usernode_pubkey) return;
+  const addr = S.user.usernode_pubkey;
+  const copyBtn = document.getElementById('wrecv-copy');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(addr); copyBtn.textContent = 'Copied!'; }
+      catch { copyBtn.textContent = 'Copy failed'; }
+      setTimeout(() => { copyBtn.textContent = 'Copy address'; }, 1500);
+    });
+  }
+  const container = document.getElementById('wrecv-qr');
+  if (!container) return;
+  try {
+    if (!window.QRCode) {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+    container.innerHTML = '<canvas id="wrecv-qr-canvas"></canvas>';
+    await QRCode.toCanvas(document.getElementById('wrecv-qr-canvas'), addr, { width: 180, color: { dark: '#e8eaf0', light: '#131620' } });
+  } catch (_) { container.innerHTML = ''; }
+}
+
+async function walletHistoryView() {
+  const statusCfg = {
+    pending:   { label: 'Pending',   cls: 'text-amber-400 bg-amber-900/30' },
+    confirmed: { label: 'Confirmed', cls: 'text-emerald-400 bg-emerald-900/30' },
+    failed:    { label: 'Failed',    cls: 'text-red-400 bg-red-900/30' },
+  };
+  function rows(items) {
+    return items.map(t => {
+      const incoming = t.direction === 'receive';
+      const cp = t.counterparty_username ? '@' + t.counterparty_username : shortAddr(t.counterparty_address || '');
+      const st = statusCfg[t.status] || { label: esc(t.status), cls: 'text-[#8b95ab] bg-[#1c2236]/60' };
+      const amt = (Number(t.amount) / U).toLocaleString('en-US', { maximumFractionDigits: 6 });
+      return `
+        <div class="card flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold ${incoming ? 'text-emerald-400' : 'text-[#e8eaf0]'}">${incoming ? 'Received' : 'Sent'}</span>
+              <span class="text-xs text-[#8b95ab]">${incoming ? 'from' : 'to'} <span class="font-mono">${esc(cp)}</span></span>
+            </div>
+            ${t.memo ? `<div class="text-xs text-[#8b95ab] mt-0.5 truncate">${esc(t.memo)}</div>` : ''}
+            <div class="text-xs text-[#4e5872] mt-0.5">${tsAgo(t.created_at)} ago</div>
+          </div>
+          <div class="shrink-0 text-right">
+            <div class="text-sm font-mono ${incoming ? 'text-emerald-400' : 'text-red-400'}">${incoming ? '+' : '-'}${amt}</div>
+            <span class="text-[0.65rem] font-semibold px-2 py-0.5 rounded ${st.cls}">${st.label}</span>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  const { transfers, nextCursor } = await api('GET', '/api/wallet/transfers?limit=20');
+  if (!transfers.length) {
+    return `<div class="card text-center py-8 text-[#8b95ab] text-sm">No transfers yet. Send funds from the Send tab, or share your address from Receive.</div>`;
+  }
+
+  let cursor = nextCursor;
+  window.walletLoadMore = async () => {
+    const btn = document.getElementById('wallet-hist-more');
+    const list = document.getElementById('wallet-hist-list');
+    if (!btn || !list) return;
+    btn.textContent = 'Loading…'; btn.disabled = true;
+    try {
+      const { transfers: more, nextCursor: nc } = await api('GET', `/api/wallet/transfers?limit=20&cursor=${encodeURIComponent(cursor)}`);
+      cursor = nc;
+      list.insertAdjacentHTML('beforeend', rows(more));
+      if (!nc) btn.remove(); else { btn.textContent = 'Load more'; btn.disabled = false; }
+    } catch (e) { btn.textContent = 'Error — retry'; btn.disabled = false; }
+  };
+
+  return `
+    <div id="wallet-hist-list" class="space-y-2">${rows(transfers)}</div>
+    ${nextCursor ? `<button id="wallet-hist-more" class="btn btn-z w-full mt-2" onclick="walletLoadMore()">Load more</button>` : ''}`;
+}
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {

@@ -1778,6 +1778,149 @@ app.get('/api/activity', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Wallet: real on-chain send / receive ──────────────────────────────────────
+// These operate on the user's REAL Usernode wallet via the bridge. They are
+// intentionally kept separate from the simulated wallet_balances / transactions
+// tables — a real transfer never debits a play-money balance.
+
+// Plausible Usernode address (ut1…) or a staging demo address (0xSTAGING…).
+const ONCHAIN_ADDR_RE = /^(ut1|0x)[a-zA-Z0-9]{4,}$/;
+
+// Resolve a Usernode username to that user's linked wallet address.
+// Throws an Error with a `.code` (HTTP status) on the failure cases.
+async function resolveWalletRecipient(rawUsername) {
+  const handle = String(rawUsername || '').trim().replace(/^@/, '');
+  if (!validStr(handle, 255)) { const e = new Error('invalid_username'); e.code = 400; throw e; }
+  const { rows } = await pool.query(
+    'SELECT user_id, username, display_name, usernode_pubkey, is_banned FROM users WHERE username=$1',
+    [handle]
+  );
+  const u = rows[0];
+  if (!u || u.is_banned) { const e = new Error('user_not_found'); e.code = 404; throw e; }
+  if (!u.usernode_pubkey) { const e = new Error('wallet_not_linked'); e.code = 422; throw e; }
+  return { user_id: u.user_id, username: u.username, display_name: u.display_name, address: u.usernode_pubkey };
+}
+
+// The caller's own address (Receive tab + Send "available balance" header).
+app.get('/api/wallet/me', requireWallet, async (req, res) => {
+  res.json({ address: req.user.usernode_pubkey, username: req.user.username });
+});
+
+// Resolve a username → address (no wallet required on the caller).
+app.get('/api/wallet/resolve', async (req, res) => {
+  try {
+    const out = await resolveWalletRecipient(req.query.username);
+    res.json(out);
+  } catch (e) { res.status(e.code || 500).json({ error: e.message }); }
+});
+
+// Record a send the client just handed to the bridge. Mirrors a 'receive' row
+// for the recipient when they're a known BloomMoney user. Idempotent on tx_hash.
+app.post('/api/wallet/transfers', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_address, amount, memo, tx_hash, recipient_username } = req.body || {};
+    if (!validStr(to_address, 255) || !ONCHAIN_ADDR_RE.test(to_address)) {
+      return res.status(400).json({ error: 'invalid_address' });
+    }
+    const amtStr = String(amount == null ? '' : amount).trim();
+    if (!/^\d+$/.test(amtStr) || amtStr === '0') {
+      return res.status(400).json({ error: 'invalid_amount' });
+    }
+    const memoStr = (memo != null && String(memo).length) ? String(memo).slice(0, 200) : null;
+    const hash = (tx_hash != null && String(tx_hash).length) ? String(tx_hash).slice(0, 255) : null;
+
+    await client.query('BEGIN');
+
+    // Idempotency: a confirmation can fire more than once.
+    if (hash) {
+      const { rows: dup } = await client.query(
+        "SELECT id, status FROM onchain_transfers WHERE user_id=$1 AND direction='send' AND tx_hash=$2",
+        [req.user.id, hash]
+      );
+      if (dup[0]) { await client.query('COMMIT'); return res.json({ id: dup[0].id, status: dup[0].status, deduped: true }); }
+    }
+
+    const { rows: cp } = await client.query(
+      'SELECT user_id, username FROM users WHERE usernode_pubkey=$1 AND user_id<>$2',
+      [to_address, req.user.id]
+    );
+    const counter = cp[0] || null;
+
+    const { rows: ins } = await client.query(
+      `INSERT INTO onchain_transfers(user_id, direction, counterparty_address, counterparty_user_id, counterparty_username, amount, memo, tx_hash, status)
+       VALUES ($1,'send',$2,$3,$4,$5,$6,$7,'pending') RETURNING id, status`,
+      [req.user.id, to_address, counter?.user_id || null, counter?.username || (recipient_username || null), amtStr, memoStr, hash]
+    );
+
+    // Mirror an inbound row for a known recipient so it shows in their History.
+    if (counter) {
+      await client.query(
+        `INSERT INTO onchain_transfers(user_id, direction, counterparty_address, counterparty_user_id, counterparty_username, amount, memo, tx_hash, status)
+         VALUES ($1,'receive',$2,$3,$4,$5,$6,$7,'pending')`,
+        [counter.user_id, req.user.usernode_pubkey, req.user.id, req.user.username, amtStr, memoStr, hash]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ id: ins[0].id, status: ins[0].status });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// Flip a transfer's status once the bridge resolves/rejects. Owner-only; the
+// status propagates to the mirrored row sharing the same tx_hash.
+app.post('/api/wallet/transfers/:id/confirm', requireWallet, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid_id' });
+    const status = req.body?.status === 'failed' ? 'failed' : 'confirmed';
+    const hash = (req.body?.tx_hash != null && String(req.body.tx_hash).length) ? String(req.body.tx_hash).slice(0, 255) : null;
+    const { rows } = await pool.query(
+      `UPDATE onchain_transfers
+         SET status=$1,
+             confirmed_at = CASE WHEN $1='confirmed' THEN NOW() ELSE confirmed_at END,
+             tx_hash = COALESCE($3, tx_hash)
+       WHERE id=$2 AND user_id=$4
+       RETURNING id, tx_hash`,
+      [status, id, hash, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'not_found' });
+    const h = rows[0].tx_hash;
+    if (h) {
+      await pool.query(
+        `UPDATE onchain_transfers
+           SET status=$1, confirmed_at = CASE WHEN $1='confirmed' THEN NOW() ELSE confirmed_at END
+         WHERE tx_hash=$2 AND id<>$3`,
+        [status, h, id]
+      );
+    }
+    res.json({ ok: true, status });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// The caller's transfer history, newest first (cursor-paginated).
+app.get('/api/wallet/transfers', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
+    const params = [req.user.id, limit + 1];
+    const cursorClause = cursor ? `AND id < $${params.push(cursor)}` : '';
+    const { rows } = await pool.query(
+      `SELECT id, direction, counterparty_address, counterparty_username,
+              amount::text AS amount, memo, tx_hash, status, created_at, confirmed_at
+       FROM onchain_transfers WHERE user_id=$1 ${cursorClause} ORDER BY id DESC LIMIT $2`,
+      params
+    );
+    const hasMore = rows.length > limit;
+    const transfers = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? transfers[transfers.length - 1].id : null;
+    res.json({ transfers, nextCursor });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Trade Journal ─────────────────────────────────────────────────────────────
 
 app.get('/api/journal', async (req, res) => {
@@ -4070,6 +4213,25 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY(user_id, key)
     );
+    -- Real on-chain transfers (native Usernode coin) — distinct from the
+    -- simulated wallet_balances / transactions tables. One row per side:
+    -- a 'send' row owned by the sender, and (when the recipient is a known
+    -- BloomMoney user) a mirrored 'receive' row owned by the recipient.
+    CREATE TABLE IF NOT EXISTS onchain_transfers (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      direction VARCHAR(10) NOT NULL,
+      counterparty_address TEXT,
+      counterparty_user_id INTEGER,
+      counterparty_username TEXT,
+      amount BIGINT NOT NULL,
+      memo TEXT,
+      tx_hash TEXT,
+      status VARCHAR(12) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      confirmed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS onchain_transfers_user_idx ON onchain_transfers (user_id, id DESC);
   `);
 
   // Initialize the funding schedule for any market missing it.
@@ -4104,6 +4266,7 @@ async function start() {
     COMMENT ON TABLE nft_listings IS 'staging:private';
     COMMENT ON TABLE nft_bids IS 'staging:private';
     COMMENT ON TABLE nft_transfers IS 'staging:private';
+    COMMENT ON TABLE onchain_transfers IS 'staging:private';
   `);
 
   // Seed initial market prices
@@ -4696,6 +4859,23 @@ async function start() {
         (9006,'adjust_balance',9001,'Staging demo — compensation USDC +50')
       ) v(admin_user_id,action_type,target_user_id,reason)
       WHERE NOT EXISTS (SELECT 1 FROM admin_actions WHERE reason='Staging demo — spam activity detected')
+    `).catch(() => {});
+
+    // On-chain transfer history demo. onchain_transfers is staging:private, so
+    // it arrives schema-only (empty) in staging — seed obviously-fake rows so
+    // the Wallet → History tab is reviewable without a funded wallet. Owned by
+    // the seeded staging-* users (ids 9001–9006); amounts are smallest-unit.
+    await pool.query(`
+      INSERT INTO onchain_transfers(user_id,direction,counterparty_address,counterparty_user_id,counterparty_username,amount,memo,tx_hash,status,confirmed_at)
+      SELECT * FROM (VALUES
+        (9001,'send','0xSTAGING0000000000000000000000000000000002',9002,'staging-bob',1500000,'Staging demo — lunch split','staging-tx-0001','confirmed',NOW()),
+        (9002,'receive','0xSTAGING0000000000000000000000000000000001',9001,'staging-alice',1500000,'Staging demo — lunch split','staging-tx-0001','confirmed',NOW()),
+        (9001,'receive','0xSTAGING0000000000000000000000000000000005',9005,'staging-eve',3000000,'Staging demo — staking payout','staging-tx-0002','confirmed',NOW()),
+        (9001,'send','ut1qstagingexternaladdr00000000000000xyz',NULL,NULL,500000,'Staging demo — tip to external wallet','staging-tx-0003','confirmed',NOW()),
+        (9001,'send','0xSTAGING0000000000000000000000000000000003',9003,'staging-carol',2250000,'Staging demo — pending transfer','staging-tx-0004','pending',NULL),
+        (9002,'send','0xSTAGING0000000000000000000000000000000004',9004,'staging-dave',750000,'Staging demo — NFT settle','staging-tx-0005','confirmed',NOW())
+      ) v(user_id,direction,counterparty_address,counterparty_user_id,counterparty_username,amount,memo,tx_hash,status,confirmed_at)
+      WHERE NOT EXISTS (SELECT 1 FROM onchain_transfers WHERE tx_hash='staging-tx-0001')
     `).catch(() => {});
   }
 
