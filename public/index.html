@@ -381,7 +381,7 @@ function fmtAmt(sym, v) {
 }
 function fmtUSD(v) { return (Number(v) / U).toFixed(2); }
 // AI Trade Helper: client-side mirror of server COINGECKO_TICKER_MAP keys.
-const KNOWN_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+const KNOWN_TICKERS = new Set(['BTC','ETH','BNB','SOL','XRP','USDT','ADA','DOGE','TON','LINK','DOT','AVAX']);
 const TICKER_RE = /\$([A-Za-z]{2,6})\b/g;
 function detectTickers(text) {
   const seen = [];
@@ -1438,7 +1438,7 @@ window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('trade'); };
 // ── Swap ──────────────────────────────────────────────────────────────────────
 async function renderSwap(sec) {
   if (S.tradeToken) { await renderTokenDetail(sec); return; }
-  const tokens = ['USDC','BLOOM','ETH','BTC'];
+  const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
   const swapState = { from: 'BTC', to: 'ETH', fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
 
   // Inject flip animation keyframes once
@@ -1460,10 +1460,17 @@ async function renderSwap(sec) {
   sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-4"></div>`;
 
   const TOKEN_COLORS = {
-    BTC:   { bg: 'rgba(251,191,36,0.15)',  text: '#fbbf24', symbol: '₿' },
-    ETH:   { bg: 'rgba(56,189,248,0.15)',  text: '#38bdf8', symbol: 'Ξ' },
-    USDC:  { bg: 'rgba(52,211,153,0.15)',  text: '#34d399', symbol: '$' },
-    BLOOM: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', symbol: '✿' },
+    BTC:   { bg: 'rgba(251,191,36,0.15)',   text: '#fbbf24', symbol: '₿' },
+    ETH:   { bg: 'rgba(56,189,248,0.15)',   text: '#38bdf8', symbol: 'Ξ' },
+    BNB:   { bg: 'rgba(243,186,47,0.15)',   text: '#f3ba2f', symbol: 'B' },
+    SOL:   { bg: 'rgba(153,69,255,0.15)',   text: '#9945ff', symbol: '◎' },
+    XRP:   { bg: 'rgba(0,149,207,0.15)',    text: '#0095cf', symbol: 'X' },
+    USDC:  { bg: 'rgba(52,211,153,0.15)',   text: '#34d399', symbol: '$' },
+    USDT:  { bg: 'rgba(38,161,123,0.15)',   text: '#26a17b', symbol: '₮' },
+    ADA:   { bg: 'rgba(0,140,255,0.15)',    text: '#008cff', symbol: '₳' },
+    DOGE:  { bg: 'rgba(203,155,31,0.15)',   text: '#cb9b1f', symbol: 'Ð' },
+    TON:   { bg: 'rgba(0,136,204,0.15)',    text: '#0088cc', symbol: '◆' },
+    BLOOM: { bg: 'rgba(167,139,250,0.15)',  text: '#a78bfa', symbol: '✿' },
   };
 
   function tokenBadge(sym) {
@@ -1675,12 +1682,19 @@ async function renderSwap(sec) {
   if (!mwrap) return;
 
   const TOKEN_META = {
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'     },
     BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
+    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
     BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'  },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
   };
-  const MARKET_ORDER = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+  const MARKET_ORDER = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'USDT', 'ADA', 'DOGE', 'TON', 'BLOOM', 'USDC'];
 
   // Fetch all four price histories in parallel
   let histories = {};
@@ -1755,12 +1769,19 @@ async function renderSwap(sec) {
 async function renderTokenDetail(sec) {
   const sym = S.tradeToken;
   const TOKEN_META_DETAIL = {
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.'                         },
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',  desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v', desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.'        },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.'           },
+    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',      desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',          desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  btnCls: 'bg-yellow-500 hover:bg-yellow-400',    desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  btnCls: 'bg-purple-600 hover:bg-purple-500',    desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    btnCls: 'bg-cyan-600 hover:bg-cyan-500',        desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    btnCls: 'bg-teal-600 hover:bg-teal-500',        desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    btnCls: 'bg-blue-600 hover:bg-blue-500',        desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  btnCls: 'bg-yellow-600 hover:bg-yellow-500',    desc: 'The original meme coin, now widely used for tipping and payments.' },
+    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-600 hover:bg-sky-500',          desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
+    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v',                                desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500',  desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
   };
-  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD' };
+  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
   const useTradingView = sym in TV_SYMBOLS;
 
   const meta = TOKEN_META_DETAIL[sym];
@@ -2467,7 +2488,7 @@ async function renderMarketDetail(sec) {
 // ── Trade Journal ─────────────────────────────────────────────────────────────
 async function renderJournal(sec) {
   let filterType = 'all', filterDir = 'all', filterStatus = 'all';
-  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','SOL','DOGE','ADA','LINK','DOT','AVAX']);
+  const JOURNAL_LIVE_TICKERS = new Set(['BTC','ETH','BNB','SOL','XRP','USDT','ADA','DOGE','TON','LINK','DOT','AVAX']);
 
   function entryPnl(e) {
     if (e.exit_price == null) return null;
