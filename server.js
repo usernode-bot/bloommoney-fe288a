@@ -372,6 +372,16 @@ setInterval(async () => {
           funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
+    // Anchor ETH-PERP and BTC-PERP to real CoinGecko prices (BLOOM-PERP stays synthetic).
+    const _perpPrices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices();
+    for (const [perp, ticker] of [['ETH-PERP', 'ETH'], ['BTC-PERP', 'BTC']]) {
+      if (_perpPrices[ticker] != null) {
+        await pool.query(
+          'UPDATE futures_markets SET mark_price=$1, index_price=$1, updated_at=NOW() WHERE symbol=$2',
+          [_perpPrices[ticker], perp]
+        );
+      }
+    }
     await pool.query(`INSERT INTO futures_price_snapshots(market_id, mark_price) SELECT id, mark_price FROM futures_markets`);
     await pool.query(`DELETE FROM futures_price_snapshots WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY created_at DESC) AS rn FROM futures_price_snapshots) r WHERE rn > 200)`);
     await pool.query(`UPDATE opinion_markets SET status='closed' WHERE is_daily=true AND status='open' AND closes_at <= NOW()`);
@@ -1522,6 +1532,69 @@ app.get('/api/activity', async (req, res) => {
     const activities = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? activities[activities.length - 1].id : null;
     res.json({ activities, nextCursor });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Trade Journal ─────────────────────────────────────────────────────────────
+
+app.get('/api/journal', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM trade_entries WHERE user_id=$1 ORDER BY trade_date DESC, id DESC',
+      [req.user.id]
+    );
+    res.json({ entries: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/journal', async (req, res) => {
+  try {
+    const { asset_type, ticker, direction, quantity, entry_price, trade_date, notes } = req.body;
+    if (!['crypto','stock','etf'].includes(asset_type)) return res.status(400).json({ error: 'Invalid asset_type' });
+    if (!validStr(ticker, 20)) return res.status(400).json({ error: 'Invalid ticker' });
+    if (!['long','short'].includes(direction)) return res.status(400).json({ error: 'Invalid direction' });
+    const qty = parseAmount(quantity);
+    if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
+    const ep = parseAmount(entry_price);
+    if (!ep) return res.status(400).json({ error: 'Invalid entry_price' });
+    const td = trade_date ? new Date(trade_date) : new Date();
+    if (isNaN(td.getTime())) return res.status(400).json({ error: 'Invalid trade_date' });
+    const { rows: [entry] } = await pool.query(
+      `INSERT INTO trade_entries(user_id,asset_type,ticker,direction,quantity,entry_price,trade_date,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.id, asset_type, ticker.toUpperCase().slice(0,20), direction, qty, ep, td, (notes||'').slice(0,500)]
+    );
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/journal/:id', async (req, res) => {
+  try {
+    const { exit_price, notes } = req.body;
+    const ep = exit_price != null ? parseAmount(exit_price) : null;
+    if (exit_price != null && !ep) return res.status(400).json({ error: 'Invalid exit_price' });
+    const { rows: [entry] } = await pool.query(
+      `UPDATE trade_entries
+       SET exit_price = COALESCE($1, exit_price),
+           notes = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE notes END,
+           updated_at = NOW()
+       WHERE id=$3 AND user_id=$4
+       RETURNING *`,
+      [ep, notes !== undefined ? (notes||'').slice(0,500) : null, req.params.id, req.user.id]
+    );
+    if (!entry) return res.status(404).json({ error: 'Not found' });
+    res.json({ entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/journal/:id', async (req, res) => {
+  try {
+    const { rowCount } = await pool.query(
+      'DELETE FROM trade_entries WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3314,6 +3387,25 @@ async function start() {
     ALTER TABLE ico_offerings ADD COLUMN IF NOT EXISTS icon_url TEXT;
   `);
 
+  // trade_entries — personal trade journal (private: individual P&L data).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS trade_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      asset_type VARCHAR(20) NOT NULL,
+      ticker VARCHAR(20) NOT NULL,
+      direction VARCHAR(10) NOT NULL,
+      quantity NUMERIC(20,8) NOT NULL,
+      entry_price NUMERIC(20,6) NOT NULL,
+      exit_price NUMERIC(20,6),
+      trade_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS trade_entries_user_idx ON trade_entries (user_id, trade_date DESC);
+  `);
+
   // funding_payments — per-position funding settlements (Phase 3, private).
   await pool.query(`
     CREATE TABLE IF NOT EXISTS funding_payments (
@@ -3357,6 +3449,7 @@ async function start() {
     COMMENT ON TABLE transactions IS 'staging:private';
     COMMENT ON TABLE social_accounts IS 'staging:private';
     COMMENT ON TABLE zk_verifications IS 'staging:private';
+    COMMENT ON TABLE trade_entries IS 'staging:private';
     COMMENT ON TABLE conversations IS 'staging:private';
     COMMENT ON TABLE conversation_members IS 'staging:private';
     COMMENT ON TABLE messages IS 'staging:private';
@@ -3755,6 +3848,17 @@ async function start() {
       await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
       await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
     }
+
+    // Seed trade journal entries (staging:private table — always empty in prod copy).
+    await pool.query(`
+      INSERT INTO trade_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,notes) VALUES
+        (900001,9001,'crypto','ETH','long',1.5,3200,3450,NOW()-INTERVAL '30 days','Staging demo trade — ETH breakout long, closed for profit'),
+        (900002,9001,'crypto','BTC','long',0.05,64000,NULL,NOW()-INTERVAL '14 days','Staging demo trade — BTC accumulation, still open'),
+        (900003,9004,'crypto','SOL','short',10,155,140,NOW()-INTERVAL '10 days','Staging demo trade — SOL overextended, shorted into resistance'),
+        (900004,9004,'crypto','ETH','short',2,3300,NULL,NOW()-INTERVAL '5 days','Staging demo trade — ETH short, still open'),
+        (900005,9002,'stock','AAPL','long',5,185,178,NOW()-INTERVAL '20 days','Staging demo trade — AAPL earnings play, small loss')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed daily opinion market snapshots
     {
