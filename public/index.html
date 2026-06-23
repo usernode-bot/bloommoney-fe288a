@@ -155,6 +155,7 @@
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="futures">📈 Futures</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
+      <button class="nav-item" data-view="analytics">📈 Analytics</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
@@ -207,6 +208,9 @@
 
       <!-- Trade Journal -->
       <section id="section-journal" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Analytics: Spending Trends -->
+      <section id="section-analytics" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / ico) -->
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -543,6 +547,7 @@ const VIEW_SECTION = {
   trade: 'section-swap', swap: 'section-swap',
   futures: 'section-futures',
   journal: 'section-journal',
+  analytics: 'section-analytics',
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -555,6 +560,7 @@ const VIEW_SECTION = {
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
   home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
+  journal: 'journal', analytics: 'earn',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
   predict: 'predict', markets: 'predict', profile: 'profile',
 };
@@ -593,6 +599,7 @@ async function loadView(view) {
       case 'messages': await renderMessages(sec); break;
       case 'futures': await renderFutures(sec); break;
       case 'journal': await renderJournal(sec); break;
+      case 'analytics': await renderAnalytics(sec); break;
       case 'nfts': await renderNFTs(sec); break;
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
@@ -3060,6 +3067,230 @@ async function renderJournal(sec) {
         if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; }
       }
     };
+  };
+
+  await load();
+}
+
+// ── Analytics: Spending Trends ────────────────────────────────────────────────
+
+async function renderAnalytics(sec) {
+  let startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  let endDate = new Date();
+  const dateRange = '30d';
+
+  function formatDate(d) {
+    return d.toISOString().split('T')[0];
+  }
+
+  function drawChart(data, container) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 400 200');
+    svg.setAttribute('class', 'w-full h-48');
+
+    if (!data || data.length === 0) {
+      svg.innerHTML = '<text x="200" y="100" text-anchor="middle" fill="#8b95ab" font-size="14">No data available</text>';
+      container.appendChild(svg);
+      return;
+    }
+
+    const maxValue = Math.max(...data.map(d => d.outflow + d.inflow), 1);
+    const chartHeight = 150;
+    const chartWidth = 380;
+    const pointSpacing = chartWidth / (data.length - 1 || 1);
+
+    svg.innerHTML = '<rect width="400" height="200" fill="transparent"/>';
+
+    // Draw grid lines
+    for (let i = 0; i <= 5; i++) {
+      const y = 20 + (i * chartHeight / 5);
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', '10');
+      line.setAttribute('y1', y);
+      line.setAttribute('x2', '390');
+      line.setAttribute('y2', y);
+      line.setAttribute('stroke', 'rgba(255,255,255,0.05)');
+      line.setAttribute('stroke-width', '1');
+      svg.appendChild(line);
+    }
+
+    // Draw data points and line
+    let pathStr = '';
+    data.forEach((d, i) => {
+      const x = 10 + (i * pointSpacing);
+      const value = d.outflow + d.inflow;
+      const y = 170 - ((value / maxValue) * chartHeight);
+
+      if (i === 0) pathStr = `M${x},${y}`;
+      else pathStr += ` L${x},${y}`;
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', x);
+      circle.setAttribute('cy', y);
+      circle.setAttribute('r', '3');
+      circle.setAttribute('fill', '#7c5cfc');
+      svg.appendChild(circle);
+    });
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathStr);
+    path.setAttribute('stroke', '#7c5cfc');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('fill', 'none');
+    svg.appendChild(path);
+
+    container.appendChild(svg);
+  }
+
+  async function load() {
+    sec.innerHTML = spin();
+    try {
+      const data = await api('GET', `/api/analytics/spending?start=${formatDate(startDate)}&end=${formatDate(endDate)}`);
+
+      const summary = data.summary;
+      const byType = data.by_type || [];
+      const daily = data.daily || [];
+      const recent = data.recent || [];
+
+      sec.innerHTML = `
+        <h2 class="text-2xl font-bold mb-6">📈 Spending Analytics</h2>
+
+        <!-- Date Range Selector -->
+        <div class="flex gap-2 mb-6">
+          <button class="pill-inactive" onclick="window.__analyticsSetRange('7d')">Last 7 Days</button>
+          <button class="pill-active" onclick="window.__analyticsSetRange('30d')">Last 30 Days</button>
+          <button class="pill-inactive" onclick="window.__analyticsSetRange('90d')">Last 90 Days</button>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div class="card text-center py-4">
+            <div class="text-[#8b95ab] text-xs mb-2">Total Outflow</div>
+            <div class="text-xl font-bold text-red-400">-$${fmtUSD(summary.total_outflow)}</div>
+          </div>
+          <div class="card text-center py-4">
+            <div class="text-[#8b95ab] text-xs mb-2">Total Inflow</div>
+            <div class="text-xl font-bold text-emerald-400">+$${fmtUSD(summary.total_inflow)}</div>
+          </div>
+          <div class="card text-center py-4">
+            <div class="text-[#8b95ab] text-xs mb-2">Net Change</div>
+            <div class="text-xl font-bold ${summary.net_change >= 0 ? 'text-emerald-400' : 'text-red-400'}">${summary.net_change >= 0 ? '+' : '-'}$${fmtUSD(Math.abs(summary.net_change))}</div>
+          </div>
+          <div class="card text-center py-4">
+            <div class="text-[#8b95ab] text-xs mb-2">Transactions</div>
+            <div class="text-xl font-bold">${summary.transaction_count}</div>
+          </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid md:grid-cols-2 gap-6 mb-6">
+          <!-- Spending Over Time -->
+          <div class="card">
+            <h3 class="text-lg font-semibold mb-4">Spending Over Time</h3>
+            <div id="analytics-time-chart"></div>
+          </div>
+
+          <!-- Spending by Type -->
+          <div class="card">
+            <h3 class="text-lg font-semibold mb-4">Spending by Type</h3>
+            <div id="analytics-type-chart"></div>
+          </div>
+        </div>
+
+        <!-- Recent Transactions -->
+        <div class="card">
+          <h3 class="text-lg font-semibold mb-4">Recent Transactions</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-[rgba(255,255,255,0.06)]">
+                  <th class="text-left py-2 px-2 font-semibold text-[#8b95ab]">Type</th>
+                  <th class="text-left py-2 px-2 font-semibold text-[#8b95ab]">Symbol</th>
+                  <th class="text-right py-2 px-2 font-semibold text-[#8b95ab]">Amount</th>
+                  <th class="text-left py-2 px-2 font-semibold text-[#8b95ab]">Description</th>
+                  <th class="text-left py-2 px-2 font-semibold text-[#8b95ab]">Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${recent.length === 0
+                  ? '<tr><td colspan="5" class="text-center py-4 text-[#8b95ab]">No transactions in this period</td></tr>'
+                  : recent.map(tx => {
+                      const amt = Number(tx.amount);
+                      const isNegative = amt < 0;
+                      return `<tr class="border-b border-[rgba(255,255,255,0.03)]">
+                        <td class="py-3 px-2"><span class="text-xs font-semibold px-2 py-1 rounded-full bg-[#7c5cfc]/20 text-[#7c5cfc]">${esc(tx.type)}</span></td>
+                        <td class="py-3 px-2 font-mono text-[#8b95ab]">${esc(tx.token_symbol)}</td>
+                        <td class="py-3 px-2 text-right font-mono ${isNegative ? 'text-red-400' : 'text-emerald-400'}">${isNegative ? '-' : '+'}$${fmtUSD(Math.abs(amt))}</td>
+                        <td class="py-3 px-2 text-[#8b95ab] truncate">${esc(tx.description)}</td>
+                        <td class="py-3 px-2 text-[#8b95ab] text-xs">${tsAgo(tx.created_at)}</td>
+                      </tr>`;
+                    }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      // Draw charts
+      drawChart(daily, document.getElementById('analytics-time-chart'));
+
+      // Draw type breakdown bar chart
+      const typeChart = document.getElementById('analytics-type-chart');
+      if (byType.length > 0) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 300 ' + (byType.length * 30 + 20));
+        svg.setAttribute('class', 'w-full');
+
+        const colors = ['#7c5cfc', '#4e9af1', '#26a69a', '#ef5350', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6'];
+
+        byType.forEach((item, idx) => {
+          const y = 20 + (idx * 30);
+          const barWidth = (item.percentage / 100) * 200;
+
+          // Bar
+          const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          rect.setAttribute('x', '50');
+          rect.setAttribute('y', y);
+          rect.setAttribute('width', barWidth);
+          rect.setAttribute('height', '20');
+          rect.setAttribute('fill', colors[idx % colors.length]);
+          rect.setAttribute('opacity', '0.7');
+          svg.appendChild(rect);
+
+          // Label
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', '5');
+          text.setAttribute('y', y + 15);
+          text.setAttribute('font-size', '12');
+          text.setAttribute('fill', '#8b95ab');
+          text.textContent = item.type.substring(0, 10);
+          svg.appendChild(text);
+
+          // Percentage
+          const pctText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          pctText.setAttribute('x', barWidth + 55);
+          pctText.setAttribute('y', y + 15);
+          pctText.setAttribute('font-size', '12');
+          pctText.setAttribute('fill', '#e8eaf0');
+          pctText.setAttribute('font-weight', 'bold');
+          pctText.textContent = item.percentage + '%';
+          svg.appendChild(pctText);
+        });
+
+        typeChart.appendChild(svg);
+      } else {
+        typeChart.innerHTML = '<div class="text-center text-[#8b95ab] py-4">No spending data</div>';
+      }
+    } catch (e) {
+      sec.innerHTML = err(e.message);
+    }
+  }
+
+  window.__analyticsSetRange = (range) => {
+    if (range === '7d') startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    else if (range === '30d') startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    else if (range === '90d') startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    load();
   };
 
   await load();

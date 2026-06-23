@@ -873,6 +873,109 @@ app.get('/api/price-history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Analytics: Spending Trends ───────────────────────────────────────────────
+
+app.get('/api/analytics/spending', async (req, res) => {
+  try {
+    const endDate = req.query.end ? new Date(req.query.end) : new Date();
+    const startDate = req.query.start
+      ? new Date(req.query.start)
+      : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const typeFilter = req.query.type
+      ? req.query.type.split(',').map(t => t.trim()).filter(Boolean)
+      : null;
+
+    const params = [req.user.id, startDate, endDate];
+    const typeClause = typeFilter && typeFilter.length
+      ? `AND type = ANY($${params.push(typeFilter)})`
+      : '';
+
+    const { rows } = await pool.query(
+      `SELECT id, type, token_symbol, amount::text AS amount, description, created_at
+       FROM transactions
+       WHERE user_id=$1 AND created_at >= $2 AND created_at < $3 ${typeClause}
+       ORDER BY created_at DESC`,
+      params
+    );
+
+    // Calculate summary metrics
+    let totalOutflow = 0, totalInflow = 0;
+    const byType = {};
+    const byDate = {};
+
+    for (const tx of rows) {
+      const amt = Number(tx.amount);
+      if (amt < 0) totalOutflow += Math.abs(amt);
+      if (amt > 0) totalInflow += amt;
+
+      if (!byType[tx.type]) {
+        byType[tx.type] = { count: 0, total: 0 };
+      }
+      byType[tx.type].count += 1;
+      byType[tx.type].total += amt;
+
+      const dateStr = new Date(tx.created_at).toISOString().split('T')[0];
+      if (!byDate[dateStr]) {
+        byDate[dateStr] = { outflow: 0, inflow: 0, count: 0 };
+      }
+      byDate[dateStr].count += 1;
+      if (amt < 0) byDate[dateStr].outflow += Math.abs(amt);
+      if (amt > 0) byDate[dateStr].inflow += amt;
+    }
+
+    // Format by_type array
+    const totalAmount = totalOutflow + totalInflow;
+    const byTypeArray = Object.entries(byType)
+      .map(([type, data]) => ({
+        type,
+        count: data.count,
+        total_amount: data.total,
+        percentage: totalAmount > 0 ? Math.round((Math.abs(data.total) / totalAmount) * 100) : 0,
+      }))
+      .sort((a, b) => Math.abs(b.total_amount) - Math.abs(a.total_amount));
+
+    // Format daily array
+    const dailyArray = Object.entries(byDate)
+      .map(([date, data]) => ({
+        date,
+        outflow: data.outflow,
+        inflow: data.inflow,
+        transaction_count: data.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Recent transactions (last 20)
+    const recent = rows.slice(0, 20).map(tx => ({
+      id: tx.id,
+      type: tx.type,
+      token_symbol: tx.token_symbol,
+      amount: tx.amount,
+      description: tx.description,
+      created_at: tx.created_at.toISOString(),
+    }));
+
+    const dayCount = Math.max(1, Math.floor((endDate - startDate) / (24 * 60 * 60 * 1000)));
+
+    res.json({
+      period: {
+        start: startDate.toISOString().split('T')[0],
+        end: endDate.toISOString().split('T')[0],
+        days: dayCount,
+      },
+      summary: {
+        total_outflow: totalOutflow,
+        total_inflow: totalInflow,
+        net_change: totalInflow - totalOutflow,
+        transaction_count: rows.length,
+      },
+      by_type: byTypeArray,
+      daily: dailyArray,
+      recent,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Public Portfolio (explorer-api) ──────────────────────────────────────────
 
 app.get('/explorer-api/portfolio/:username', async (req, res) => {
@@ -3976,6 +4079,7 @@ async function start() {
       description TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE INDEX IF NOT EXISTS transactions_user_created_idx ON transactions (user_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS investment_holdings (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -4563,24 +4667,27 @@ async function start() {
       );
       if (!exist) {
         await pool.query(`
-          INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
-            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
-            (900202, 9001, 'swap',         'USDC',   -75000000, 'Staging demo swap — Swap USDC to ETH'),
-            (900203, 9001, 'swap',         'BLOOM',  -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
-            (900204, 9001, 'swap',         'USDC',  -200000000, 'Staging demo swap — Swap USDC to BTC'),
-            (900205, 9001, 'swap',         'ETH',      -500000, 'Staging demo swap — Swap ETH to USDC'),
-            (900206, 9004, 'futures_open', 'USDC',  -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
-            (900207, 9004, 'futures_pnl',  'USDC',   72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
-            (900208, 9004, 'futures_open', 'USDC',  -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
-            (900209, 9003, 'market_trade', 'USDC',   -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
-            (900210, 9003, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
-            (900211, 9003, 'ico_invest',   'USDC',  -100000000, 'Staging demo ICO — Invested in SDC ICO'),
-            (900212, 9001, 'tip',          'BLOOM',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002'),
-            (900213, 9002, 'tip',          'BLOOM',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003'),
-            (900214, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
-            (900215, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
-            (900216, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures open gas fee'),
-            (900217, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures close gas fee')
+          INSERT INTO transactions(id, user_id, type, token_symbol, amount, description, created_at) VALUES
+            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to BLOOM', NOW()-INTERVAL '30 days'),
+            (900202, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee', NOW()-INTERVAL '30 days'),
+            (900203, 9001, 'swap',         'USDC',   -75000000, 'Staging demo swap — Swap USDC to ETH', NOW()-INTERVAL '26 days'),
+            (900204, 9001, 'nft_buy',      'USDC',   -50000000, 'Staging demo NFT — Buy Genesis #2', NOW()-INTERVAL '24 days'),
+            (900205, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee', NOW()-INTERVAL '24 days'),
+            (900206, 9004, 'futures_open', 'USDC',  -480000000, 'Staging demo futures — Open ETH-PERP Long 5x', NOW()-INTERVAL '20 days'),
+            (900207, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures open gas fee', NOW()-INTERVAL '20 days'),
+            (900208, 9003, 'market_trade', 'USDC',   -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k', NOW()-INTERVAL '18 days'),
+            (900209, 9003, 'swap',         'USDC',  -200000000, 'Staging demo swap — Swap USDC to BTC', NOW()-INTERVAL '15 days'),
+            (900210, 9003, 'ico_invest',   'USDC',  -100000000, 'Staging demo ICO — Invested in SDC ICO', NOW()-INTERVAL '12 days'),
+            (900211, 9001, 'tip',          'BLOOM',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002', NOW()-INTERVAL '10 days'),
+            (900212, 9002, 'nft_buy',      'USDC',   -75000000, 'Staging demo NFT — Buy Rare Bloom', NOW()-INTERVAL '8 days'),
+            (900213, 9002, 'swap',         'USDC',  -150000000, 'Staging demo swap — Swap USDC to BLOOM', NOW()-INTERVAL '6 days'),
+            (900214, 9001, 'futures_open', 'USDC',  -340000000, 'Staging demo futures — Open BTC-PERP Short 10x', NOW()-INTERVAL '4 days'),
+            (900215, 9004, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee', NOW()-INTERVAL '3 days'),
+            (900216, 9001, 'tip',          'BLOOM',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003', NOW()-INTERVAL '2 days'),
+            (900217, 9005, 'swap',         'USDC',   -60000000, 'Staging demo swap — Swap USDC to SOL', NOW()-INTERVAL '1 day'),
+            (900218, 9001, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2', NOW()-INTERVAL '1 day'),
+            (900219, 9004, 'futures_pnl',  'USDC',   72000000, 'Staging demo futures — Close ETH-PERP +15% PnL', NOW()-INTERVAL '1 day'),
+            (900220, 9003, 'nft_buy',      'USDC',   -40000000, 'Staging demo NFT — Buy Moon Mission', NOW())
           ON CONFLICT(id) DO NOTHING
         `);
       }
