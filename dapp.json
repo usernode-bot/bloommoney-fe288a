@@ -194,6 +194,8 @@
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
     { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" },
+    { "name": "Vault nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"vault\"]" },
+    { "name": "Vault API returns seeded vaults", "path": "/api/defi/vaults", "expectText": "BLOOM-USDC" },
     { "name": "News tab button renders in feed", "path": "/?demo=1", "expectText": "News 📰" },
     { "name": "News feed API returns bot posts", "path": "/api/feed?tab=news&limit=10", "expectSelector": "body" },
     { "name": "Futures leverage presets render", "path": "/?demo=1", "expectSelector": "#fut-lev-presets" },

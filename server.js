@@ -1524,6 +1524,15 @@ app.delete('/api/defi/liquidity/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── DeFi: Vaults ──────────────────────────────────────────────────────────────
+
+app.get('/api/defi/vaults', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM defi_vaults ORDER BY apy_bps DESC');
+    res.json({ vaults: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DeFi: ICO ─────────────────────────────────────────────────────────────────
 
 app.get('/api/ico', async (req, res) => {
@@ -4007,6 +4016,15 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       removed_at TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS defi_vaults (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      token_pair VARCHAR(40) NOT NULL,
+      apy_bps INTEGER NOT NULL DEFAULT 0,
+      tvl_usd BIGINT NOT NULL DEFAULT 0,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS ico_offerings (
       id SERIAL PRIMARY KEY,
       token_name VARCHAR(100) NOT NULL,
@@ -4623,6 +4641,15 @@ async function start() {
         (9005,'Staging ChainSpark','CSP','Staging demo ICO — Play-to-earn gaming platform with onchain asset ownership.',30000,50000000000000,1500000000000,0,0,'upcoming',NOW()+INTERVAL '14 days',NOW()+INTERVAL '28 days',9006),
         (9006,'Staging PixelDAO','PXD','Staging demo ICO — NFT governance DAO with fractionalized art vaults.',250000,4000000000000,1000000000000,1000000000000,4000000000000,'sold_out',NOW()-INTERVAL '60 days',NOW()-INTERVAL '30 days',9006),
         (9007,'Staging ZephyrNet','ZPN','Staging demo ICO — Layer 2 scaling solution for microtransactions.',100000,40000000000000,4000000000000,2700000000000,27000000000000,'ended',NOW()-INTERVAL '90 days',NOW()-INTERVAL '45 days',9006)
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed Vault listings
+    await pool.query(`
+      INSERT INTO defi_vaults(id,name,token_pair,apy_bps,tvl_usd,description) VALUES
+        (9001,'Staging BLOOM-USDC Auto Vault','BLOOM/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
+        (9002,'Staging ETH Yield Vault','ETH/USDC',820,1200000,'Staging demo vault — Automated ETH yield strategy'),
+        (9003,'Staging Stable Vault','USDC/DAI',510,500000,'Staging demo vault — Low-risk stablecoin vault')
       ON CONFLICT(id) DO NOTHING
     `);
 
