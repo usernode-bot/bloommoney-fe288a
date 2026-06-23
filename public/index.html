@@ -2848,11 +2848,19 @@ async function renderLiquidity(sec) {
   const POOL_META = {
     BLOOM_USDC: { tokens: ['BLOOM', 'USDC'], label: 'BLOOM / USDC' },
     ETH_USDC:   { tokens: ['ETH',   'USDC'], label: 'ETH / USDC'   },
+    ETH_BLOOM:  { tokens: ['ETH',   'BLOOM'],label: 'ETH / BLOOM'  },
+    BTC_USDC:   { tokens: ['BTC',   'USDC'], label: 'BTC / USDC'   },
+    SOL_ETH:    { tokens: ['SOL',   'ETH'],  label: 'SOL / ETH'    },
+    BTC_BLOOM:  { tokens: ['BTC',   'BLOOM'],label: 'BTC / BLOOM'  },
+    SOL_USDC:   { tokens: ['SOL',   'USDC'], label: 'SOL / USDC'   },
+    ETH_BTC:    { tokens: ['ETH',   'BTC'],  label: 'ETH / BTC'    },
   };
   const TC = {
     BLOOM: { bg: 'rgba(167,139,250,0.25)', text: '#a78bfa', sym: '✿' },
     ETH:   { bg: 'rgba(56,189,248,0.25)',  text: '#38bdf8', sym: 'Ξ' },
     USDC:  { bg: 'rgba(59,130,246,0.25)',  text: '#60a5fa', sym: '$' },
+    BTC:   { bg: 'rgba(251,191,36,0.25)',  text: '#fbbf24', sym: '₿' },
+    SOL:   { bg: 'rgba(153,69,255,0.25)',  text: '#9945ff', sym: '◎' },
   };
 
   let selPool = null;
