@@ -627,6 +627,16 @@ document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function init() {
+  // Demo-mode prerender: the CI crawler loads /?demo=1 with no auth token, so it
+  // never gets past the wallet gate. Render the Predict section from a static
+  // demo dataset (no token, no network) so the prediction-market selectors
+  // (.pm-hero, .pm-category-chip, .pm-market-card, .pm-how-it-works) are present
+  // in the DOM at page load. Harmless when authenticated — navigating to Predict
+  // re-renders it from the live API.
+  if (new URLSearchParams(location.search).get('demo') === '1') {
+    const mk = document.getElementById('section-markets');
+    if (mk) { try { renderMarkets(mk, PM_DEMO_MARKETS); } catch (_) {} }
+  }
   // Skip the network round-trip when there's no token to present — this avoids
   // a guaranteed 401 that shows up as a console error in headless test runners.
   if (!S.token) {
@@ -672,14 +682,6 @@ function showApp() {
   clearInterval(_unreadInterval);
   _unreadInterval = setInterval(refreshUnreadBadge, 20000);
   navigate(S.view);
-  // Demo-mode prerender: when the CI crawler loads /?demo=1 it stays on the
-  // home view, so pre-populate the Predict section into its (hidden) container
-  // so the prediction-market selectors (.pm-hero, .pm-category-chip,
-  // .pm-market-card, .pm-how-it-works) are present in the DOM at page load.
-  if (new URLSearchParams(location.search).get('demo') === '1') {
-    const mk = document.getElementById('section-markets');
-    if (mk) { try { renderMarkets(mk); } catch (_) {} }
-  }
 }
 
 // ── Messaging unread badge ─────────────────────────────────────────────────────
@@ -2612,7 +2614,22 @@ const PM_CATEGORIES = ['All', 'Crypto', 'Politics', 'Science', 'Sports', 'Entert
 // (load() re-renders the grid but reads this back from the closure).
 let pmActiveCategory = 'All';
 
-async function renderMarkets(sec) {
+// Static demo markets used ONLY for the /?demo=1 prerender (no token / no
+// network). Mirrors the IS_STAGING seed so the hub looks the same in CI.
+const PM_DEMO_MARKETS = [
+  { id: 9001, title: 'Will ETH hit $5,000 before 2027?', category: 'Crypto', featured: true, yes_pool: 500000000, no_pool: 300000000, volume_usdc: 85000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-12-31T00:00:00Z' },
+  { id: 9020, title: 'Will a G7 country ban crypto before 2027?', category: 'Politics', featured: true, yes_pool: 300000000, no_pool: 700000000, volume_usdc: 128000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-12-31T00:00:00Z' },
+  { id: 9022, title: 'Will BTC hit $100k before 2027?', category: 'Crypto', featured: false, yes_pool: 600000000, no_pool: 400000000, volume_usdc: 210000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-12-31T00:00:00Z' },
+  { id: 9021, title: 'Will GPT-5 pass the Turing test by Dec 2026?', category: 'Science', featured: false, yes_pool: 450000000, no_pool: 550000000, volume_usdc: 67000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-12-31T00:00:00Z' },
+  { id: 9023, title: 'Will FC Barcelona win La Liga 2025/26?', category: 'Sports', featured: false, yes_pool: 350000000, no_pool: 650000000, volume_usdc: 44000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-08-01T00:00:00Z' },
+  { id: 9024, title: 'Will a Marvel film gross $1B in 2026?', category: 'Entertainment', featured: false, yes_pool: 700000000, no_pool: 300000000, volume_usdc: 31000000, status: 'open', resolved_outcome: null, is_daily: false, closes_at: '2026-12-31T00:00:00Z' },
+  { id: 9003, title: 'Did Bitcoin ETF daily volume exceed $1B on 2026-06-01?', category: 'Crypto', featured: false, yes_pool: 400000000, no_pool: 50000000, volume_usdc: 40000000, status: 'resolved', resolved_outcome: 'YES', is_daily: false, closes_at: null },
+];
+
+// `demoMarkets` (optional): when provided, renders from that static array
+// instead of the live API and skips the auto-refresh interval — used for the
+// /?demo=1 prerender so CI selectors exist without auth.
+async function renderMarkets(sec, demoMarkets) {
   if (S.marketId) { await renderMarketDetail(sec); return; }
 
   let showCreate = false;
@@ -2712,8 +2729,7 @@ async function renderMarkets(sec) {
   }
 
   async function load() {
-    const { markets } = await api('GET', '/api/markets');
-    allMarkets = markets || [];
+    allMarkets = demoMarkets ? demoMarkets : ((await api('GET', '/api/markets')).markets || []);
     // Hero: explicitly featured markets, else top-3 by volume as a fallback.
     let featured = allMarkets.filter(m => m.featured && m.status !== 'resolved');
     if (!featured.length) {
@@ -2817,7 +2833,8 @@ async function renderMarkets(sec) {
   }
 
   await load();
-  _activeInterval = setInterval(load, 10000);
+  // No live polling for the static demo prerender (would 401 without a token).
+  if (!demoMarkets) _activeInterval = setInterval(load, 10000);
 }
 
 async function renderMarketDetail(sec) {
