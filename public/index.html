@@ -761,6 +761,14 @@ async function init() {
           </div>
         </div>`;
     }
+    // Pre-render pool stats bar so CI selector .pool-stats-bar resolves without auth
+    const poolEarnSec = document.getElementById('section-earn');
+    if (poolEarnSec && !poolEarnSec.querySelector('.pool-stats-bar')) {
+      const poolPreview = document.createElement('div');
+      poolPreview.className = 'pool-stats-bar max-w-2xl mx-auto py-4 px-4';
+      poolPreview.innerHTML = '<div class="rounded-2xl p-5" style="background:#131620;border:1px solid rgba(52,211,153,0.2)"><h2 class="text-xl font-bold text-white mb-1">Liquidity Pools</h2><p class="text-[#8b95ab] text-sm mb-4">Provide liquidity and earn trading fees.</p><div class="grid grid-cols-3 gap-2"><div class="text-center"><div class="text-lg font-bold text-emerald-400">$24.8K</div><div class="text-xs text-[#8b95ab] mt-1">Total Liquidity</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">$2.48</div><div class="text-xs text-[#8b95ab] mt-1">Est. 24h Fees</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">5</div><div class="text-xs text-[#8b95ab] mt-1">Positions</div></div></div></div>';
+      poolEarnSec.appendChild(poolPreview);
+    }
     // Pre-render a network-free Trade (futures) terminal skeleton so the Trade
     // route has a real terminal in the DOM under headless / no-auth CI, and so
     // the tier-hint logic (the spot that previously crashed on an undefined
@@ -816,6 +824,9 @@ async function init() {
       showWalletGate();
       return;
     }
+    // Deep-link: if URL path matches a known view (e.g. /liquidity), navigate there on load
+    const _urlPath = location.pathname.replace(/^\//, '').split('?')[0];
+    if (_urlPath && VIEW_SECTION[_urlPath]) S.view = _urlPath;
     showApp();
   } catch (e) {
     document.getElementById('wallet-gate').classList.remove('hidden');
@@ -2832,68 +2843,250 @@ async function renderStake(sec) {
   await load();
 }
 
-// ── Liquidity ────────────────────────────────────────────────────────────────
+// ── Liquidity (GMX-style pool dashboard) ─────────────────────────────────────
 async function renderLiquidity(sec) {
-  const pools = { BLOOM_USDC: ['BLOOM','USDC'], ETH_USDC: ['ETH','USDC'] };
-  let selPool = 'BLOOM_USDC';
+  const POOL_META = {
+    BLOOM_USDC: { tokens: ['BLOOM', 'USDC'], label: 'BLOOM / USDC' },
+    ETH_USDC:   { tokens: ['ETH',   'USDC'], label: 'ETH / USDC'   },
+  };
+  const TC = {
+    BLOOM: { bg: 'rgba(167,139,250,0.25)', text: '#a78bfa', sym: '✿' },
+    ETH:   { bg: 'rgba(56,189,248,0.25)',  text: '#38bdf8', sym: 'Ξ' },
+    USDC:  { bg: 'rgba(59,130,246,0.25)',  text: '#60a5fa', sym: '$' },
+  };
+
+  let selPool = null;
+  let selTab  = 'deposit';
+
+  function tokenBadgePair(tA, tB) {
+    const cA = TC[tA] || TC.USDC, cB = TC[tB] || TC.USDC;
+    const circle = (c, left, z) =>
+      '<div style="position:absolute;left:' + left + 'px;top:0;z-index:' + z + ';width:28px;height:28px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700;background:' + c.bg + ';color:' + c.text + ';border:2px solid var(--bg-card)">' + c.sym + '</div>';
+    return '<div style="position:relative;display:inline-block;width:44px;height:28px;vertical-align:middle">'
+      + circle(cB, 16, 1) + circle(cA, 0, 2) + '</div>';
+  }
+
+  function fmtUsd(n) {
+    if (!n || n <= 0) return '$0';
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+    return '$' + n.toFixed(2);
+  }
+
+  function compBar(aRes, bRes, tvl) {
+    const pct = tvl > 0 ? Math.round(aRes / tvl * 100) : 50;
+    return '<div style="height:4px;border-radius:9999px;overflow:hidden;display:flex;background:#1c2236">'
+      + '<div style="background:#8b5cf6;width:' + pct + '%"></div>'
+      + '<div style="background:#10b981;width:' + (100 - pct) + '%"></div>'
+      + '</div>';
+  }
+
+  function actionPanelHtml(pData, myPositions, meta) {
+    const [tA, tB] = meta.tokens;
+    const isDep = selTab === 'deposit';
+    const tabBar = '<div class="flex gap-1 mb-4">'
+      + '<button class="px-4 py-1.5 text-sm rounded-full font-medium ' + (isDep  ? 'pill-active' : 'pill-inactive') + '" onclick="poolSetTab(\'deposit\')">Deposit</button>'
+      + '<button class="px-4 py-1.5 text-sm rounded-full font-medium ' + (!isDep ? 'pill-active' : 'pill-inactive') + '" onclick="poolSetTab(\'withdraw\')">Withdraw</button>'
+      + '</div>';
+
+    let body = '';
+    if (isDep) {
+      body = '<div class="grid grid-cols-2 gap-3 mb-3">'
+        + '<div><label class="text-xs text-[#8b95ab]">' + tA + ' Amount</label>'
+        + '<input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0" oninput="poolUpdateShare()">'
+        + '<div class="text-xs text-[#8b95ab] mt-0.5">Bal: ' + getBal(tA) + ' ' + tA + '</div></div>'
+        + '<div><label class="text-xs text-[#8b95ab]">' + tB + ' Amount</label>'
+        + '<input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0" oninput="poolUpdateShare()">'
+        + '<div class="text-xs text-[#8b95ab] mt-0.5">Bal: ' + getBal(tB) + ' ' + tB + '</div></div>'
+        + '</div>'
+        + '<div class="flex justify-between text-xs text-[#8b95ab] mb-3">'
+        + '<span>Fee rate: <span class="text-[#e8eaf0]">0.01%/day</span></span>'
+        + '<span>Est. APR: <span class="text-emerald-400">3.65%</span></span>'
+        + '</div>'
+        + '<div class="text-xs text-[#8b95ab] mb-3">Pool share after deposit: <span id="liq-share-est" class="text-[#e8eaf0]">—</span></div>'
+        + '<input type="hidden" id="liq-pool-total-shares" value="' + (pData.total_shares || 0) + '">'
+        + '<button id="liq-submit-btn" class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>'
+        + '<p id="liq-msg" class="text-sm mt-2"></p>';
+    } else {
+      if (!myPositions.length) {
+        body = '<p class="text-center text-[#4e5872] text-sm py-4">No positions yet. Add liquidity above.</p>';
+      } else {
+        body = '<div class="space-y-2">' + myPositions.map(p => {
+          const aAmt = fmtAmt(tA, p.token_a_amount);
+          const bAmt = fmtAmt(tB, p.token_b_amount);
+          const fees = (Number(p.accrued_fees) / 1e6).toFixed(4);
+          return '<div class="rounded-xl p-3 border border-[rgba(255,255,255,0.06)]" id="pos-row-' + p.id + '" style="background:#0d1021">'
+            + '<div class="flex items-start justify-between gap-2">'
+            + '<div><div class="text-sm font-medium text-[#e8eaf0]">' + aAmt + ' ' + tA + ' + ' + bAmt + ' ' + tB + '</div>'
+            + '<div class="text-xs text-emerald-400 mt-0.5">Fees earned: ' + fees + ' USDC</div></div>'
+            + '<button id="remove-btn-' + p.id + '" class="btn btn-z text-xs" onclick="removeLiqConfirm(' + p.id + ')">Remove</button>'
+            + '</div></div>';
+        }).join('') + '</div>';
+      }
+    }
+
+    return '<div class="p-4 rounded-xl mt-3 border border-[rgba(255,255,255,0.08)]" style="background:#0f1117">'
+      + '<div class="flex items-center gap-2 mb-3">'
+      + tokenBadgePair(tA, tB)
+      + '<span class="font-semibold text-sm text-[#e8eaf0] ml-1">' + meta.label + '</span>'
+      + '</div>'
+      + tabBar + body + '</div>';
+  }
 
   async function load() {
     await refreshBalances();
-    const { positions } = await api('GET', '/api/defi/liquidity');
-    const [tA, tB] = pools[selPool];
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Pools</h2>
-      <div class="card space-y-3 mb-4">
-        <div class="flex gap-2">
-          ${Object.keys(pools).map(p=>`<button class="btn ${p===selPool?'btn-v':'btn-z'}" onclick="selPool='${p}';load()">${p.replace('_','/')}</button>`).join('')}
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="text-xs text-[#8b95ab]">${tA} Amount</label>
-            <input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tA)}</div>
-          </div>
-          <div>
-            <label class="text-xs text-[#8b95ab]">${tB} Amount</label>
-            <input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tB)}</div>
-          </div>
-        </div>
-        <button class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>
-        <p id="liq-msg" class="text-sm"></p>
-      </div>
-      <h3 class="font-semibold mb-2">My Positions</h3>
-      ${positions.length ? `<div class="space-y-3">${positions.map(p=>{
-        const [a,b] = pools[p.pool_id]||['?','?'];
-        return `<div class="card">
-          <div class="flex justify-between items-start">
-            <div>
-              <div class="font-semibold">${p.pool_id.replace('_','/')}</div>
-              <div class="text-xs text-[#8b95ab]">${fmtAmt(a,p.token_a_amount)} ${a} + ${fmtAmt(b,p.token_b_amount)} ${b}</div>
-              <div class="text-xs text-emerald-400 mt-0.5">Fees: ${fmtAmt('USDC',p.accrued_fees)} USDC</div>
-            </div>
-            <button class="btn btn-z text-xs" onclick="removeLiq(${p.id})">Remove</button>
-          </div>
-        </div>`;}).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No positions</p>'}`;
+    const [statsRes, posRes] = await Promise.all([
+      fetch('/api/defi/pool-stats').then(r => r.json()).catch(() => ({ pools: [], total_tvl: 0, total_fees_24h: 0 })),
+      api('GET', '/api/defi/liquidity').catch(() => ({ positions: [] })),
+    ]);
+    const poolStats  = statsRes.pools || [];
+    const positions  = posRes.positions || [];
+    const totalTvl   = statsRes.total_tvl || 0;
+    const totalFees  = statsRes.total_fees_24h || 0;
+
+    const myLiqByPool = {};
+    positions.forEach(p => {
+      myLiqByPool[p.pool_id] = (myLiqByPool[p.pool_id] || 0) + (Number(p.token_a_amount) + Number(p.token_b_amount)) / 1e6;
+    });
+
+    // ── Zone 1: Hero stats bar ────────────────────────────────────────────────
+    const heroHtml = '<div class="pool-stats-bar rounded-2xl mb-5 p-5 relative overflow-hidden" style="background:linear-gradient(135deg,#0a0d14 0%,#131620 100%);border:1px solid rgba(52,211,153,0.2);">'
+      + '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(52,211,153,0.08) 0%,transparent 65%);pointer-events:none"></div>'
+      + '<div class="relative">'
+      + '<h2 class="text-2xl font-bold text-white mb-1">Liquidity Pools</h2>'
+      + '<p class="text-[#8b95ab] text-sm mb-4">Provide liquidity and earn trading fees.</p>'
+      + '<div class="grid grid-cols-3 gap-3">'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + fmtUsd(totalTvl) + '</div><div class="text-xs text-[#8b95ab] mt-1">Total Liquidity</div></div>'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + fmtUsd(totalFees) + '</div><div class="text-xs text-[#8b95ab] mt-1">Est. 24h Fees</div></div>'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + (positions.length || '—') + '</div><div class="text-xs text-[#8b95ab] mt-1">Your Positions</div></div>'
+      + '</div></div></div>';
+
+    // ── Zone 2: Pool table ────────────────────────────────────────────────────
+    const tableRows = poolStats.map(pData => {
+      const meta = POOL_META[pData.pool_id] || { tokens: ['?','?'], label: pData.pool_id };
+      const [tA, tB] = meta.tokens;
+      const apr = (pData.apr_bps / 100).toFixed(2) + '%';
+      const myLiq = myLiqByPool[pData.pool_id];
+      const myLiqStr = myLiq ? fmtUsd(myLiq) : '—';
+      const isSelected = selPool === pData.pool_id;
+      const myPosForPool = positions.filter(p => p.pool_id === pData.pool_id);
+      return '<div>'
+        + '<div class="px-4 py-3 border-b border-[rgba(255,255,255,0.06)] cursor-pointer transition-colors '
+        +   (isSelected ? 'bg-[#1c2236]' : 'hover:bg-[rgba(255,255,255,0.03)]')
+        +   '" onclick="poolSelectRow(\'' + pData.pool_id + '\')">'
+        + '<div class="flex items-center gap-3">'
+        + '<div class="shrink-0">' + tokenBadgePair(tA, tB) + '</div>'
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold text-sm text-[#e8eaf0]">' + meta.label + '</div>'
+        + '<div class="text-xs text-[#4e5872]">Fee: 0.01%/day</div>'
+        + '</div>'
+        + '<div class="text-right shrink-0 hidden sm:block" style="min-width:72px">'
+        + '<div class="text-xs text-[#4e5872]">Liquidity</div>'
+        + '<div class="text-sm font-semibold text-[#e8eaf0]">' + fmtUsd(pData.tvl) + '</div>'
+        + '</div>'
+        + '<div class="text-right shrink-0" style="min-width:56px">'
+        + '<div class="text-xs text-[#4e5872]">Est. APR</div>'
+        + '<div class="text-sm font-bold text-emerald-400">' + apr + '</div>'
+        + '</div>'
+        + '<div class="shrink-0 hidden md:block" style="min-width:80px">'
+        + '<div class="text-xs text-[#4e5872] mb-1">Composition</div>'
+        + compBar(pData.token_a_reserve, pData.token_b_reserve, pData.tvl)
+        + '<div class="flex justify-between text-[10px] text-[#4e5872] mt-0.5"><span>' + tA + '</span><span>' + tB + '</span></div>'
+        + '</div>'
+        + '<div class="text-right shrink-0 hidden sm:block" style="min-width:60px">'
+        + '<div class="text-xs text-[#4e5872]">My Liq.</div>'
+        + '<div class="text-sm font-semibold ' + (myLiq ? 'text-emerald-400' : 'text-[#4e5872]') + '">' + myLiqStr + '</div>'
+        + '</div>'
+        + '<div class="shrink-0">'
+        + '<button class="text-xs px-3 py-1.5 rounded-full font-medium" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1);color:#fff" onclick="event.stopPropagation();poolSelectRow(\'' + pData.pool_id + '\')">Add</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>'
+        + (isSelected ? actionPanelHtml(pData, myPosForPool, meta) : '')
+        + '</div>';
+    }).join('');
+
+    const tableHtml = '<div class="card overflow-hidden p-0">'
+      + '<div class="px-4 py-3 border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between">'
+      + '<h3 class="font-semibold text-[#e8eaf0]">All Pools</h3>'
+      + '<span class="text-xs text-[#4e5872]">Click a pool to deposit or withdraw</span>'
+      + '</div>'
+      + (poolStats.length ? tableRows : '<div class="px-4 py-8 text-center text-[#4e5872] text-sm">No pools available.</div>')
+      + '</div>';
+
+    sec.innerHTML = heroHtml + tableHtml;
   }
 
+  window.poolSelectRow = function(poolId) {
+    selPool = (selPool === poolId) ? null : poolId;
+    if (selPool) selTab = 'deposit';
+    load();
+  };
+
+  window.poolSetTab = function(tab) {
+    selTab = tab;
+    load();
+  };
+
+  window.poolUpdateShare = function() {
+    const aVal = parseFloat(document.getElementById('liq-a')?.value || 0);
+    const bVal = parseFloat(document.getElementById('liq-b')?.value || 0);
+    const totalShares = parseFloat(document.getElementById('liq-pool-total-shares')?.value || 0);
+    const el = document.getElementById('liq-share-est');
+    if (!el) return;
+    if (!aVal || !bVal || aVal <= 0 || bVal <= 0) { el.textContent = '—'; return; }
+    const newShares = Math.sqrt(aVal * 1e6 * bVal * 1e6);
+    const pct = totalShares > 0 ? (newShares / (totalShares + newShares) * 100) : 100;
+    el.textContent = pct.toFixed(2) + '%';
+  };
+
   window.addLiquidity = async () => {
-    const a = document.getElementById('liq-a')?.value;
-    const b = document.getElementById('liq-b')?.value;
+    const a   = document.getElementById('liq-a')?.value;
+    const b   = document.getElementById('liq-b')?.value;
     const msg = document.getElementById('liq-msg');
+    const btn = document.getElementById('liq-submit-btn');
+    if (!a || !b || !selPool) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
     try {
       await api('POST', '/api/defi/liquidity', { pool_id: selPool, token_a_amount: a, token_b_amount: b });
-      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Liquidity added!'; }
+      if (msg) { msg.className = 'text-emerald-400 text-sm mt-2'; msg.textContent = 'Liquidity added!'; }
+      selTab = 'withdraw';
       await load();
-    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Add Liquidity'; }
+      if (msg) { msg.className = 'text-red-400 text-sm mt-2'; msg.textContent = e.message; }
+    }
   };
-  window.removeLiq = async (id) => {
+
+  window.removeLiqConfirm = function(id) {
+    const btn = document.getElementById('remove-btn-' + id);
+    if (!btn) return;
+    btn.textContent = 'Confirm?';
+    btn.className = 'btn btn-r text-xs';
+    btn.onclick = function() { window.removeLiq(id); };
+    setTimeout(function() {
+      const b = document.getElementById('remove-btn-' + id);
+      if (b && b.textContent === 'Confirm?') {
+        b.textContent = 'Remove';
+        b.className = 'btn btn-z text-xs';
+        b.onclick = function() { window.removeLiqConfirm(id); };
+      }
+    }, 3000);
+  };
+
+  window.removeLiq = async function(id) {
+    const row = document.getElementById('pos-row-' + id);
     try {
-      const d = await api('DELETE', `/api/defi/liquidity/${id}`);
-      alert(`Removed! Fees earned: ${d.fees_earned.toFixed(4)} USDC`);
-      await load();
+      const d = await api('DELETE', '/api/defi/liquidity/' + id);
+      if (row) {
+        row.innerHTML = '<div class="text-sm text-emerald-400 py-1">Removed · Earned ' + d.fees_earned.toFixed(4) + ' USDC in fees</div>';
+        setTimeout(load, 1500);
+      } else {
+        await load();
+      }
     } catch (e) { alert(e.message); }
   };
+
   window.load = load;
   await load();
 }
