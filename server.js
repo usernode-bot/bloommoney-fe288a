@@ -245,6 +245,10 @@ async function logAdmin(adminUserId, actionType, opts = {}) {
 
 // Verification tier vocabulary + gating. Single source of truth (Phase 1).
 const TIER_RANK = { basic: 0, social: 1, premium: 2 };
+// Leverage ceilings. Premium (incl. admin-granted) tops out at 20×; the
+// extreme 50×/100× band is unlocked only by an actual zkPassport proof.
+const PREMIUM_MAX_LEVERAGE = 20;
+const ZK_MAX_LEVERAGE = 100;
 function effectiveTier(kyc) {
   if (kyc && kyc.status === 'approved' && TIER_RANK[kyc.level] != null) return kyc.level;
   return 'basic';
@@ -256,9 +260,20 @@ function tierAllows(level, action) {
   return true;
 }
 function maxLeverageFor(level) {
-  if (TIER_RANK[level] >= TIER_RANK.premium) return 20;
+  if (TIER_RANK[level] >= TIER_RANK.premium) return PREMIUM_MAX_LEVERAGE;
   if (TIER_RANK[level] >= TIER_RANK.social) return 5;
   return 1;
+}
+// Per-user ceiling that accounts for zkPassport verification (extreme band).
+function maxLeverageForUser(level, zkVerified) {
+  if (zkVerified) return ZK_MAX_LEVERAGE;
+  return maxLeverageFor(level);
+}
+// True when the user has a real zkPassport proof on file (distinct from merely
+// holding the Premium tier, which an admin can grant without a passport).
+async function isZkVerified(userId) {
+  const { rows } = await pool.query('SELECT 1 FROM zk_verifications WHERE user_id=$1', [userId]);
+  return rows.length > 0;
 }
 
 function featureLimits(_tier) {
@@ -628,15 +643,16 @@ app.get('/api/me', async (req, res) => {
   try {
     await upsertUser(req.user);
     await ensureBalances(req.user.id, req.user.usernode_pubkey);
-    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }, { rows: socialAccounts }] = await Promise.all([
+    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }, { rows: socialAccounts }, { rows: zkRows }] = await Promise.all([
       pool.query('SELECT * FROM users WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT token_symbol, balance FROM wallet_balances WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC', [req.user.id]),
+      pool.query('SELECT 1 FROM zk_verifications WHERE user_id=$1', [req.user.id]),
     ]);
     // Pre-generate portfolio on first login so first portfolio view is instant
     generatePortfolio(req.user.id).catch(() => {});
-    res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
+    res.json({ user, balances: bals, kyc: kyc || null, zk_verified: zkRows.length > 0, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1590,6 +1606,15 @@ app.delete('/api/defi/liquidity/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── DeFi: Vaults ──────────────────────────────────────────────────────────────
+
+app.get('/api/defi/vaults', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM defi_vaults ORDER BY apy_bps DESC');
+    res.json({ vaults: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DeFi: ICO ─────────────────────────────────────────────────────────────────
 
 app.get('/api/ico', async (req, res) => {
@@ -1938,13 +1963,23 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { market_id, side, leverage, quantity, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
-    const lev = Math.max(1, Math.min(20, parseInt(leverage) || 1));
+    const lev = Math.max(1, Math.min(ZK_MAX_LEVERAGE, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
     if (!['long', 'short'].includes(side)) return res.status(400).json({ error: 'Invalid side' });
     const mode = 'live';
 
     const tier = await userTier(req.user.id);
+    if (mode === 'live') {
+      if (!tierAllows(tier, 'live_futures'))
+        return res.status(403).json({ error: 'verify_required', tier_needed: 'social' });
+      if (lev > 5 && !tierAllows(tier, 'high_leverage'))
+        return res.status(403).json({ error: 'verify_required', tier_needed: 'premium' });
+    }
+    // Extreme leverage (>20×) is unlocked only by a real zkPassport proof,
+    // in BOTH paper and live modes — distinct from merely holding Premium.
+    if (lev > PREMIUM_MAX_LEVERAGE && !(await isZkVerified(req.user.id)))
+      return res.status(403).json({ error: 'verify_required', tier_needed: 'zkpassport' });
     if (!(await withinBasicDailyCap(req.user.id, tier)))
       return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
 
@@ -2523,7 +2558,8 @@ app.get('/api/kyc', async (req, res) => {
       );
     }
     const { rows: [kyc] } = await pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]);
-    res.json({ kyc: kyc || null });
+    const zkVerified = await isZkVerified(req.user.id);
+    res.json({ kyc: kyc || null, zk_verified: zkVerified });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4062,6 +4098,15 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       removed_at TIMESTAMPTZ
     );
+    CREATE TABLE IF NOT EXISTS defi_vaults (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      token_pair VARCHAR(40) NOT NULL,
+      apy_bps INTEGER NOT NULL DEFAULT 0,
+      tvl_usd BIGINT NOT NULL DEFAULT 0,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS ico_offerings (
       id SERIAL PRIMARY KEY,
       token_name VARCHAR(100) NOT NULL,
@@ -4681,6 +4726,15 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
 
+    // Seed Vault listings
+    await pool.query(`
+      INSERT INTO defi_vaults(id,name,token_pair,apy_bps,tvl_usd,description) VALUES
+        (9001,'Staging BLOOM-USDC Auto Vault','BLOOM/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
+        (9002,'Staging ETH Yield Vault','ETH/USDC',820,1200000,'Staging demo vault — Automated ETH yield strategy'),
+        (9003,'Staging Stable Vault','USDC/DAI',510,500000,'Staging demo vault — Low-risk stablecoin vault')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
     // Seed NFT collections
     await pool.query(`
       INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES
@@ -4859,7 +4913,8 @@ async function start() {
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,last_funding_at) VALUES
           (900001,9001,$1,'live','long',5,2400,1.0,480000000,1968,'open',NOW()),
-          (900002,9004,$2,'live','short',10,68000,0.05,340000000,74800,'open',NOW())
+          (900002,9004,$2,'paper','short',10,68000,0.05,340000000,74800,'open',NOW()),
+          (900003,9002,$2,'live','long',100,68000,0.05,34000000,67388,'open',NOW())
         ON CONFLICT(id) DO NOTHING
       `, [ethFut.id, btcFut.id]);
       await pool.query(`

@@ -639,7 +639,7 @@ const VIEW_SECTION = {
 const VIEW_TAB = {
   home: 'home', feed: 'home', market: 'market', swap: 'market', trade: 'trade', futures: 'trade',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
-  launchpad: 'earn', vault: 'earn',
+  launchpad: 'earn', vault: null,
   predict: 'predict', markets: 'predict', profile: 'profile',
 };
 
@@ -761,6 +761,7 @@ async function init() {
     S.user = data.user;
     S.points = Number(data.user?.points) || 0;
     S.kyc = data.kyc;
+    S.zkVerified = !!data.zk_verified;
     S.social_accounts = data.social_accounts || [];
     if (data.balances) {
       S.balances = {};
@@ -4145,16 +4146,32 @@ async function renderFutures(sec) {
     const nextFunding = mkt && mkt.next_funding_at ? fundingCountdown(mkt.next_funding_at) : '—';
     const openInterest = mkt ? (Number(mkt.open_interest || 0) / 1e6).toFixed(1) : '0';
 
-    const balHtml = `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+    const balHtml = S.futuresMode === 'paper'
+      ? `<span class="text-[#8b95ab] text-xs">Paper:</span> <span class="font-mono text-xs" style="color:var(--long)">$${fmtUSD(_paperBal)}</span>`
+      : `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+
+    const zkVerified = !!S.zkVerified;
+    let tierWarnHtml = '';
+    if (S.futuresMode === 'live' && futTier === 'basic')
+      tierWarnHtml = `<div class="text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+    else if (S.futuresMode === 'live' && futTier === 'social')
+      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+    else if (futTier === 'premium' && !zkVerified)
+      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
+    else if (zkVerified)
+      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
 
     const mktTabsHtml = _markets.map(m =>
       `<button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm ${S.futuresMarket?.id === m.id ? 'fut-mkt-tab-active' : ''}" onclick="futSwitchMarket(${m.id})">${esc(m.symbol)}</button>`
     ).join('');
 
-    const LEV_PRESETS = [1, 2, 3, 5, 10, 20];
-    const levPresetsHtml = LEV_PRESETS.map(l =>
-      `<button class="fut-lev-preset px-2 py-0.5 text-xs rounded border border-[rgba(255,255,255,0.08)] transition-all ${leverage === l ? 'lev-active' : 'text-[#8b95ab] hover:text-[#e8eaf0]'}" onclick="futSetLeverage(${l})">${l}×</button>`
-    ).join('');
+    const LEV_PRESETS = [1, 2, 3, 5, 10, 20, 50, 100];
+    const levPresetsHtml = LEV_PRESETS.map(l => {
+      const locked = l > 20 && !zkVerified;
+      if (locked)
+        return `<button class="fut-lev-preset px-2 py-0.5 text-xs rounded border border-[rgba(255,255,255,0.08)] opacity-50 cursor-pointer text-[#8b95ab]" title="Requires zkPassport verification" onclick="futLockedLeverage()">🔒 ${l}×</button>`;
+      return `<button class="fut-lev-preset px-2 py-0.5 text-xs rounded border border-[rgba(255,255,255,0.08)] transition-all ${leverage === l ? 'lev-active' : 'text-[#8b95ab] hover:text-[#e8eaf0]'}" onclick="futSetLeverage(${l})">${l}×</button>`;
+    }).join('');
 
     const preview = calcPreview(mkt);
 
@@ -4245,7 +4262,8 @@ async function renderFutures(sec) {
             <span id="fut-lev-display" class="text-xs font-mono text-[#e8eaf0]">${leverage}×</span>
           </div>
           <div class="flex gap-1 flex-wrap mb-1.5" id="fut-lev-presets">${levPresetsHtml}</div>
-          <input id="fut-lev-custom" type="number" min="1" max="20" value="${leverage}" class="inp text-xs py-1 text-center" placeholder="Custom 1-20×" oninput="futSetLeverageCustom(parseInt(this.value)||1)">
+          <input id="fut-lev-custom" type="number" min="1" max="${zkVerified ? 100 : 20}" value="${leverage}" class="inp text-xs py-1 text-center" placeholder="Custom 1-${zkVerified ? 100 : 20}×" oninput="futSetLeverageCustom(parseInt(this.value)||1)">
+          <div id="fut-lev-lock-msg" class="text-xs mt-1 text-amber-400 hidden">50× and 100× require zkPassport verification. <button class="underline" onclick="navigate('verify')">Verify →</button></div>
         </div>
 
         <!-- Pay field -->
@@ -4681,9 +4699,24 @@ async function renderFutures(sec) {
     updatePreviewDisplay(mkt);
   };
 
+  window.futLockedLeverage = () => {
+    const lockMsg = document.getElementById('fut-lev-lock-msg');
+    if (lockMsg) lockMsg.classList.remove('hidden');
+  };
+
   window.futSetLeverageCustom = (l) => {
-    l = Math.max(1, Math.min(20, l || 1));
+    const ceiling = S.zkVerified ? 100 : 20;
+    const lockMsg = document.getElementById('fut-lev-lock-msg');
+    if ((l || 1) > ceiling) {
+      // Unverified user reached past the 20× cap — snap back and prompt.
+      if (lockMsg) lockMsg.classList.remove('hidden');
+    } else if (lockMsg) {
+      lockMsg.classList.add('hidden');
+    }
+    l = Math.max(1, Math.min(ceiling, l || 1));
     leverage = l;
+    const custom = document.getElementById('fut-lev-custom');
+    if (custom && parseInt(custom.value) !== l) custom.value = l;
     updateLevUI();
     const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
     if (mkt && side !== 'swap') {
@@ -5426,11 +5459,13 @@ async function renderNFTActivity(sec) {
 const PROVIDER_LABEL = { x: 'X', instagram: 'Instagram', tiktok: 'TikTok', coinbase: 'Coinbase' };
 
 async function renderVerify(sec) {
-  const [{ kyc }, providers] = await Promise.all([
-    api('GET', '/api/kyc').catch(() => ({ kyc: null })),
+  const [kycResp, providers] = await Promise.all([
+    api('GET', '/api/kyc').catch(() => ({ kyc: null, zk_verified: false })),
     api('GET', '/api/verify/providers').catch(() => ({ social_providers: [], social_enabled: false, premium_enabled: false, staging: false })),
   ]);
+  const kyc = kycResp.kyc;
   S.kyc = kyc;
+  S.zkVerified = !!kycResp.zk_verified;
   const level = (kyc && kyc.status === 'approved') ? kyc.level : 'basic';
   const isSocial = level === 'social' || level === 'premium';
   const isPremium = level === 'premium';
@@ -5454,15 +5489,17 @@ async function renderVerify(sec) {
          <p id="social-msg" class="text-sm"></p>`
       : `<p class="text-xs text-amber-400">No social providers are configured right now — try Premium instead.</p>`;
 
-  const premiumAction = isPremium
-    ? `<p class="text-xs text-emerald-400">✓ Premium verified via zkPassport</p>`
-    : providers.premium_enabled
-      ? `<button class="btn btn-v text-xs" onclick="startZkSession()">Verify with zkPassport</button>
+  const zkVerified = !!kycResp.zk_verified;
+  const zkButtonHtml = `<button class="btn btn-v text-xs" onclick="startZkSession()">Verify with zkPassport</button>
          <div id="zk-qr-section" class="hidden space-y-2 mt-2">
            <img id="zk-qr-img" src="" alt="ZK QR Code" class="w-48 h-48 rounded-lg mx-auto bg-[#161b2a]">
            <p class="text-xs text-[#8b95ab] text-center">Scan with your zkPassport app</p>
            <p id="zk-session-msg" class="text-sm text-center"></p>
-         </div>`
+         </div>`;
+  const premiumAction = zkVerified
+    ? `<p class="text-xs text-emerald-400">✓ Premium verified via zkPassport — 50× & 100× leverage unlocked</p>`
+    : providers.premium_enabled
+      ? `${isPremium ? '<p class="text-xs text-[#8b95ab] mb-1">Verify with zkPassport to unlock 50× & 100× leverage.</p>' : ''}${zkButtonHtml}`
       : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
   sec.innerHTML = `
@@ -5472,7 +5509,7 @@ async function renderVerify(sec) {
       ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
         '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
       ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
-      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 20× leverage', 'Higher trade-size limits', 'Premium profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
+      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 100× leverage (50× & 100× require zkPassport)', 'Higher trade-size limits', 'Premium profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
     </div>`;
 
   window.connectSocial = async (provider) => {
@@ -5525,6 +5562,7 @@ async function renderVerify(sec) {
           const { status } = await api('GET', `/api/zk/status/${sessionId}`);
           if (status === 'verified') {
             S.kyc = { level: 'premium', status: 'approved', provider: 'zkpassport' };
+            S.zkVerified = true;
             msg.className = 'text-emerald-400 text-sm text-center';
             msg.textContent = '✓ Identity verified!';
             setTimeout(() => renderVerify(sec), 1200);
