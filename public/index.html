@@ -156,6 +156,7 @@
       <button class="nav-item" data-view="futures">📈 Futures</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
+      <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
         <span>💬 Messages</span>
@@ -210,6 +211,9 @@
 
       <!-- Earn (composite: stake / liquidity / ico) -->
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+
+      <!-- Vault -->
+      <section id="section-vault" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Opinion / Prediction Markets -->
       <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -543,7 +547,8 @@ const VIEW_SECTION = {
   trade: 'section-swap', swap: 'section-swap',
   futures: 'section-futures',
   journal: 'section-journal',
-  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
+  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn', launchpad: 'section-earn',
+  vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
   messages: 'section-messages',
@@ -555,7 +560,8 @@ const VIEW_SECTION = {
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
   home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
-  earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
+  earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn', launchpad: 'earn',
+  vault: null,
   predict: 'predict', markets: 'predict', profile: 'profile',
 };
 
@@ -589,6 +595,8 @@ async function loadView(view) {
       case 'profile': await renderProfile(sec); break;
       case 'trade': case 'swap': await renderSwap(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
+      case 'launchpad': S.earnTab = 'ico'; await renderEarn(sec); break;
+      case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
       case 'futures': await renderFutures(sec); break;
@@ -2485,6 +2493,59 @@ async function renderEarn(sec) {
     else await renderICO(sub);
   } catch (e) { sub.innerHTML = err(e.message); }
   window.setEarnTab = (t) => { S.earnTab = t; renderEarn(sec); };
+}
+
+// ── Vault ────────────────────────────────────────────────────────────────────────
+async function renderVault(sec) {
+  const subnav = [
+    ['earn',      '🌱 Earn'],
+    ['stake',     '🔒 Stake'],
+    ['liquidity', '💧 Liquidity'],
+    ['launchpad', '🚀 Launchpad'],
+    ['vault',     '🏦 Vault'],
+  ];
+  const navHtml = subnav.map(([k, l]) =>
+    `<button class="text-sm px-3 py-1 rounded-full transition-colors ${k === 'vault' ? 'pill-active' : 'pill-inactive'}" onclick="vaultSubnav('${k}')">${l}</button>`
+  ).join('');
+
+  sec.innerHTML = `
+    <h2 class="text-xl font-bold mb-4">🏦 Vault</h2>
+    <div class="flex gap-2 mb-4 border-b border-[rgba(255,255,255,0.06)] pb-2 flex-wrap">
+      ${navHtml}
+    </div>
+    <div id="vault-content">${spin()}</div>`;
+
+  window.vaultSubnav = (k) => {
+    if (k === 'vault') return;
+    if (k === 'stake')     { S.earnTab = 'stake';     navigate('earn'); return; }
+    if (k === 'liquidity') { S.earnTab = 'liquidity'; navigate('earn'); return; }
+    if (k === 'launchpad') { S.earnTab = 'ico';       navigate('earn'); return; }
+    navigate(k);
+  };
+
+  const content = document.getElementById('vault-content');
+  try {
+    const { vaults } = await api('GET', '/api/defi/vaults');
+    if (!vaults.length) {
+      content.innerHTML = '<p class="text-[#4e5872] text-sm">No vaults available</p>';
+      return;
+    }
+    content.innerHTML = `<div class="space-y-3">${vaults.map(v => {
+      const apy = (v.apy_bps / 100).toFixed(2);
+      const tvl = Number(v.tvl_usd).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+      return `<div class="card flex items-center justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold">${esc(v.name)}</div>
+          <div class="text-xs text-[#8b95ab]">${esc(v.token_pair)} · ${esc(v.description)}</div>
+          <div class="flex gap-3 mt-1">
+            <span class="text-xs text-emerald-400 font-semibold">${apy}% APY</span>
+            <span class="text-xs text-[#8b95ab]">TVL ${tvl}</span>
+          </div>
+        </div>
+        <button class="btn btn-v shrink-0" disabled>Deposit</button>
+      </div>`;
+    }).join('')}</div>`;
+  } catch (e) { content.innerHTML = err(e.message); }
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
