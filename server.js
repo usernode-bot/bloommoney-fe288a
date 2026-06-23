@@ -61,6 +61,12 @@ const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
 // Per-day caps applied to Basic-tier users (security layer, Phase 4).
 const BASIC_DAILY_TRADE_COUNT = 25;
 
+// Prediction-market categories (single source of truth, Polymarket-style hub).
+const MARKET_CATEGORIES = new Set(['Crypto', 'Politics', 'Science', 'Sports', 'Entertainment', 'General']);
+function normalizeCategory(c) {
+  return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
+}
+
 const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
@@ -1464,7 +1470,19 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
 
 app.get('/api/markets', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM opinion_markets ORDER BY created_at DESC');
+    const params = [];
+    const conds = [];
+    if (req.query.category && MARKET_CATEGORIES.has(req.query.category)) {
+      params.push(req.query.category);
+      conds.push(`category=$${params.length}`);
+    }
+    if (req.query.featured === 'true') conds.push('featured=true');
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const { rows } = await pool.query(
+      `SELECT * FROM opinion_markets ${where}
+       ORDER BY featured DESC, (yes_pool + no_pool) DESC, created_at DESC`,
+      params
+    );
     res.json({ markets: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1482,13 +1500,13 @@ app.get('/api/markets/:id', async (req, res) => {
 
 app.post('/api/markets', requireWallet, async (req, res) => {
   try {
-    const { title, description, resolution_criteria, closes_at } = req.body;
+    const { title, description, resolution_criteria, closes_at, category } = req.body;
     if (!title || typeof title !== 'string' || title.trim().length < 5 || title.length > 200)
       return res.status(400).json({ error: 'Title must be 5–200 characters' });
     const { rows: [market] } = await pool.query(`
-      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5) RETURNING *
-    `, [title.trim(), (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,category,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [title.trim(), (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, normalizeCategory(category), req.user.id]);
     res.status(201).json({ market });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1524,6 +1542,8 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
     } else {
       await client.query('UPDATE opinion_markets SET no_pool=no_pool+$1 WHERE id=$2', [usdcUnits, market.id]);
     }
+    // Denormalized running volume total for the prediction-market hub.
+    await client.query('UPDATE opinion_markets SET volume_usdc=volume_usdc+$1 WHERE id=$2', [usdcUnits, market.id]);
     await client.query(
       'INSERT INTO opinion_positions(user_id,market_id,outcome,shares,cost_basis) VALUES($1,$2,$3,$4,$5)',
       [req.user.id, market.id, outcome, shares, usdcUnits]
@@ -2460,14 +2480,32 @@ app.delete('/api/admin/ico/:id', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/markets', requireAdmin, async (req, res) => {
   try {
-    const { title, description, resolution_criteria, closes_at } = req.body;
+    const { title, description, resolution_criteria, closes_at, category, featured } = req.body;
     if (!validStr(title, 200)) return res.status(400).json({ error: 'Invalid title' });
     const { rows: [market] } = await pool.query(`
-      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5) RETURNING *
-    `, [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,category,featured,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *
+    `, [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null,
+        normalizeCategory(category), !!featured, req.user.id]);
     await logAdmin(req.user.id, 'create_market', { target_market_id: market.id });
     res.json({ market });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update a market's hub placement: category and/or featured flag.
+app.patch('/api/admin/markets/:id', requireAdmin, async (req, res) => {
+  try {
+    const { category, featured } = req.body;
+    const sets = [], params = [parseInt(req.params.id, 10)];
+    if (category !== undefined) { params.push(normalizeCategory(category)); sets.push(`category=$${params.length}`); }
+    if (featured !== undefined) { params.push(!!featured); sets.push(`featured=$${params.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    const { rows } = await pool.query(
+      `UPDATE opinion_markets SET ${sets.join(',')} WHERE id=$1 RETURNING *`, params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    await logAdmin(req.user.id, 'update_market', { target_market_id: parseInt(req.params.id, 10) });
+    res.json({ market: rows[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4019,7 +4057,12 @@ async function start() {
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS is_daily BOOLEAN DEFAULT FALSE;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS template_slug VARCHAR(40);
     ALTER TABLE opinion_markets ALTER COLUMN created_by_user_id DROP NOT NULL;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS category VARCHAR(30) NOT NULL DEFAULT 'General';
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS volume_usdc BIGINT NOT NULL DEFAULT 0;
   `);
+  // Backfill: daily auto-generated markets are crypto price questions.
+  await pool.query("UPDATE opinion_markets SET category='Crypto' WHERE is_daily=true AND category='General'");
   // UNIQUE on anti_sybil_token enforces one social account per wallet.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS kyc_anti_sybil_uniq
@@ -4284,6 +4327,28 @@ async function start() {
       ON CONFLICT(id) DO NOTHING
     `);
     await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW() WHERE id=9003");
+
+    // Backfill category/featured/volume on the original demo markets (idempotent:
+    // only touches rows still on the 'General' default so re-runs are no-ops).
+    await pool.query(`
+      UPDATE opinion_markets SET category='Crypto', featured=true,  volume_usdc=85000000 WHERE id=9001 AND category='General';
+      UPDATE opinion_markets SET category='Crypto', featured=false, volume_usdc=22000000 WHERE id=9002 AND category='General';
+      UPDATE opinion_markets SET category='Crypto', featured=false, volume_usdc=40000000 WHERE id=9003 AND category='General';
+    `);
+
+    // Seed cross-category demo markets (Polymarket-style hub). Public table, so
+    // these rows are safe to seed directly. Amounts are BIGINT micro-units.
+    await pool.query(`
+      INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,category,featured,volume_usdc,created_by_user_id,closes_at) VALUES
+        (9020,'Will a G7 country ban crypto before 2027?','Regulatory prediction market','Resolved YES if any G7 government enacts a full ban on crypto trading before Jan 1, 2027.',300000000,700000000,'open','Politics',true,128000000,9006,'2026-12-31 00:00:00+00'),
+        (9021,'Will GPT-5 pass the Turing test by Dec 2026?','AI milestone market','Resolved YES if a published, peer-reviewed study reports GPT-5 passing a standard Turing test before Dec 31, 2026.',450000000,550000000,'open','Science',false,67000000,9006,'2026-12-31 00:00:00+00'),
+        (9022,'Will BTC hit $100k before 2027?','Bitcoin price prediction','Resolved YES if BTC/USD closes above $100,000 on any major exchange before Jan 1, 2027.',600000000,400000000,'open','Crypto',false,210000000,9006,'2026-12-31 00:00:00+00'),
+        (9023,'Will FC Barcelona win La Liga 2025/26?','Football title race','Resolved YES if FC Barcelona is crowned La Liga champion for the 2025/26 season.',350000000,650000000,'open','Sports',false,44000000,9006,'2026-08-01 00:00:00+00'),
+        (9024,'Will a Marvel film gross $1B in 2026?','Box office milestone','Resolved YES if any Marvel theatrical release grosses $1B+ worldwide during 2026.',700000000,300000000,'open','Entertainment',false,31000000,9006,'2026-12-31 00:00:00+00'),
+        (9025,'Will the Fed cut rates 3+ times in 2026?','Macro policy market','Resolved YES if the US Federal Reserve cuts its target rate on three or more occasions during 2026.',420000000,580000000,'open','Politics',false,59000000,9006,'2026-12-31 00:00:00+00'),
+        (9026,'Will a CRISPR aging trial reach Phase 3 by 2027?','Biotech milestone','Resolved YES if a CRISPR-based anti-aging therapy enters a registered Phase 3 trial before Jan 1, 2027.',250000000,750000000,'open','Science',false,18000000,9006,'2027-01-01 00:00:00+00')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed ICO offerings — one live (SDC existing), two more live, two upcoming, two completed.
     // Amounts are stored as BIGINT micro-units (value × 1_000_000). Dates use interval arithmetic
@@ -4590,6 +4655,8 @@ async function start() {
       );
       await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
       await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
+      // Daily markets are crypto price questions (these are seeded after the migration backfill).
+      await pool.query("UPDATE opinion_markets SET category='Crypto' WHERE id IN (9010,9011,9012,9013) AND category='General'");
     }
 
     // Seed trade journal entries (staging:private table — always empty in prod copy).
@@ -4666,8 +4733,8 @@ async function start() {
         title = tmpl.titleFn(dateLabel);
       }
       await pool.query(
-        `INSERT INTO opinion_markets(title,description,resolution_criteria,is_daily,template_slug,closes_at,created_by_user_id)
-         VALUES($1,$2,$3,true,$4,$5,NULL)`,
+        `INSERT INTO opinion_markets(title,description,resolution_criteria,is_daily,template_slug,category,closes_at,created_by_user_id)
+         VALUES($1,$2,$3,true,$4,'Crypto',$5,NULL)`,
         [title, tmpl.description, tmpl.resolution_criteria, tmpl.slug, closesAt]
       );
     }

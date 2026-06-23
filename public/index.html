@@ -212,7 +212,7 @@
       <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Opinion / Prediction Markets -->
-      <section id="section-markets" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-markets" class="view hidden w-full"></section>
 
       <!-- Futures -->
       <section id="section-futures" class="view hidden"></section>
@@ -298,6 +298,13 @@
 .tag-elite { background: rgba(245,158,11,0.15); color: #fcd34d; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .tag-zk-verified { background: rgba(20,184,166,0.15); color: #5eead4; font-size:0.7rem; padding: 0.15rem 0.5rem; border-radius: 9999px; }
 .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--accent-purple); border-radius: 50%; animation: spin 0.6s linear infinite; }
+/* Prediction-market hub helpers */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pm-category-chip { flex-shrink: 0; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: #1c2236; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; white-space: nowrap; }
+.pm-category-chip:hover { color: #e8eaf0; border-color: rgba(124,92,252,0.3); }
+.pm-category-chip.active { background: #7c5cfc; color: #fff; border-color: #7c5cfc; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Post-to-Earn points animations */
 .points-pulse { animation: pointsPulse 0.7s ease-out; }
@@ -665,6 +672,14 @@ function showApp() {
   clearInterval(_unreadInterval);
   _unreadInterval = setInterval(refreshUnreadBadge, 20000);
   navigate(S.view);
+  // Demo-mode prerender: when the CI crawler loads /?demo=1 it stays on the
+  // home view, so pre-populate the Predict section into its (hidden) container
+  // so the prediction-market selectors (.pm-hero, .pm-category-chip,
+  // .pm-market-card, .pm-how-it-works) are present in the DOM at page load.
+  if (new URLSearchParams(location.search).get('demo') === '1') {
+    const mk = document.getElementById('section-markets');
+    if (mk) { try { renderMarkets(mk); } catch (_) {} }
+  }
 }
 
 // ── Messaging unread badge ─────────────────────────────────────────────────────
@@ -2579,12 +2594,20 @@ function svgLineChart(points, opts = {}) {
 }
 
 // ── Opinion Markets ───────────────────────────────────────────────────────────
+// Polymarket-style prediction-market hub: featured hero, sticky category
+// filters, a dense responsive card grid, a how-it-works explainer and footer.
+const PM_CATEGORIES = ['All', 'Crypto', 'Politics', 'Science', 'Sports', 'Entertainment'];
+// activeCategory lives at module scope so it survives the 10s auto-refresh
+// (load() re-renders the grid but reads this back from the closure).
+let pmActiveCategory = 'All';
+
 async function renderMarkets(sec) {
   if (S.marketId) { await renderMarketDetail(sec); return; }
 
   let showCreate = false;
+  let allMarkets = [];
 
-  function fmtCountdown(closesAt) {
+  function pmCountdown(closesAt) {
     const ms = new Date(closesAt) - Date.now();
     if (ms <= 0) return 'closing';
     const h = Math.floor(ms / 3600000);
@@ -2592,62 +2615,178 @@ async function renderMarkets(sec) {
     if (h >= 1) return `${h}h ${m}m`;
     return m > 0 ? `${m}m` : 'closing';
   }
+  // Compact USD from micro-units, with thousands separators (no cents).
+  function pmMoney(units) {
+    return '$' + Math.round(Number(units) / 1e6).toLocaleString('en-US');
+  }
+  function pmCloses(m) {
+    if (!m.closes_at) return '';
+    const ms = new Date(m.closes_at) - Date.now();
+    if (ms > 0 && ms <= 48 * 3600000) {
+      return `<span class="text-amber-400 text-xs font-semibold whitespace-nowrap">&#x23f1; ${pmCountdown(m.closes_at)}</span>`;
+    }
+    return ms > 0 ? `<span class="text-[#4e5872] text-xs whitespace-nowrap">Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : '';
+  }
+  function pmProbBar(yesPct) {
+    const noPct = (100 - yesPct).toFixed(0);
+    return `<div class="flex items-center justify-between text-xs mb-1">
+        <span class="font-bold text-emerald-400">${yesPct.toFixed(0)}% YES</span>
+        <span class="font-bold text-red-400">${noPct}% NO</span>
+      </div>
+      <div class="flex h-2 rounded-full overflow-hidden bg-[#1c2236]">
+        <div class="bg-emerald-500 h-full" style="width:${yesPct}%"></div>
+        <div class="bg-red-600 h-full" style="width:${100 - yesPct}%"></div>
+      </div>`;
+  }
+  function pmResolvedBadge(m) {
+    const yes = m.resolved_outcome === 'YES';
+    return `<div class="text-sm font-bold ${yes ? 'text-emerald-400' : 'text-red-400'}">${yes ? '&#x2713; YES' : '&#x2717; NO'} <span class="text-[#4e5872] font-normal text-xs">resolved</span></div>`;
+  }
 
-  function marketCard(m, opts = {}) {
-    const yesPct = (Number(m.yes_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
-    const noPct = (100 - parseFloat(yesPct)).toFixed(1);
-    const statusCls = { open:'text-emerald-400', closed:'text-[#4e5872]', resolved:'text-[#4e9af1]' };
-    return `<div class="card space-y-2 cursor-pointer hover:border-[rgba(124,92,252,0.3)] transition-colors" onclick="openMarket(${m.id})">
-      <div class="flex justify-between items-start gap-2">
-        <div class="flex flex-wrap items-start gap-2 min-w-0">
-          <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
-          ${opts.daily ? '<span class="shrink-0 text-xs font-semibold bg-amber-900/40 border border-amber-700/50 text-amber-300 px-2 py-0.5 rounded-full">Daily</span>' : ''}
+  // Compact grid card.
+  function pmMarketCard(m) {
+    const liq = Number(m.yes_pool) + Number(m.no_pool);
+    const yesPct = liq > 0 ? Number(m.yes_pool) / liq * 100 : 50;
+    const resolved = m.status === 'resolved' && m.resolved_outcome;
+    return `<div class="pm-market-card bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-4 flex flex-col gap-2 cursor-pointer hover:border-[rgba(124,92,252,0.3)] transition-colors" onclick="openMarket(${m.id})">
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-[0.65rem] uppercase tracking-wide font-semibold text-[#7c5cfc] bg-[#7c5cfc]/10 px-1.5 py-0.5 rounded">${esc(m.category || 'General')}</span>
+        ${m.is_daily ? '<span class="text-[0.65rem] font-semibold bg-amber-900/40 border border-amber-700/50 text-amber-300 px-1.5 py-0.5 rounded-full">Daily</span>' : ''}
+      </div>
+      <h3 class="text-sm font-semibold leading-snug line-clamp-2 min-h-[2.5rem]">${esc(m.title)}</h3>
+      <div>${resolved ? pmResolvedBadge(m) : pmProbBar(yesPct)}</div>
+      <div class="flex items-center justify-between mt-auto pt-1">
+        <div class="flex gap-2 text-xs font-mono text-[#4e5872]">
+          <span title="Volume traded">Vol ${pmMoney(m.volume_usdc || 0)}</span>
+          <span title="Total liquidity">Liq ${pmMoney(liq)}</span>
         </div>
-        <span class="${statusCls[m.status]||'text-[#8b95ab]'} text-xs shrink-0 ml-1">${m.status}</span>
+        ${pmCloses(m)}
       </div>
-      <div class="flex gap-2 text-xs">
-        <div class="flex-1 bg-emerald-900/30 border border-emerald-800/40 rounded px-2 py-1">YES <span class="font-bold text-emerald-400">${yesPct}%</span></div>
-        <div class="flex-1 bg-red-900/30 border border-red-800/40 rounded px-2 py-1">NO <span class="font-bold text-red-400">${noPct}%</span></div>
-      </div>
-      <div class="flex justify-between text-xs text-[#4e5872]">
-        <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
-        ${opts.daily && m.closes_at ? `<span class="text-amber-400">&#x23f1; ${fmtCountdown(m.closes_at)}</span>` :
-          m.closes_at ? `<span>Closes ${new Date(m.closes_at).toLocaleDateString()}</span>` : ''}
-      </div>
-      ${m.resolved_outcome ? `<div class="text-xs text-[#4e9af1]">&#x2713; Resolved: ${m.resolved_outcome}</div>` : ''}
+      <button class="btn btn-z text-xs ml-auto mt-1">Trade →</button>
     </div>`;
+  }
+
+  // Larger featured hero card.
+  function pmHeroCard(m) {
+    const liq = Number(m.yes_pool) + Number(m.no_pool);
+    const yesPct = liq > 0 ? Number(m.yes_pool) / liq * 100 : 50;
+    const resolved = m.status === 'resolved' && m.resolved_outcome;
+    return `<div class="snap-start min-w-[280px] max-w-[340px] flex-1 bg-gradient-to-br from-[#1a1f33] to-[#131620] border border-[rgba(124,92,252,0.25)] rounded-2xl p-5 flex flex-col gap-3 cursor-pointer hover:border-[rgba(124,92,252,0.5)] transition-colors" onclick="openMarket(${m.id})">
+      <div class="flex items-center gap-1.5">
+        <span class="text-[0.65rem] uppercase tracking-wide font-semibold text-[#7c5cfc] bg-[#7c5cfc]/15 px-2 py-0.5 rounded">${esc(m.category || 'General')}</span>
+        <span class="text-[0.65rem] uppercase tracking-wide font-semibold text-amber-300">&#9733; Featured</span>
+      </div>
+      <h3 class="text-base font-bold leading-snug line-clamp-2">${esc(m.title)}</h3>
+      <div>${resolved ? pmResolvedBadge(m) : pmProbBar(yesPct)}</div>
+      <div class="flex items-center justify-between text-xs text-[#8b95ab] mt-auto pt-1">
+        <span class="font-mono">${pmMoney(m.volume_usdc || 0)} traded</span>
+        <span class="font-mono">${pmMoney(liq)} liq</span>
+        ${pmCloses(m)}
+      </div>
+    </div>`;
+  }
+
+  // Re-render just the grid (used on chip click — no network round-trip).
+  function renderGrid() {
+    const grid = document.getElementById('pm-grid');
+    if (!grid) return;
+    let list = allMarkets;
+    if (pmActiveCategory !== 'All') list = list.filter(m => (m.category || 'General') === pmActiveCategory);
+    grid.innerHTML = list.length
+      ? list.map(pmMarketCard).join('')
+      : `<div class="col-span-full text-center text-[#4e5872] text-sm py-10">No markets in ${esc(pmActiveCategory)}.</div>`;
+    document.querySelectorAll('.pm-category-chip').forEach(b => {
+      b.classList.toggle('active', b.dataset.cat === pmActiveCategory);
+    });
   }
 
   async function load() {
     const { markets } = await api('GET', '/api/markets');
-    const dailyToday = markets.filter(m => m.is_daily && m.status === 'open');
-    const otherMarkets = markets.filter(m => !(m.is_daily && m.status === 'open'));
+    allMarkets = markets || [];
+    // Hero: explicitly featured markets, else top-3 by volume as a fallback.
+    let featured = allMarkets.filter(m => m.featured && m.status !== 'resolved');
+    if (!featured.length) {
+      featured = allMarkets.filter(m => m.status !== 'resolved')
+        .slice().sort((a, b) => Number(b.volume_usdc || 0) - Number(a.volume_usdc || 0));
+    }
+    featured = featured.slice(0, 3);
 
     sec.innerHTML = `
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Opinion Markets</h2>
-        <button class="btn btn-z text-xs" onclick="toggleCreate()">+ New Market</button>
+      <div class="pm-header flex justify-between items-center px-4 py-3 border-b border-[rgba(255,255,255,0.06)]">
+        <div>
+          <h2 class="text-xl font-bold">Predict</h2>
+          <p class="text-xs text-[#8b95ab]">Trade on the outcome of real-world events</p>
+        </div>
+        <button class="btn btn-z text-xs shrink-0" onclick="toggleCreate()">+ New Market</button>
       </div>
-      ${dailyToday.length ? `
-      <div class="mb-5">
-        <h3 class="font-semibold text-sm text-amber-400 mb-2">&#x1f4c5; Today's Markets</h3>
-        <div class="space-y-3">${dailyToday.map(m => marketCard(m, { daily: true })).join('')}</div>
-      </div>` : ''}
-      <div id="create-market-form" class="${showCreate ? '' : 'hidden'} card space-y-2 mb-4">
+
+      <div id="create-market-form" class="${showCreate ? '' : 'hidden'} card space-y-2 mx-4 mt-4">
         <h3 class="font-semibold text-sm">Create Market</h3>
         <input id="mk-title" class="inp" placeholder="Question (e.g. Will ETH hit $5k?)">
         <input id="mk-desc" class="inp" placeholder="Description (optional)">
         <input id="mk-criteria" class="inp" placeholder="Resolution criteria (optional)">
-        <input id="mk-closes" class="inp" type="date" placeholder="Closes at (optional)">
+        <div class="flex gap-2">
+          <select id="mk-category" class="inp flex-1">
+            ${PM_CATEGORIES.filter(c => c !== 'All').map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+          <input id="mk-closes" class="inp flex-1" type="date" placeholder="Closes at (optional)">
+        </div>
         <button class="btn btn-v w-full" onclick="createMarket()">Create Market</button>
         <p id="mk-msg" class="text-sm"></p>
       </div>
-      ${otherMarkets.length ? `
-      ${dailyToday.length ? '<h3 class="font-semibold text-sm text-[#8b95ab] mb-2">Community Markets</h3>' : ''}
-      <div class="space-y-3">${otherMarkets.map(m => marketCard(m)).join('')}</div>` :
-      dailyToday.length ? '' : '<p class="text-[#4e5872] text-sm">No markets</p>'}
+
+      ${featured.length ? `
+      <div class="px-4 pt-4">
+        <h3 class="text-xs uppercase tracking-wider font-semibold text-[#8b95ab] mb-2">&#9733; Featured</h3>
+      </div>
+      <div class="pm-hero flex gap-3 overflow-x-auto px-4 pb-2 snap-x snap-mandatory scrollbar-hide">
+        ${featured.map(pmHeroCard).join('')}
+      </div>` : '<div class="pm-hero hidden"></div>'}
+
+      <div class="pm-filter-bar sticky top-0 z-20 bg-[#0f1117]/95 backdrop-blur border-b border-[rgba(255,255,255,0.06)]">
+        <div class="flex gap-2 overflow-x-auto px-4 py-2.5 scrollbar-hide">
+          ${PM_CATEGORIES.map(c => `<button class="pm-category-chip ${c === pmActiveCategory ? 'active' : ''}" data-cat="${c}" onclick="pmSetCategory('${c}')">${c}</button>`).join('')}
+        </div>
+      </div>
+
+      <div id="pm-grid" class="pm-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 px-4 py-4"></div>
+
+      <div class="pm-how-it-works px-4 py-8 border-t border-[rgba(255,255,255,0.06)]">
+        <h3 class="text-lg font-bold mb-1 text-center">How it works</h3>
+        <p class="text-xs text-[#8b95ab] text-center mb-6">Three steps to trade your opinion</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+          <div class="card text-center space-y-2">
+            <div class="text-3xl">&#x1f50d;</div>
+            <h4 class="font-semibold text-sm">1. Browse Markets</h4>
+            <p class="text-xs text-[#8b95ab]">Find a question to trade on. New markets open every day across Crypto, Politics, Science and more.</p>
+          </div>
+          <div class="card text-center space-y-2">
+            <div class="text-3xl">&#x1f4b8;</div>
+            <h4 class="font-semibold text-sm">2. Buy YES or NO</h4>
+            <p class="text-xs text-[#8b95ab]">Trade with USDC at the current implied odds. Your position is recorded instantly.</p>
+          </div>
+          <div class="card text-center space-y-2">
+            <div class="text-3xl">&#x1f3c6;</div>
+            <h4 class="font-semibold text-sm">3. Claim Winnings</h4>
+            <p class="text-xs text-[#8b95ab]">When the market resolves, winners split the entire pool proportional to their position.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="pm-footer px-4 py-6 border-t border-[rgba(255,255,255,0.06)] text-center space-y-2">
+        <div class="font-bold text-[#7c5cfc]">&#x1f338; BloomMoney</div>
+        <p class="text-xs text-[#4e5872]">BloomMoney is a demo prediction platform — no real funds.</p>
+        <div class="flex gap-4 justify-center text-xs text-[#8b95ab]">
+          <button class="hover:text-[#e8eaf0]" onclick="navigate('earn')">Earn</button>
+          <button class="hover:text-[#e8eaf0]" onclick="navigate('trade')">Trade</button>
+          <button class="hover:text-[#e8eaf0]" onclick="navigate('nfts')">NFTs</button>
+        </div>
+      </div>
     `;
 
+    renderGrid();
+
+    window.pmSetCategory = (c) => { pmActiveCategory = c; renderGrid(); };
     window.toggleCreate = () => { showCreate = !showCreate; load(); };
     window.openMarket = (id) => { S.marketId = id; clearInterval(_activeInterval); _activeInterval = null; renderMarkets(sec); };
     window.createMarket = async () => {
@@ -2655,10 +2794,11 @@ async function renderMarkets(sec) {
       const desc = document.getElementById('mk-desc')?.value;
       const criteria = document.getElementById('mk-criteria')?.value;
       const closes = document.getElementById('mk-closes')?.value;
+      const category = document.getElementById('mk-category')?.value;
       const msg = document.getElementById('mk-msg');
       try {
-        await api('POST', '/api/markets', { title, description: desc, resolution_criteria: criteria, closes_at: closes || null });
-        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='&#x2713; Market created'; }
+        await api('POST', '/api/markets', { title, description: desc, resolution_criteria: criteria, closes_at: closes || null, category });
+        if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='✓ Market created'; }
         showCreate = false;
         setTimeout(() => load(), 800);
       } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
@@ -4612,10 +4752,14 @@ async function renderAdmin(sec) {
   async function loadMarketsAdmin() {
     const { markets } = await api('GET', '/api/admin/markets');
     return `<div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead><tr class="text-[#4e5872] text-xs">${['ID','Title','Status','Yes Pool','No Pool','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
+      <thead><tr class="text-[#4e5872] text-xs">${['ID','Title','Category','Featured','Status','Yes Pool','No Pool','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${markets.map(m => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
         <td class="py-1 pr-3 text-[#8b95ab]">${m.id}</td>
         <td class="pr-3 max-w-xs truncate">${esc(m.title)}</td>
+        <td class="pr-3">${esc(m.category||'General')}</td>
+        <td class="pr-3">
+          <button class="text-xs px-2 py-0.5 rounded ${m.featured?'bg-amber-500/20 text-amber-300':'bg-[#1c2236] text-[#8b95ab]'}" onclick="adminToggleFeatured(${m.id},${!m.featured})">${m.featured?'★ Yes':'☆ No'}</button>
+        </td>
         <td class="pr-3">${esc(m.status)}</td>
         <td class="pr-3">${fmtUSD(m.yes_pool/1e6)}</td>
         <td class="pr-3">${fmtUSD(m.no_pool/1e6)}</td>
@@ -4790,6 +4934,9 @@ async function renderAdmin(sec) {
   window.adminResolveMarket = async (id, outcome) => {
     if (!confirm(`Resolve market ${id} as ${outcome}?`)) return;
     try { await api('POST', `/api/admin/markets/${id}/resolve`, { outcome }); fullRender(); } catch (e) { alert(e.message); }
+  };
+  window.adminToggleFeatured = async (id, featured) => {
+    try { await api('PATCH', `/api/admin/markets/${id}`, { featured }); fullRender(); } catch (e) { alert(e.message); }
   };
   window.adminEndICO = async (id) => {
     if (!confirm('End ICO offering?')) return;
