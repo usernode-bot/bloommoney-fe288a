@@ -195,6 +195,9 @@
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
     { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" },
     { "name": "News tab button renders in feed", "path": "/?demo=1", "expectText": "News 📰" },
-    { "name": "News feed API returns bot posts", "path": "/api/feed?tab=news&limit=10", "expectSelector": "body" }
+    { "name": "News feed API returns bot posts", "path": "/api/feed?tab=news&limit=10", "expectSelector": "body" },
+    { "name": "Futures leverage presets render", "path": "/?demo=1", "expectSelector": "#fut-lev-presets" },
+    { "name": "Verify screen shows 100x leverage benefit", "path": "/?demo=1", "expectText": "Up to 100× leverage" },
+    { "name": "KYC API exposes zk_verified flag", "path": "/api/kyc", "expectSelector": "body" }
   ]
 }
