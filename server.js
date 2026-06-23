@@ -324,6 +324,88 @@ async function getCoinGeckoPrices() {
   }
 }
 
+// ── Top coins (/api/coins/top) ────────────────────────────────────────────────
+
+const STAGING_TOP_COINS = [
+  { rank:1,  symbol:'BTC',   name:'Bitcoin',          price_usd:64000,      market_cap:1257600000000, volume_24h:28500000000, price_change_24h_pct:2.34,  circulating_supply:19700000,       high_24h:65200,     low_24h:63100,    swappable:true  },
+  { rank:2,  symbol:'ETH',   name:'Ethereum',         price_usd:3200,       market_cap:384000000000,  volume_24h:14200000000, price_change_24h_pct:1.87,  circulating_supply:120000000,      high_24h:3280,      low_24h:3150,     swappable:true  },
+  { rank:3,  symbol:'USDT',  name:'Tether',           price_usd:1.00,       market_cap:112000000000,  volume_24h:62000000000, price_change_24h_pct:0.01,  circulating_supply:112000000000,   high_24h:1.001,     low_24h:0.999,    swappable:true  },
+  { rank:4,  symbol:'BNB',   name:'BNB',              price_usd:310,        market_cap:45000000000,   volume_24h:1800000000,  price_change_24h_pct:1.12,  circulating_supply:145000000,      high_24h:315,       low_24h:306,      swappable:true  },
+  { rank:5,  symbol:'SOL',   name:'Solana',           price_usd:150,        market_cap:68000000000,   volume_24h:3200000000,  price_change_24h_pct:3.45,  circulating_supply:453000000,      high_24h:154,       low_24h:146,      swappable:true  },
+  { rank:6,  symbol:'USDC',  name:'USD Coin',         price_usd:1.00,       market_cap:43000000000,   volume_24h:6100000000,  price_change_24h_pct:0.00,  circulating_supply:43000000000,    high_24h:1.001,     low_24h:0.999,    swappable:true  },
+  { rank:7,  symbol:'XRP',   name:'XRP',              price_usd:0.55,       market_cap:30000000000,   volume_24h:1400000000,  price_change_24h_pct:-0.82, circulating_supply:54000000000,    high_24h:0.57,      low_24h:0.54,     swappable:true  },
+  { rank:8,  symbol:'DOGE',  name:'Dogecoin',         price_usd:0.12,       market_cap:17000000000,   volume_24h:890000000,   price_change_24h_pct:1.55,  circulating_supply:142000000000,   high_24h:0.123,     low_24h:0.118,    swappable:true  },
+  { rank:9,  symbol:'TON',   name:'Toncoin',          price_usd:5.50,       market_cap:13800000000,   volume_24h:220000000,   price_change_24h_pct:0.73,  circulating_supply:2500000000,     high_24h:5.62,      low_24h:5.40,     swappable:true  },
+  { rank:10, symbol:'ADA',   name:'Cardano',          price_usd:0.45,       market_cap:16000000000,   volume_24h:420000000,   price_change_24h_pct:-1.23, circulating_supply:35000000000,    high_24h:0.46,      low_24h:0.44,     swappable:true  },
+  { rank:11, symbol:'STETH', name:'Lido Staked ETH',  price_usd:3198,       market_cap:36000000000,   volume_24h:80000000,    price_change_24h_pct:1.85,  circulating_supply:11260000,       high_24h:3276,      low_24h:3148,     swappable:false },
+  { rank:12, symbol:'TRX',   name:'TRON',             price_usd:0.11,       market_cap:9700000000,    volume_24h:290000000,   price_change_24h_pct:0.45,  circulating_supply:88000000000,    high_24h:0.112,     low_24h:0.108,    swappable:false },
+  { rank:13, symbol:'AVAX',  name:'Avalanche',        price_usd:28,         market_cap:11400000000,   volume_24h:340000000,   price_change_24h_pct:2.10,  circulating_supply:407000000,      high_24h:28.7,      low_24h:27.4,     swappable:false },
+  { rank:14, symbol:'LINK',  name:'Chainlink',        price_usd:14,         market_cap:8200000000,    volume_24h:310000000,   price_change_24h_pct:1.67,  circulating_supply:587000000,      high_24h:14.4,      low_24h:13.8,     swappable:false },
+  { rank:15, symbol:'SHIB',  name:'Shiba Inu',        price_usd:0.0000085,  market_cap:5000000000,    volume_24h:170000000,   price_change_24h_pct:-0.56, circulating_supply:589000000000000,high_24h:0.0000087, low_24h:0.0000083,swappable:false },
+  { rank:16, symbol:'DOT',   name:'Polkadot',         price_usd:6,          market_cap:8600000000,    volume_24h:190000000,   price_change_24h_pct:-0.34, circulating_supply:1430000000,     high_24h:6.15,      low_24h:5.90,     swappable:false },
+  { rank:17, symbol:'LEO',   name:'UNUS SED LEO',     price_usd:5.80,       market_cap:5400000000,    volume_24h:2200000,     price_change_24h_pct:0.17,  circulating_supply:930000000,      high_24h:5.85,      low_24h:5.76,     swappable:false },
+  { rank:18, symbol:'BCH',   name:'Bitcoin Cash',     price_usd:380,        market_cap:7500000000,    volume_24h:240000000,   price_change_24h_pct:1.23,  circulating_supply:19700000,       high_24h:388,       low_24h:374,      swappable:false },
+  { rank:19, symbol:'LTC',   name:'Litecoin',         price_usd:78,         market_cap:5800000000,    volume_24h:310000000,   price_change_24h_pct:0.89,  circulating_supply:74000000,       high_24h:79.5,      low_24h:77.0,     swappable:false },
+  { rank:20, symbol:'UNI',   name:'Uniswap',          price_usd:7.20,       market_cap:4300000000,    volume_24h:130000000,   price_change_24h_pct:2.34,  circulating_supply:600000000,      high_24h:7.38,      low_24h:7.05,     swappable:false },
+  { rank:21, symbol:'NEAR',  name:'NEAR Protocol',    price_usd:4.80,       market_cap:5300000000,    volume_24h:150000000,   price_change_24h_pct:1.45,  circulating_supply:1100000000,     high_24h:4.92,      low_24h:4.70,     swappable:false },
+  { rank:22, symbol:'ICP',   name:'Internet Computer',price_usd:9.50,       market_cap:4400000000,    volume_24h:80000000,    price_change_24h_pct:-0.67, circulating_supply:463000000,      high_24h:9.72,      low_24h:9.34,     swappable:false },
+  { rank:23, symbol:'APT',   name:'Aptos',            price_usd:7.80,       market_cap:3900000000,    volume_24h:110000000,   price_change_24h_pct:1.12,  circulating_supply:500000000,      high_24h:7.98,      low_24h:7.65,     swappable:false },
+  { rank:24, symbol:'POL',   name:'Polygon',          price_usd:0.48,       market_cap:4800000000,    volume_24h:190000000,   price_change_24h_pct:0.56,  circulating_supply:10000000000,    high_24h:0.492,     low_24h:0.471,    swappable:false },
+  { rank:25, symbol:'BLOOM', name:'BloomMoney',       price_usd:1.25,       market_cap:125000000,     volume_24h:4500000,     price_change_24h_pct:5.23,  circulating_supply:100000000,      high_24h:1.28,      low_24h:1.22,     swappable:true  },
+];
+
+const topCoinsCache = { data: null, fetchedAt: 0 };
+
+app.get('/api/coins/top', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 25, 100);
+    if (IS_STAGING) {
+      return res.json({ coins: STAGING_TOP_COINS.slice(0, limit) });
+    }
+    const now = Date.now();
+    if (now - topCoinsCache.fetchedAt < 60000 && topCoinsCache.data) {
+      return res.json({ coins: topCoinsCache.data.slice(0, limit) });
+    }
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h';
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+    const cgRes = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!cgRes.ok) throw new Error(`CoinGecko /coins/markets non-200: ${cgRes.status}`);
+    const cgData = await cgRes.json();
+    const cgIdToSym = Object.fromEntries(Object.entries(COINGECKO_TICKER_MAP).map(([sym, id]) => [id, sym]));
+    const coins = [];
+    for (const coin of cgData) {
+      if (coins.length >= limit) break;
+      const symbol = cgIdToSym[coin.id] || coin.symbol?.toUpperCase();
+      if (!symbol) continue;
+      coins.push({
+        rank: coin.market_cap_rank || coins.length + 1,
+        symbol,
+        name: coin.name,
+        price_usd: coin.current_price || 0,
+        market_cap: coin.market_cap || 0,
+        volume_24h: coin.total_volume || 0,
+        price_change_24h_pct: coin.price_change_percentage_24h || 0,
+        circulating_supply: coin.circulating_supply || 0,
+        high_24h: coin.high_24h || 0,
+        low_24h: coin.low_24h || 0,
+        swappable: symbol in COINGECKO_TICKER_MAP,
+      });
+    }
+    if (!coins.find(c => c.symbol === 'BLOOM')) {
+      const livePrices = await getCoinGeckoPrices();
+      coins.push({ rank: coins.length + 1, symbol: 'BLOOM', name: 'BloomMoney', price_usd: livePrices['BLOOM'] || 0, market_cap: 0, volume_24h: 0, price_change_24h_pct: 0, circulating_supply: 0, high_24h: livePrices['BLOOM'] || 0, low_24h: livePrices['BLOOM'] || 0, swappable: true });
+    }
+    topCoinsCache.data = coins;
+    topCoinsCache.fetchedAt = now;
+    res.json({ coins: coins.slice(0, limit) });
+  } catch (e) {
+    console.warn('coins/top error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Auto-generate portfolio ────────────────────────────────────────────────────
 
 const PORTFOLIO_COINS = [

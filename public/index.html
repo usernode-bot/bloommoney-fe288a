@@ -158,8 +158,8 @@
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
+      <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
-      <button class="nav-item" data-view="futures">📈 Futures</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
@@ -201,8 +201,8 @@
         <div id="linked-accounts-section" class="hidden"></div>
       </section>
 
-      <!-- Swap -->
-      <section id="section-swap" class="view hidden max-w-md mx-auto py-4 px-4"></section>
+      <!-- Market -->
+      <section id="section-market" class="view hidden max-w-md mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
       <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -222,8 +222,8 @@
       <!-- Opinion / Prediction Markets -->
       <section id="section-markets" class="view hidden w-full"></section>
 
-      <!-- Futures -->
-      <section id="section-futures" class="view hidden"></section>
+      <!-- Trade (Futures Terminal) -->
+      <section id="section-trade" class="view hidden"></section>
 
       <!-- Trade Journal -->
       <section id="section-journal" class="view hidden max-w-3xl mx-auto py-4 px-4"></section>
@@ -255,8 +255,8 @@
   <!-- Mobile Bottom Nav (six tabs) -->
   <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-[#131620] border-t border-[rgba(255,255,255,0.06)] flex z-30">
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
+    <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="futures" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('futures')">📈<span>Futures</span></button>
     <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
@@ -398,8 +398,8 @@ select.inp option { background: var(--bg-card); }
 /* Messages split pane */
 #msg-inbox-panel { min-height: 0; }
 #msg-thread-panel { min-height: 0; }
-/* Futures table zebra rows — kept for fallback compatibility */
-#section-futures tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+/* Trade terminal table zebra rows */
+#section-trade tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
 /* Avatar hue override — purple/blue band */
 
 /* ── Futures Terminal ─────────────────────────────────────────────────────── */
@@ -487,6 +487,7 @@ const S = {
   prices: {},
   marketId: null,
   tradeToken: null,
+  topCoinsData: [],
   profileUser: null,
   futuresMarket: null,
   social_accounts: [],
@@ -620,8 +621,8 @@ function avatarImg(username, cls, avatarUrl) {
 // internal deep-links keep working.
 const VIEW_SECTION = {
   home: 'app-feed', feed: 'app-feed',
-  trade: 'section-swap', swap: 'section-swap',
-  futures: 'section-futures',
+  market: 'section-market', swap: 'section-market',
+  trade: 'section-trade', futures: 'section-trade',
   journal: 'section-journal',
   earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
   launchpad: 'section-earn',
@@ -636,7 +637,7 @@ const VIEW_SECTION = {
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
-  home: 'home', feed: 'home', trade: 'trade', swap: 'trade', futures: 'futures',
+  home: 'home', feed: 'home', market: 'market', swap: 'market', trade: 'trade', futures: 'trade',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
   launchpad: 'earn', vault: 'earn',
   predict: 'predict', markets: 'predict', profile: 'profile',
@@ -684,13 +685,13 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
-      case 'trade': case 'swap': await renderSwap(sec); break;
+      case 'market': case 'swap': await renderMarket(sec); break;
       case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
       case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
       case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
-      case 'futures': await renderFutures(sec); break;
+      case 'trade': case 'futures': await renderFutures(sec); break;
       case 'journal': await renderJournal(sec); break;
       case 'nfts': await renderNFTs(sec); break;
       case 'explore': await renderExplore(sec); break;
@@ -728,6 +729,26 @@ async function init() {
   if (new URLSearchParams(location.search).get('demo') === '1') {
     const mk = document.getElementById('section-markets');
     if (mk) { try { renderMarkets(mk, PM_DEMO_MARKETS); } catch (_) {} }
+    // Pre-render Market section so CI selectors exist without auth
+    const mkr = document.getElementById('section-market');
+    if (mkr) {
+      mkr.innerHTML = `
+        <div id="market-list-wrap">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-bold text-[#e8eaf0]">Markets</h2>
+            <div class="flex gap-2">
+              <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
+              <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
+              <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
+            </div>
+          </div>
+          <div id="market-coin-rows" class="space-y-2">
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(251,191,36,0.15);color:#fbbf24;">BTC</div><div class="flex-1"><div class="text-sm font-semibold">BTC</div><div class="text-xs text-[#8b95ab]">Bitcoin</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(56,189,248,0.15);color:#38bdf8;">ETH</div><div class="flex-1"><div class="text-sm font-semibold">ETH</div><div class="text-xs text-[#8b95ab]">Ethereum</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(167,139,250,0.15);color:#a78bfa;">BLOOM</div><div class="flex-1"><div class="text-sm font-semibold">BLOOM</div><div class="text-xs text-[#8b95ab]">BloomMoney</div></div></div>
+          </div>
+        </div>`;
+    }
   }
   // Skip the network round-trip when there's no token to present — this avoids
   // a guaranteed 401 that shows up as a console error in headless test runners.
@@ -1874,7 +1895,7 @@ window.doCopyTrade = async (username) => {
       if (modal) modal.remove();
       alert(`✓ Copied ${result.copied_count} position${result.copied_count !== 1 ? 's' : ''} from ${username}!`);
       await refreshBalances();
-      const futSec = document.getElementById('section-futures');
+      const futSec = document.getElementById('section-trade');
       if (futSec && futSec.offsetParent !== null) {
         await renderFutures(futSec);
       }
@@ -1887,15 +1908,15 @@ window.doCopyTrade = async (username) => {
 };
 
 // ── Token detail ──────────────────────────────────────────────────────────────
-window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('trade'); };
+window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('market'); };
 
-// ── Swap ──────────────────────────────────────────────────────────────────────
-async function renderSwap(sec) {
-  if (S.tradeToken) { await renderTokenDetail(sec); return; }
+// ── Swap Card (reusable helper) ────────────────────────────────────────────────
+function renderSwapCard(containerEl, prefilledFrom) {
   const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
-  const swapState = { from: 'BTC', to: 'ETH', fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
+  const initFrom = tokens.includes(prefilledFrom) ? prefilledFrom : 'BTC';
+  const initTo   = initFrom === 'BTC' ? 'ETH' : 'BTC';
+  const swapState = { from: initFrom, to: initTo, fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
 
-  // Inject flip animation keyframes once
   if (!document.getElementById('swap-anim-style')) {
     const st = document.createElement('style');
     st.id = 'swap-anim-style';
@@ -1909,9 +1930,6 @@ async function renderSwap(sec) {
     `;
     document.head.appendChild(st);
   }
-
-  // Two containers: phone frame re-renders; markets list renders once.
-  sec.innerHTML = `<div id="swap-card-wrap"></div><div id="swap-markets-wrap" class="mt-4"></div>`;
 
   const TOKEN_COLORS = {
     BTC:   { bg: 'rgba(251,191,36,0.15)',   text: '#fbbf24', symbol: '₿' },
@@ -1939,8 +1957,7 @@ async function renderSwap(sec) {
   }
 
   function render() {
-    const wrap = document.getElementById('swap-card-wrap');
-    if (!wrap) return;
+    if (!containerEl || !containerEl.isConnected) return;
     const toAmt = calcToAmt();
     const fromBal = getBal(swapState.from);
     const toBal = getBal(swapState.to);
@@ -1965,7 +1982,7 @@ async function renderSwap(sec) {
       { label: 'Expected output',    value: expectedOut,              info: false },
     ];
 
-    wrap.innerHTML = `
+    containerEl.innerHTML = `
       <div class="swap-token-card" style="display:flex;flex-direction:column;gap:4px;padding:0 4px;">
 
           <!-- Header -->
@@ -2070,11 +2087,6 @@ async function renderSwap(sec) {
       </div>`;
   }
 
-  try {
-    const d = await api('GET', '/api/prices');
-    d.prices.forEach(p => { S.prices[p.symbol] = parseFloat(p.price_usd); });
-  } catch {}
-
   window.swapFromChange = (v) => {
     swapState.from = v;
     if (swapState.from === swapState.to) swapState.to = tokens.find(t => t !== swapState.from);
@@ -2131,19 +2143,155 @@ async function renderSwap(sec) {
       msg.textContent = `✓ Received ${d.to_amount.toFixed(6)} ${d.to_token}`;
       await refreshBalances();
       swapState.fromAmt = '';
-      setTimeout(() => { msg.textContent = ''; render(); }, 2000);
+      setTimeout(() => { if (msg) { msg.textContent = ''; } render(); }, 2000);
     } catch (e) {
       if (msg) { msg.style.color = '#f87171'; msg.textContent = e.message; }
     }
   };
 
   render();
+}
 
-  // ── Markets list ──────────────────────────────────────────────────────────
-  const mwrap = document.getElementById('swap-markets-wrap');
+// ── Market ────────────────────────────────────────────────────────────────────
+async function renderMarket(sec) {
+  if (S.tradeToken) { await renderTokenDetail(sec); return; }
+
+  sec.innerHTML = `<div id="market-list-wrap"></div>`;
+  const mwrap = document.getElementById('market-list-wrap');
   if (!mwrap) return;
 
-  const TOKEN_META = {
+  const TOKEN_COLORS = {
+    BTC:   '#fbbf24', ETH:   '#38bdf8', BNB:   '#f3ba2f', SOL:   '#9945ff',
+    XRP:   '#0095cf', USDC:  '#34d399', USDT:  '#26a17b', ADA:   '#008cff',
+    DOGE:  '#cb9b1f', TON:   '#0088cc', BLOOM: '#a78bfa',
+  };
+  const TOKEN_BG = {
+    BTC:'rgba(251,191,36,0.15)', ETH:'rgba(56,189,248,0.15)',   BNB:'rgba(243,186,47,0.15)',
+    SOL:'rgba(153,69,255,0.15)', XRP:'rgba(0,149,207,0.15)',    USDC:'rgba(52,211,153,0.15)',
+    USDT:'rgba(38,161,123,0.15)',ADA:'rgba(0,140,255,0.15)',    DOGE:'rgba(203,155,31,0.15)',
+    TON:'rgba(0,136,204,0.15)',  BLOOM:'rgba(167,139,250,0.15)',
+  };
+
+  let topCoins = [];
+  let histories = {};
+  let marketStats = {};
+
+  try {
+    const [topData, statsData] = await Promise.all([
+      api('GET', '/api/coins/top?limit=25').catch(() => ({ coins: [] })),
+      api('GET', '/api/trade/market-stats').catch(() => ({ stats: [] })),
+    ]);
+    topCoins = topData.coins || [];
+    S.topCoinsData = topCoins;
+    (statsData.stats || []).forEach(s => { marketStats[s.symbol] = s.swap_count; });
+
+    const histResults = await Promise.all(
+      topCoins.map(c => api('GET', `/api/price-history?symbol=${c.symbol}&hours=24`).catch(() => ({ history: [] })))
+    );
+    topCoins.forEach((c, i) => { histories[c.symbol] = (histResults[i] && histResults[i].history) || []; });
+  } catch {}
+
+  let marketTab = 'most_active';
+
+  function buildSparkline(hist, color) {
+    if (!hist || hist.length < 2) {
+      return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+    const prices = hist.map(h => parseFloat(h.price_usd));
+    const mn = Math.min(...prices), mx = Math.max(...prices);
+    const rng = Math.max(mx - mn, 0.000001);
+    const xStep = 60 / (prices.length - 1);
+    const pts = prices.map((p, i) =>
+      `${(i * xStep).toFixed(1)},${(22 - ((p - mn) / rng) * 20).toFixed(1)}`
+    ).join(' ');
+    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  function fmtCoinPrice(p) {
+    if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (p >= 1)    return '$' + p.toFixed(2);
+    if (p >= 0.01) return '$' + p.toFixed(4);
+    return '$' + p.toFixed(8);
+  }
+
+  function getSortedCoins(tab) {
+    const coins = [...topCoins];
+    if (tab === 'most_active') {
+      coins.sort((a, b) => (marketStats[b.symbol] || 0) - (marketStats[a.symbol] || 0));
+    } else if (tab === 'top_gainer') {
+      coins.sort((a, b) => (b.price_change_24h_pct || 0) - (a.price_change_24h_pct || 0));
+    } else if (tab === 'top_loser') {
+      coins.sort((a, b) => (a.price_change_24h_pct || 0) - (b.price_change_24h_pct || 0));
+    }
+    return coins;
+  }
+
+  function renderCoinRows(tab) {
+    const rowsEl = document.getElementById('market-coin-rows');
+    if (!rowsEl) return;
+    const tabBtns = { most_active: 'mkt-tab-most-active', top_gainer: 'mkt-tab-top-gainer', top_loser: 'mkt-tab-top-loser' };
+    Object.entries(tabBtns).forEach(([t, id]) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+    });
+    const sorted = getSortedCoins(tab);
+    rowsEl.innerHTML = sorted.map((coin, idx) => {
+      const clrText = TOKEN_COLORS[coin.symbol] || '#8b95ab';
+      const clrBg   = TOKEN_BG[coin.symbol]    || 'rgba(100,100,120,0.2)';
+      const hist    = histories[coin.symbol] || [];
+      const pct     = coin.price_change_24h_pct;
+      const changeStr  = pct == null ? '—' : (pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`);
+      const changeCls  = pct == null ? 'text-[#8b95ab]' : pct > 0.05 ? 'text-emerald-400' : pct < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
+      const sparkline  = buildSparkline(hist, clrText);
+      const displaySym = coin.symbol.length > 4 ? coin.symbol.slice(0, 4) : coin.symbol;
+      const rankNum    = tab === 'most_active' ? (coin.rank || idx + 1) : idx + 1;
+      return `
+        <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
+             onclick="openTokenDetail('${coin.symbol}')">
+          <div class="text-xs text-[#4e5872] font-mono w-5 text-right shrink-0">${rankNum}</div>
+          <div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+               style="background:${clrBg};color:${clrText};">${displaySym}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold">${coin.symbol}</div>
+            <div class="text-xs text-[#8b95ab] truncate">${esc(coin.name)}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-sm font-semibold">${fmtCoinPrice(coin.price_usd)}</div>
+            <div class="text-xs font-medium ${changeCls}">${changeStr}</div>
+          </div>
+          <div class="shrink-0">${sparkline}</div>
+        </div>`;
+    }).join('');
+  }
+
+  window.setMarketTab = (tab) => {
+    marketTab = tab;
+    renderCoinRows(tab);
+  };
+
+  mwrap.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold text-[#e8eaf0]">Markets</h2>
+      <div class="flex gap-2">
+        <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active"  onclick="setMarketTab('most_active')">Most Active</button>
+        <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
+        <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
+      </div>
+    </div>
+    <div id="market-coin-rows" class="space-y-2"></div>`;
+
+  renderCoinRows(marketTab);
+}
+
+// ── Token Detail ──────────────────────────────────────────────────────────────
+async function renderTokenDetail(sec) {
+  const sym = S.tradeToken;
+
+  // Base metadata for all known swappable tokens + fallback for top-25 coins
+  const SWAPPABLE_TOKENS = new Set(['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM']);
+
+  const TOKEN_META_DETAIL = {
     BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
     ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
     BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
@@ -2156,155 +2304,70 @@ async function renderSwap(sec) {
     BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
     USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
   };
-  const MARKET_ORDER = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'USDT', 'ADA', 'DOGE', 'TON', 'BLOOM', 'USDC'];
 
-  let marketTab = 'most_active';
-  let marketStats = {};
+  // Try to get extended data (market cap, volume, etc.) from cached top-coins list
+  let topCoinData = (S.topCoinsData || []).find(c => c.symbol === sym);
+  // If not cached (deep link), fetch it
+  if (!topCoinData) {
+    try {
+      const td = await api('GET', '/api/coins/top?limit=25');
+      S.topCoinsData = td.coins || [];
+      topCoinData = S.topCoinsData.find(c => c.symbol === sym);
+    } catch {}
+  }
 
-  // Fetch price histories and market stats in parallel
-  let histories = {};
-  try {
-    const [histResults, statsData] = await Promise.all([
-      Promise.all(MARKET_ORDER.map(sym => api('GET', `/api/price-history?symbol=${sym}&hours=24`).catch(() => ({ history: [] })))),
-      api('GET', '/api/trade/market-stats').catch(() => ({ stats: [] })),
-    ]);
-    MARKET_ORDER.forEach((sym, i) => { histories[sym] = (histResults[i] && histResults[i].history) || []; });
-    (statsData.stats || []).forEach(s => { marketStats[s.symbol] = s.swap_count; });
-  } catch {}
-
-  function buildSparkline(hist, color) {
-    if (!hist || hist.length < 2) {
-      return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
+  // Build meta from static map, then augment with top-coin name/desc if available
+  let meta = TOKEN_META_DETAIL[sym];
+  if (!meta) {
+    if (topCoinData) {
+      meta = {
+        name: topCoinData.name,
+        color: 'rgb(139,149,171)',
+        badgeBg: 'bg-[#8b95ab]/10',
+        badgeText: 'text-[#8b95ab]',
+        desc: `${topCoinData.name} (${sym}) — ranked #${topCoinData.rank} by market cap.`,
+      };
+    } else {
+      S.tradeToken = null; navigate('market'); return;
     }
-    const prices = hist.map(h => parseFloat(h.price_usd));
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const range = Math.max(max - min, 0.000001);
-    const xStep = 60 / (prices.length - 1);
-    const pts = prices.map((p, i) =>
-      `${(i * xStep).toFixed(1)},${(22 - ((p - min) / range) * 20).toFixed(1)}`
-    ).join(' ');
-    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
   }
 
-  function computeChange(hist) {
-    if (!hist || hist.length < 2) return null;
-    const first = parseFloat(hist[0].price_usd);
-    const last  = parseFloat(hist[hist.length - 1].price_usd);
-    return ((last - first) / first) * 100;
-  }
+  const swappable = SWAPPABLE_TOKENS.has(sym);
+  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
+  const useTradingView = sym in TV_SYMBOLS;
+  let chartHours = 24;
 
-  function fmtMarketPrice(sym) {
-    const p = S.prices[sym];
+  function fmtDetailPrice(s) {
+    const p = topCoinData ? topCoinData.price_usd : S.prices[s];
     if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (p >= 1)    return '$' + p.toFixed(2);
+    if (p >= 0.01) return '$' + p.toFixed(4);
+    return '$' + p.toFixed(8);
+  }
+
+  function fmtLargeNum(n) {
+    if (!n || n === 0) return '—';
+    if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
+    return '$' + n.toLocaleString();
+  }
+
+  function fmtSupply(n, s) {
+    if (!n || n === 0) return '—';
+    if (n >= 1e12) return (n / 1e12).toFixed(2) + 'T ' + s;
+    if (n >= 1e9)  return (n / 1e9).toFixed(2) + 'B ' + s;
+    if (n >= 1e6)  return (n / 1e6).toFixed(2) + 'M ' + s;
+    return n.toLocaleString() + ' ' + s;
+  }
+
+  function fmtHiLo(p) {
+    if (!p || p === 0) return '—';
     if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (p >= 1)    return '$' + p.toFixed(2);
     return '$' + p.toFixed(4);
   }
-
-  function getSortedSymbols(tab) {
-    const syms = [...MARKET_ORDER];
-    if (tab === 'most_active') {
-      syms.sort((a, b) => (marketStats[b] || 0) - (marketStats[a] || 0));
-    } else if (tab === 'top_gainer') {
-      syms.sort((a, b) => {
-        const ca = computeChange(histories[a]);
-        const cb = computeChange(histories[b]);
-        if (ca === null && cb === null) return 0;
-        if (ca === null) return 1;
-        if (cb === null) return -1;
-        return cb - ca;
-      });
-    } else if (tab === 'top_loser') {
-      syms.sort((a, b) => {
-        const ca = computeChange(histories[a]);
-        const cb = computeChange(histories[b]);
-        if (ca === null && cb === null) return 0;
-        if (ca === null) return 1;
-        if (cb === null) return -1;
-        return ca - cb;
-      });
-    }
-    return syms;
-  }
-
-  function renderMarketRows(tab) {
-    const rowsEl = document.getElementById('swap-market-rows');
-    if (!rowsEl) return;
-    const tabBtns = { most_active: 'mkt-tab-most-active', top_gainer: 'mkt-tab-top-gainer', top_loser: 'mkt-tab-top-loser' };
-    Object.entries(tabBtns).forEach(([t, id]) => {
-      const btn = document.getElementById(id);
-      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
-    });
-    const sorted = getSortedSymbols(tab);
-    rowsEl.innerHTML = sorted.map(sym => {
-      const meta = TOKEN_META[sym];
-      const hist = histories[sym];
-      const change = computeChange(hist);
-      const changeStr = change === null ? '—' :
-        (change >= 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`);
-      const changeClass = change === null ? 'text-[#8b95ab]' :
-        change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
-      const sparkline = buildSparkline(hist, meta.color);
-      return `
-        <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
-             onclick="openTokenDetail('${sym}')">
-          <div class="w-9 h-9 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-xs font-bold shrink-0">${sym}</div>
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">${sym}</div>
-            <div class="text-xs text-[#8b95ab] truncate">${meta.name}</div>
-          </div>
-          <div class="text-right shrink-0">
-            <div class="text-sm font-semibold">${fmtMarketPrice(sym)}</div>
-            <div class="text-xs font-medium ${changeClass}">${changeStr}</div>
-          </div>
-          <div class="shrink-0">${sparkline}</div>
-        </div>`;
-    }).join('');
-  }
-
-  window.setMarketTab = (tab) => {
-    marketTab = tab;
-    renderMarketRows(tab);
-  };
-
-  mwrap.innerHTML = `
-    <div class="flex items-center justify-between mt-6 mb-2">
-      <h3 class="font-semibold text-[#e8eaf0]">Markets</h3>
-      <div class="flex gap-2">
-        <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
-        <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
-        <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
-      </div>
-    </div>
-    <div id="swap-market-rows" class="space-y-2"></div>`;
-
-  renderMarketRows(marketTab);
-}
-
-// ── Token Detail ──────────────────────────────────────────────────────────────
-async function renderTokenDetail(sec) {
-  const sym = S.tradeToken;
-  const TOKEN_META_DETAIL = {
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   btnCls: 'bg-amber-500 hover:bg-amber-400',      desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-500 hover:bg-sky-400',          desc: 'The programmable blockchain powering smart contracts and DeFi.' },
-    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  btnCls: 'bg-yellow-500 hover:bg-yellow-400',    desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
-    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  btnCls: 'bg-purple-600 hover:bg-purple-500',    desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
-    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    btnCls: 'bg-cyan-600 hover:bg-cyan-500',        desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
-    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    btnCls: 'bg-teal-600 hover:bg-teal-500',        desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
-    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    btnCls: 'bg-blue-600 hover:bg-blue-500',        desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
-    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  btnCls: 'bg-yellow-600 hover:bg-yellow-500',    desc: 'The original meme coin, now widely used for tipping and payments.' },
-    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     btnCls: 'bg-sky-600 hover:bg-sky-500',          desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  btnCls: 'btn-v',                                desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', btnCls: 'bg-emerald-600 hover:bg-emerald-500',  desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
-  };
-  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
-  const useTradingView = sym in TV_SYMBOLS;
-
-  const meta = TOKEN_META_DETAIL[sym];
-  if (!meta) { S.tradeToken = null; navigate('trade'); return; }
-
-  let chartHours = 24;
 
   function computeChangePct(hist) {
     if (!hist || hist.length < 2) return null;
@@ -2349,14 +2412,6 @@ async function renderTokenDetail(sec) {
     container.appendChild(script);
   }
 
-  function fmtDetailPrice(s) {
-    const p = S.prices[s];
-    if (p == null) return '—';
-    if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    if (p >= 1)    return '$' + p.toFixed(2);
-    return '$' + p.toFixed(4);
-  }
-
   async function load() {
     await refreshBalances();
     let hist24 = [];
@@ -2365,7 +2420,8 @@ async function renderTokenDetail(sec) {
       hist24 = (res && res.history) || [];
     } catch {}
 
-    const change = computeChangePct(hist24);
+    // Use API 24h pct if available, otherwise compute from history
+    let change = topCoinData ? topCoinData.price_change_24h_pct : computeChangePct(hist24);
     const changeStr = change === null ? '—' : (change >= 0 ? `+${change.toFixed(2)}%` : `${change.toFixed(2)}%`);
     const changeCls = change === null ? 'text-[#8b95ab]' : change > 0.05 ? 'text-emerald-400' : change < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
 
@@ -2379,11 +2435,36 @@ async function renderTokenDetail(sec) {
           <div id="token-detail-chart"></div>
         </div>`;
 
+    // Stats tiles from top-coin data
+    const statsRow = topCoinData ? `
+      <div class="grid grid-cols-2 gap-2 mt-3">
+        <div class="bg-[#161b2a] rounded-xl px-3 py-2">
+          <div class="text-xs text-[#4e5872] mb-0.5">Market Cap</div>
+          <div class="text-sm font-semibold text-[#e8eaf0]">${fmtLargeNum(topCoinData.market_cap)}</div>
+        </div>
+        <div class="bg-[#161b2a] rounded-xl px-3 py-2">
+          <div class="text-xs text-[#4e5872] mb-0.5">24h Volume</div>
+          <div class="text-sm font-semibold text-[#e8eaf0]">${fmtLargeNum(topCoinData.volume_24h)}</div>
+        </div>
+        <div class="bg-[#161b2a] rounded-xl px-3 py-2">
+          <div class="text-xs text-[#4e5872] mb-0.5">Circulating Supply</div>
+          <div class="text-sm font-semibold text-[#e8eaf0]">${fmtSupply(topCoinData.circulating_supply, sym)}</div>
+        </div>
+        <div class="bg-[#161b2a] rounded-xl px-3 py-2">
+          <div class="text-xs text-[#4e5872] mb-0.5">24h High / Low</div>
+          <div class="text-sm font-semibold text-[#e8eaf0]">${fmtHiLo(topCoinData.high_24h)} / ${fmtHiLo(topCoinData.low_24h)}</div>
+        </div>
+      </div>` : '';
+
+    const swapSection = swappable
+      ? `<div id="detail-swap-wrap" class="mt-4"></div>`
+      : `<div class="card mt-4 text-center py-6 text-[#8b95ab] text-sm">Swapping ${esc(sym)} is not yet available.</div>`;
+
     sec.innerHTML = `
-      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('trade')">← Markets</button>
+      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-4 flex items-center gap-1 token-detail-back" onclick="S.tradeToken=null;navigate('market')">← Market</button>
       <div class="card space-y-4 mb-4">
         <div class="flex items-center gap-3">
-          <div class="w-12 h-12 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-sm font-bold shrink-0">${sym}</div>
+          <div class="w-12 h-12 rounded-full flex items-center justify-center ${meta.badgeBg} ${meta.badgeText} text-sm font-bold shrink-0">${sym.length > 4 ? sym.slice(0,4) : sym}</div>
           <div>
             <div class="font-bold text-lg leading-tight">${esc(meta.name)}</div>
             <div class="text-sm text-[#8b95ab]">${sym}</div>
@@ -2393,15 +2474,21 @@ async function renderTokenDetail(sec) {
             <div class="text-sm font-medium ${changeCls}">${changeStr} <span class="text-[#4e5872] font-normal">24h</span></div>
           </div>
         </div>
+        ${statsRow}
         <p class="text-sm text-[#8b95ab]">${esc(meta.desc)}</p>
         ${chartSection}
       </div>
-      <button class="btn btn-v w-full py-3 rounded-xl font-semibold" onclick="window._swapFromDetail('${sym}')">Swap ${esc(sym)} →</button>`;
+      ${swapSection}`;
 
     if (useTradingView) {
       mountTradingViewChart(sym);
     } else {
       await renderChart();
+    }
+
+    if (swappable) {
+      const swapWrap = document.getElementById('detail-swap-wrap');
+      if (swapWrap) renderSwapCard(swapWrap, sym);
     }
   }
 
@@ -2412,12 +2499,6 @@ async function renderTokenDetail(sec) {
     if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 24 ? 'pill-active' : 'pill-inactive'}`;
     if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium transition-colors ${h === 168 ? 'pill-active' : 'pill-inactive'}`;
     await renderChart();
-  };
-
-  window._swapFromDetail = (s) => {
-    S.tradeToken = null;
-    navigate('trade');
-    setTimeout(() => { if (window.swapFromChange) window.swapFromChange(s); }, 50);
   };
 
   await load();
@@ -3092,7 +3173,7 @@ async function renderMarkets(sec, demoMarkets) {
         <p class="text-xs text-[#4e5872]">BloomMoney is a demo prediction platform — no real funds.</p>
         <div class="flex gap-4 justify-center text-xs text-[#8b95ab]">
           <button class="hover:text-[#e8eaf0]" onclick="navigate('earn')">Earn</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('trade')">Trade</button>
+          <button class="hover:text-[#e8eaf0]" onclick="navigate('market')">Market</button>
           <button class="hover:text-[#e8eaf0]" onclick="navigate('nfts')">NFTs</button>
         </div>
       </div>
