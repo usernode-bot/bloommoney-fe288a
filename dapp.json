@@ -138,6 +138,10 @@
   "tests": [
     { "name": "Feed renders", "path": "/?demo=1", "expectSelector": "#app-feed" },
     { "name": "Opinion markets section in DOM", "path": "/?demo=1", "expectSelector": "#section-markets" },
+    { "name": "Prediction market hero renders", "path": "/?demo=1", "expectSelector": ".pm-hero" },
+    { "name": "Category filter chips render", "path": "/?demo=1", "expectSelector": ".pm-category-chip" },
+    { "name": "Market grid card renders", "path": "/?demo=1", "expectSelector": ".pm-market-card" },
+    { "name": "How-it-works section renders", "path": "/?demo=1", "expectSelector": ".pm-how-it-works" },
     { "name": "Futures terminal in DOM", "path": "/?demo=1", "expectSelector": "#section-futures" },
     { "name": "Verify screen in DOM", "path": "/?demo=1", "expectSelector": "#section-verify" },
     { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
@@ -167,6 +171,10 @@
     { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
     { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" },
     { "name": "Highlights tab button in feed DOM", "path": "/?demo=1", "expectText": "Highlights" },
+    { "name": "Landing page hero renders", "path": "/landing.html", "expectSelector": "#landing-hero" },
+    { "name": "Vault section in DOM", "path": "/?demo=1", "expectSelector": "#section-vault" },
+    { "name": "Launchpad nav item in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='launchpad']" },
+    { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
     { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" },
     { "name": "Trade Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
     { "name": "Journal API returns JSON", "path": "/api/journal", "expectSelector": "body" },
@@ -185,6 +193,8 @@
     { "name": "NFT activity API returns JSON", "path": "/api/nft-activity", "expectSelector": "body" },
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
-    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" }
+    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" },
+    { "name": "News tab button renders in feed", "path": "/?demo=1", "expectText": "News 📰" },
+    { "name": "News feed API returns bot posts", "path": "/api/feed?tab=news&limit=10", "expectSelector": "body" }
   ]
 }
