@@ -161,7 +161,6 @@
       <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
-      <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">DeFi</div>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="stake">🔒 Stake</button>
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
@@ -173,7 +172,6 @@
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
@@ -490,6 +488,7 @@ const S = {
   prices: {},
   marketId: null,
   tradeToken: null,
+  tradePrefillSymbol: null,
   topCoinsData: [],
   profileUser: null,
   futuresMarket: null,
@@ -1924,6 +1923,10 @@ window.doCopyTrade = async (username) => {
 // ── Token detail ──────────────────────────────────────────────────────────────
 window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('market'); };
 
+// Leave the coin detail and jump to the Trade page focused on this token.
+// Clearing tradeToken prevents the Market tab from re-opening the detail later.
+window.openTradeForToken = (sym) => { S.tradeToken = null; navigate('trade', { tradePrefillSymbol: sym }); };
+
 // ── Swap Card (reusable helper) ────────────────────────────────────────────────
 function renderSwapCard(containerEl, prefilledFrom) {
   const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
@@ -2580,7 +2583,7 @@ async function renderTokenDetail(sec) {
       </div>` : '';
 
     const swapSection = swappable
-      ? `<div id="detail-swap-wrap" class="mt-4"></div>`
+      ? `<button id="token-detail-trade-btn" class="token-detail-trade-btn w-full mt-4 py-3 rounded-xl font-bold text-sm text-white transition-all" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1)" onclick="window.openTradeForToken('${esc(sym)}')">Trade ${esc(sym)} →</button>`
       : `<div class="card mt-4 text-center py-6 text-[#8b95ab] text-sm">Swapping ${esc(sym)} is not yet available.</div>`;
 
     sec.innerHTML = `
@@ -2607,11 +2610,6 @@ async function renderTokenDetail(sec) {
       mountTradingViewChart(sym);
     } else {
       await renderChart();
-    }
-
-    if (swappable) {
-      const swapWrap = document.getElementById('detail-swap-wrap');
-      if (swapWrap) renderSwapCard(swapWrap, sym);
     }
   }
 
@@ -4257,6 +4255,21 @@ async function renderFutures(sec) {
     } catch (e) {
       sec.innerHTML = `<div class="p-8 text-center text-[#4e5872] text-sm">Failed to load futures data: ${esc(e.message)}</div>`;
       return;
+    }
+
+    // Consume a one-shot prefill from the coin/token detail "Trade" button.
+    if (S.tradePrefillSymbol) {
+      const want = _markets.find(m => m.symbol.split('-')[0] === S.tradePrefillSymbol);
+      if (want) {
+        // BTC/ETH/BLOOM have a perp market — select it, keep the default Long side.
+        S.futuresMarket = want;
+      } else if (FUT_TOKENS.includes(S.tradePrefillSymbol)) {
+        // No perp market — open the Swap tab pre-targeted at this token.
+        side = 'swap';
+        payToken = 'USDC';
+        receiveToken = S.tradePrefillSymbol;
+      }
+      S.tradePrefillSymbol = null;
     }
 
     if (!S.futuresMarket && _markets.length) S.futuresMarket = _markets[0];
