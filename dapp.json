@@ -203,6 +203,8 @@
     { "name": "News feed API returns bot posts", "path": "/api/feed?tab=news&limit=10", "expectSelector": "body" },
     { "name": "Futures leverage presets render", "path": "/?demo=1", "expectSelector": "#fut-lev-presets" },
     { "name": "Verify screen shows 100x leverage benefit", "path": "/?demo=1", "expectText": "Up to 100× leverage" },
-    { "name": "KYC API exposes zk_verified flag", "path": "/api/kyc", "expectSelector": "body" }
+    { "name": "KYC API exposes zk_verified flag", "path": "/api/kyc", "expectSelector": "body" },
+    { "name": "Earn hub hero renders with max APY", "path": "/?demo=1", "expectText": "Up to 18.5% APY" },
+    { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" }
   ]
 }
