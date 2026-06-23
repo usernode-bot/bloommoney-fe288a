@@ -861,6 +861,7 @@ async function renderFeed(sec) {
 
   function postCard(p) {
     const isMilestone = !!p.milestone_type;
+    const isBot = !!p.is_bot;
     const cheerCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
     const body = isLockedForMe
@@ -875,6 +876,12 @@ async function renderFeed(sec) {
     const milestoneBanner = isMilestone
       ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
       : '';
+    const sourcePill = isBot && p.bot_source
+      ? `<span class="inline-flex items-center text-xs bg-[#161b2a] border border-[rgba(78,154,241,0.25)] rounded-full px-2 py-0.5 text-[#4e9af1] ml-1">${esc(p.bot_source)}</span>`
+      : '';
+    const readMoreLink = isBot && p.source_url
+      ? `<a href="${esc(p.source_url)}" target="_blank" rel="noopener noreferrer" class="text-[#4e9af1] hover:text-[#7c5cfc] text-xs transition-colors">Read article →</a>`
+      : '';
     const likeBtn = isMilestone
       ? `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">🎉 ${p.like_count}</button>`
       : `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>`;
@@ -884,6 +891,8 @@ async function renderFeed(sec) {
           <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10', p.author_avatar_url)}</button>
           <div class="min-w-0">
             <button class="text-sm font-semibold text-[#e8eaf0] hover:text-[#7c5cfc] truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
+            ${isBot ? '<span class="text-xs ml-1" title="Automated news bot">🤖</span>' : ''}
+            ${sourcePill}
             ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
             ${p.locked ? '<span class="text-amber-400 text-xs ml-1" title="Premium locked post">🔒</span>' : ''}
             <span class="text-[#4e5872] text-xs ml-2">${tsAgo(p.created_at)}</span>
@@ -895,8 +904,9 @@ async function renderFeed(sec) {
       <div class="flex items-center gap-4">
         ${likeBtn}
         <button class="text-[#4e5872] hover:text-[#8b95ab] flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
-        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
-        ${S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
+        ${readMoreLink}
+        ${!isBot && S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
+        ${!isBot && S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
       </div>
     </div>`;
   }
@@ -919,8 +929,9 @@ async function renderFeed(sec) {
 
   function render() {
     if (feedState.thread) return;
+    const isNewsTab = feedState.tab === 'news';
     sec.innerHTML = `
-      <div class="card space-y-2">
+      ${isNewsTab ? '' : `<div class="card space-y-2">
         <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <select id="compose-milestone" class="inp text-xs py-1">
@@ -943,11 +954,12 @@ async function renderFeed(sec) {
           </div>
           <button class="btn btn-v" onclick="submitPost()">Post</button>
         </div>
-      </div>
+      </div>`}
       <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='wins'?'pill-active':'pill-inactive'}" onclick="switchTab('wins')">Wins 🏆</button>
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='news'?'pill-active':'pill-inactive'}" onclick="switchTab('news')">News 📰</button>
       </div>
       <div id="feed-list" class="space-y-3">
         ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
