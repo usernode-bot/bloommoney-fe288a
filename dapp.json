@@ -185,6 +185,9 @@
     { "name": "NFT activity API returns JSON", "path": "/api/nft-activity", "expectSelector": "body" },
     { "name": "Portfolio chart API returns JSON", "path": "/api/portfolio/chart", "expectSelector": "body" },
     { "name": "Market stats API returns JSON", "path": "/api/trade/market-stats", "expectSelector": "body" },
-    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" }
+    { "name": "Market tab buttons render on trade page", "path": "/?demo=1", "expectSelector": "#mkt-tab-most-active" },
+    { "name": "Analytics section in DOM", "path": "/?demo=1", "expectSelector": "#section-analytics" },
+    { "name": "Analytics nav button in DOM", "path": "/?demo=1", "expectSelector": "[data-view=\"analytics\"]" },
+    { "name": "Analytics spending API returns JSON", "path": "/api/analytics/spending", "expectSelector": "body" }
   ]
 }
