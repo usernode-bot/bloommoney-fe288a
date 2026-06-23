@@ -759,6 +759,78 @@ app.patch('/api/me', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Avatar upload (raw image bytes → Postgres) ─────────────────────────────────
+// Accepts the raw JPG/PNG file (max ~2 MB) as the request body and stores the
+// bytes in the public `user_avatars` table. We point users.avatar_url at the
+// serve route below (cache-busted) so every existing display path — feed,
+// threads, profile, edit-form preview — shows the uploaded image unchanged.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024; // ~2 MB
+const avatarRawBody = express.raw({ type: ['image/jpeg', 'image/png'], limit: AVATAR_MAX_BYTES });
+function sniffImageType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 &&
+      buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) return 'image/png';
+  return null;
+}
+app.post('/api/avatar', avatarRawBody, async (req, res) => {
+  try {
+    const declared = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (declared !== 'image/jpeg' && declared !== 'image/png') {
+      return res.status(400).json({ error: 'Only JPG or PNG images are allowed' });
+    }
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'No image data received' });
+    }
+    if (buf.length > AVATAR_MAX_BYTES) {
+      return res.status(400).json({ error: 'Image too large (max 2 MB)' });
+    }
+    // Verify the actual file contents match a real JPG/PNG signature and the
+    // declared content type — don't trust the header alone.
+    const sniffed = sniffImageType(buf);
+    if (!sniffed || sniffed !== declared) {
+      return res.status(400).json({ error: 'File contents are not a valid JPG or PNG image' });
+    }
+    await pool.query(
+      `INSERT INTO user_avatars (user_id, username, content_type, image_bytes, byte_size, updated_at)
+       VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         username=EXCLUDED.username, content_type=EXCLUDED.content_type,
+         image_bytes=EXCLUDED.image_bytes, byte_size=EXCLUDED.byte_size, updated_at=NOW()`,
+      [req.user.id, req.user.username, declared, buf, buf.length]
+    );
+    const avatar_url = `/avatars/${encodeURIComponent(req.user.username)}?v=${Date.now()}`;
+    await pool.query('UPDATE users SET avatar_url=$1 WHERE user_id=$2', [avatar_url, req.user.id]);
+    res.json({ ok: true, avatar_url });
+  } catch (e) {
+    // express.raw rejects oversized bodies with a 413-flavored error before the
+    // handler runs in some cases; surface a clean message either way.
+    if (e && (e.type === 'entity.too.large' || e.status === 413)) {
+      return res.status(400).json({ error: 'Image too large (max 2 MB)' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public serve route for stored avatar bytes. A plain GET (not under /api/) so
+// it bypasses the JWT gate — an <img src> can't forward the iframe token, and
+// avatars are public content anyway.
+app.get('/avatars/:username', async (req, res) => {
+  try {
+    const { rows: [row] } = await pool.query(
+      'SELECT content_type, image_bytes FROM user_avatars WHERE username=$1',
+      [req.params.username]
+    );
+    if (!row) return res.status(404).end();
+    res.setHeader('Content-Type', row.content_type);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.send(row.image_bytes);
+  } catch (e) {
+    return res.status(404).end();
+  }
+});
+
 app.put('/api/profile/cover', async (req, res) => {
   try {
     const { cover_url } = req.body;
@@ -4153,6 +4225,17 @@ async function start() {
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT;
+    -- Uploaded avatar image bytes, stored directly in Postgres. Public table:
+    -- avatars are public profile content shown in the feed, threads and profiles,
+    -- so a stranger seeing every row is fine (no staging:private marker).
+    CREATE TABLE IF NOT EXISTS user_avatars (
+      user_id INTEGER PRIMARY KEY,
+      username VARCHAR(255),
+      content_type VARCHAR(30) NOT NULL,
+      image_bytes BYTEA NOT NULL,
+      byte_size INTEGER NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS wallet_balances (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -4716,6 +4799,23 @@ async function start() {
     await pool.query(`
       UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL
     `, ['data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMDBhYTU1Ii8+PHRleHQgeD0iMzIiIHk9IjQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIzMiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BPC90ZXh0Pjwvc3ZnPg==']);
+
+    // Seed staging-bob with a real uploaded avatar stored as bytes in Postgres,
+    // exercising the new user_avatars table + /avatars/:username serve route.
+    const demoAvatarPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    await pool.query(
+      `INSERT INTO user_avatars (user_id, username, content_type, image_bytes, byte_size, updated_at)
+       VALUES (9002,'staging-bob','image/png',$1,$2,NOW())
+       ON CONFLICT (user_id) DO NOTHING`,
+      [demoAvatarPng, demoAvatarPng.length]
+    );
+    await pool.query(
+      `UPDATE users SET avatar_url='/avatars/staging-bob'
+       WHERE user_id=9002 AND (avatar_url IS NULL OR avatar_url='')`
+    );
 
     // Give demo users an obviously-fake non-zero Points available balance so the
     // Post-to-Earn badge renders a realistic number in staging previews. Scoped
