@@ -201,7 +201,6 @@ async function ensureBalances(userId, pubkey) {
       [userId, sym, bal]
     );
   }
-  await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [userId]);
   if (pubkey) {
     await pool.query(
       "INSERT INTO kyc_verifications(user_id,level,status) VALUES($1,'basic','approved') ON CONFLICT DO NOTHING",
@@ -486,14 +485,10 @@ async function runFunding() {
         const sign = p.side === 'long' ? -1 : 1;
         const amount = Math.round(sign * notional * rate * UNITS);
         if (amount !== 0) {
-          if (p.mode === 'live') {
-            await client.query(
-              "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=GREATEST(0,wallet_balances.balance+$2), updated_at=NOW()",
-              [p.user_id, amount]
-            );
-          } else {
-            await client.query('UPDATE paper_balances SET usdc_balance=GREATEST(0,usdc_balance+$1) WHERE user_id=$2', [amount, p.user_id]);
-          }
+          await client.query(
+            "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=GREATEST(0,wallet_balances.balance+$2), updated_at=NOW()",
+            [p.user_id, amount]
+          );
           await client.query(
             'INSERT INTO funding_payments(position_id,user_id,market_id,amount,rate,mode) VALUES($1,$2,$3,$4,$5,$6)',
             [p.id, p.user_id, m.id, amount, rate, p.mode]
@@ -892,8 +887,7 @@ app.post('/api/unfollow', async (req, res) => {
 app.get('/api/balances', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM wallet_balances WHERE user_id=$1', [req.user.id]);
-    const { rows: [paper] } = await pool.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1', [req.user.id]);
-    res.json({ balances: rows, paperBalance: paper?.usdc_balance || 0 });
+    res.json({ balances: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1312,7 +1306,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
 
     const tier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, tier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     const { rows: prices } = await client.query('SELECT symbol, price_usd::float FROM market_prices');
     const priceMap = {};
     prices.forEach(p => priceMap[p.symbol] = p.price_usd);
@@ -1548,7 +1542,7 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
     const icoTier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, icoTier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     await client.query('BEGIN');
     const { rows: [ico] } = await client.query(
       "SELECT * FROM ico_offerings WHERE id=$1 AND status='active' FOR UPDATE", [req.params.id]
@@ -1720,7 +1714,7 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
     const mtTier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, mtTier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     await client.query('BEGIN');
     const { rows: [market] } = await client.query(
       "SELECT * FROM opinion_markets WHERE id=$1 AND status='open' FOR UPDATE", [req.params.id]
@@ -1874,22 +1868,15 @@ app.get('/api/futures/positions', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/futures/paper-balance', async (req, res) => {
-  try {
-    const { rows: [pb] } = await pool.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1', [req.user.id]);
-    res.json({ balance: pb?.usdc_balance || 10000000000 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, mode, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
+    const { market_id, side, leverage, quantity, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
     const lev = Math.max(1, Math.min(ZK_MAX_LEVERAGE, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
     if (!['long', 'short'].includes(side)) return res.status(400).json({ error: 'Invalid side' });
-    if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'Invalid mode' });
+    const mode = 'live';
 
     const tier = await userTier(req.user.id);
     if (mode === 'live') {
@@ -1903,7 +1890,7 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     if (lev > PREMIUM_MAX_LEVERAGE && !(await isZkVerified(req.user.id)))
       return res.status(403).json({ error: 'verify_required', tier_needed: 'zkpassport' });
     if (!(await withinBasicDailyCap(req.user.id, tier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
 
     // Idempotency guard against double-submit (Phase 4).
     if (idempotency_key) {
@@ -1926,24 +1913,18 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const marginUnits = Math.ceil(qty * markPrice * UNITS / lev);
     const liqPrice = side === 'long' ? markPrice * (1 - 0.9 / lev) : markPrice * (1 + 0.9 / lev);
 
-    // BLOOM gas fee check — applies to both live and paper modes.
+    // BLOOM gas fee check.
     const { rows: [bloomOpenBal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
     if (!bloomOpenBal || Number(bloomOpenBal.balance) < FUTURES_GAS)
       throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
 
-    if (mode === 'live') {
-      const { rows: [bal] } = await client.query(
-        "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
-      );
-      if (!bal || Number(bal.balance) < marginUnits) throw new Error('Insufficient USDC');
-      await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [marginUnits, req.user.id]);
-    } else {
-      const { rows: [pb] } = await client.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1 FOR UPDATE', [req.user.id]);
-      if (!pb || Number(pb.usdc_balance) < marginUnits) throw new Error('Insufficient paper balance');
-      await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
-    }
+    const { rows: [bal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!bal || Number(bal.balance) < marginUnits) throw new Error('Insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [marginUnits, req.user.id]);
 
     const validOrderType = ['market', 'limit', 'twap'].includes(order_type) ? order_type : 'market';
     const validLimitPrice = limit_price ? parseFloat(limit_price) : null;
@@ -1989,7 +1970,7 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     const pnl = Math.round((pos.mark_price - parseFloat(pos.entry_price)) * parseFloat(pos.quantity) * (pos.side === 'long' ? 1 : -1) * UNITS);
     const returnAmt = Math.max(0, Number(pos.margin) + pnl);
 
-    // BLOOM gas fee for closing (applies to both live and paper modes).
+    // BLOOM gas fee for closing.
     const { rows: [bloomCloseBal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
@@ -2001,11 +1982,7 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     );
 
     await client.query("UPDATE futures_positions SET status='closed', realized_pnl=$1, closed_at=NOW() WHERE id=$2", [pnl, pos.id]);
-    if (pos.mode === 'live') {
-      await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
-    } else {
-      await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance+$1 WHERE user_id=$2', [returnAmt, req.user.id]);
-    }
+    await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
     await client.query('UPDATE futures_markets SET open_interest=GREATEST(0, open_interest-$1) WHERE id=$2', [pos.margin, pos.market_id]);
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
@@ -3062,11 +3039,11 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
       return res.json({ ok: true, copied_count: 0, positions: [] });
     }
 
-    // Check paper balance
-    const { rows: [paperBal] } = await client.query(
-      'SELECT usdc_balance FROM paper_balances WHERE user_id=$1 FOR UPDATE', [req.user.id]
+    // Check live USDC balance
+    const { rows: [usdcBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
     );
-    let availableBalance = Number(paperBal?.usdc_balance || 10000000000);
+    let availableBalance = Number(usdcBal?.balance || 0);
 
     const copiedPositions = [];
     const totalMarginNeeded = sourcePositions.reduce((sum, p) => {
@@ -3078,10 +3055,10 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
 
     if (availableBalance < totalMarginNeeded) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Insufficient paper balance' });
+      return res.status(400).json({ error: 'Insufficient USDC balance' });
     }
 
-    // Create copied positions
+    // Create copied positions in live mode
     for (const src of sourcePositions) {
       const qty = parseFloat(src.quantity);
       const markPrice = src.mark_price;
@@ -3093,7 +3070,7 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
 
       const { rows: [newPos] } = await client.query(`
         INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
-        VALUES($1,$2,'paper',$3,$4,$5,$6,$7,$8) RETURNING *
+        VALUES($1,$2,'live',$3,$4,$5,$6,$7,$8) RETURNING *
       `, [req.user.id, src.market_id, src.side, lev, markPrice, qty, margin, liqPrice]);
 
       await client.query(
@@ -3110,14 +3087,16 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
         quantity: newPos.quantity.toString(),
         entry_price: newPos.entry_price.toString(),
         margin: newPos.margin,
-        mode: 'paper'
+        mode: 'live'
       });
 
       availableBalance -= margin;
     }
 
-    await client.query('UPDATE paper_balances SET usdc_balance=$1 WHERE user_id=$2',
-      [availableBalance, req.user.id]);
+    await client.query(
+      "UPDATE wallet_balances SET balance=$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'",
+      [availableBalance, req.user.id]
+    );
 
     await client.query('COMMIT');
     res.json({ ok: true, copied_count: copiedPositions.length, positions: copiedPositions });
@@ -4087,7 +4066,7 @@ async function start() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
       market_id INTEGER NOT NULL REFERENCES futures_markets(id),
-      mode VARCHAR(10) NOT NULL DEFAULT 'paper',
+      mode VARCHAR(10) NOT NULL DEFAULT 'live',
       side VARCHAR(5) NOT NULL,
       leverage INTEGER NOT NULL DEFAULT 1,
       entry_price NUMERIC(20,6) NOT NULL,
@@ -4316,6 +4295,7 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_positions ALTER COLUMN mode SET DEFAULT 'live';
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) DEFAULT 'market';
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS limit_price NUMERIC(20,6);
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS slippage_bps INTEGER DEFAULT 50;
@@ -4538,7 +4518,6 @@ async function start() {
           ($1,'ADA',100000000),($1,'DOGE',200000000),($1,'TON',10000000),($1,'USDT',20000000)
         ON CONFLICT DO NOTHING
       `, [uid]);
-      await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);
     }
 
     // Seed posts
@@ -4818,8 +4797,7 @@ async function start() {
         provider='zkpassport', attestation_ref='staging-zk-session-9004', verified_at=NOW()
     `);
 
-    // Seed open futures positions (one paper, one live) so PnL + funding
-    // columns render, plus a little funding history.
+    // Seed open futures positions (live mode) so PnL + funding columns render.
     const ethFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='ETH-PERP'")).rows[0];
     const btcFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='BTC-PERP'")).rows[0];
     if (ethFut && btcFut) {
@@ -4833,7 +4811,7 @@ async function start() {
       await pool.query(`
         INSERT INTO funding_payments(id,position_id,user_id,market_id,amount,rate,mode) VALUES
           (900001,900001,9001,$1,-240,0.0001,'live'),
-          (900002,900002,9004,$2,170,0.0001,'paper')
+          (900002,900002,9004,$2,170,0.0001,'live')
         ON CONFLICT(id) DO NOTHING
       `, [ethFut.id, btcFut.id]);
       await pool.query(`
@@ -4882,28 +4860,28 @@ async function start() {
       // staging-alice: 5 closed positions with mix of profit/loss (total ROI ~+30%)
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
-          (900101,9001,$1,'paper','long',3,2000,0.5,333333333,1600,'closed',50000000,NOW()-INTERVAL '30 days',NOW()-INTERVAL '20 days'),
-          (900102,9001,$2,'paper','long',5,65000,0.02,260000000,52000,'closed',26000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '15 days'),
-          (900103,9001,$1,'paper','short',2,2300,1.0,383333333,2645,'closed',-57500000,NOW()-INTERVAL '20 days',NOW()-INTERVAL '10 days'),
-          (900104,9001,$2,'paper','short',4,66000,0.01,165000000,79200,'closed',66000000,NOW()-INTERVAL '15 days',NOW()-INTERVAL '5 days'),
-          (900105,9001,$1,'paper','long',2,2100,0.8,336000000,2310,'closed',32000000,NOW()-INTERVAL '10 days',NOW()-INTERVAL '2 days')
+          (900101,9001,$1,'live','long',3,2000,0.5,333333333,1600,'closed',50000000,NOW()-INTERVAL '30 days',NOW()-INTERVAL '20 days'),
+          (900102,9001,$2,'live','long',5,65000,0.02,260000000,52000,'closed',26000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '15 days'),
+          (900103,9001,$1,'live','short',2,2300,1.0,383333333,2645,'closed',-57500000,NOW()-INTERVAL '20 days',NOW()-INTERVAL '10 days'),
+          (900104,9001,$2,'live','short',4,66000,0.01,165000000,79200,'closed',66000000,NOW()-INTERVAL '15 days',NOW()-INTERVAL '5 days'),
+          (900105,9001,$1,'live','long',2,2100,0.8,336000000,2310,'closed',32000000,NOW()-INTERVAL '10 days',NOW()-INTERVAL '2 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
       // staging-bob: 3 closed positions with net loss (total ROI ~-10%)
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
-          (900201,9002,$1,'paper','long',5,2200,2.0,880000000,1760,'closed',-88000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '18 days'),
-          (900202,9002,$2,'paper','short',3,68000,0.05,340000000,85000,'closed',-17000000,NOW()-INTERVAL '18 days',NOW()-INTERVAL '12 days'),
-          (900203,9002,$1,'paper','long',1,2300,3.0,690000000,2300,'closed',23000000,NOW()-INTERVAL '12 days',NOW()-INTERVAL '3 days')
+          (900201,9002,$1,'live','long',5,2200,2.0,880000000,1760,'closed',-88000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '18 days'),
+          (900202,9002,$2,'live','short',3,68000,0.05,340000000,85000,'closed',-17000000,NOW()-INTERVAL '18 days',NOW()-INTERVAL '12 days'),
+          (900203,9002,$1,'live','long',1,2300,3.0,690000000,2300,'closed',23000000,NOW()-INTERVAL '12 days',NOW()-INTERVAL '3 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
       // staging-charlie: 2 open positions for copy-trade demo
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
-          (900301,9003,$1,'paper','long',5,2400,0.5,480000000,1920,'open',NOW()-INTERVAL '7 days'),
-          (900302,9003,$2,'paper','short',3,67000,0.03,201000000,79900,'open',NOW()-INTERVAL '5 days')
+          (900301,9003,$1,'live','long',5,2400,0.5,480000000,1920,'open',NOW()-INTERVAL '7 days'),
+          (900302,9003,$2,'live','short',3,67000,0.03,201000000,79900,'open',NOW()-INTERVAL '5 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
@@ -4912,7 +4890,7 @@ async function start() {
       if (bloomFut) {
         await pool.query(`
           INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
-            (900401,9005,$1,'paper','long',2,0.5,1000,500000,0.35,'open',NOW()-INTERVAL '3 days')
+            (900401,9005,$1,'live','long',2,0.5,1000,500000,0.35,'open',NOW()-INTERVAL '3 days')
           ON CONFLICT(id) DO NOTHING
         `, [bloomFut.id]);
       }

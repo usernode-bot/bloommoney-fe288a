@@ -488,7 +488,6 @@ const S = {
   marketId: null,
   tradeToken: null,
   profileUser: null,
-  futuresMode: 'paper',
   futuresMarket: null,
   social_accounts: [],
   points: 0,
@@ -1837,7 +1836,6 @@ window.openCopyTradeModal = async (username) => {
             <div class="bg-[#0d1021] border border-[rgba(255,255,255,0.06)] rounded-lg p-3 space-y-2">
               <div class="flex justify-between items-start">
                 <div class="font-semibold">${esc(p.symbol)}</div>
-                <div class="text-xs text-[#8b95ab]">${p.mode === 'live' ? '💰 Live' : '📄 Paper'}</div>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
                 <div><span class="text-[#8b95ab]">Side</span><div class="font-mono ${p.side === 'long' ? 'text-emerald-400' : 'text-red-400'}">${p.side.toUpperCase()} ${p.leverage}x</div></div>
@@ -1850,7 +1848,7 @@ window.openCopyTradeModal = async (username) => {
           `).join('')}
         </div>
         <div class="text-xs text-[#8b95ab] bg-[#1c2236] p-2 rounded">
-          ℹ️ Positions will be copied in <strong>paper mode</strong> at current market price (${positions.length} position${positions.length !== 1 ? 's' : ''})
+          ℹ️ Positions will be copied as live trades at current market price (${positions.length} position${positions.length !== 1 ? 's' : ''})
         </div>
         <div class="flex gap-2 pt-2">
           <button class="btn btn-v flex-1" onclick="doCopyTrade('${esc(username)}')">Confirm & Copy</button>
@@ -3940,7 +3938,7 @@ async function renderFutures(sec) {
   };
   let _chart = null, _areaSeries = null;
   let _futuresTab = 'positions';
-  let _markets = [], _positions = [], _paperBal = 0;
+  let _markets = [], _positions = [];
 
   // ── Lazy-load TradingView Lightweight Charts v4 ──────────────────────────────
   async function loadLWC() {
@@ -3997,13 +3995,12 @@ async function renderFutures(sec) {
   }
 
   function buildPositionsHtml(openPos) {
-    if (!openPos.length) return `<tr><td colspan="10" class="py-4 text-center text-[#4e5872] text-xs">No open positions</td></tr>`;
+    if (!openPos.length) return `<tr><td colspan="9" class="py-4 text-center text-[#4e5872] text-xs">No open positions</td></tr>`;
     return openPos.map(p => {
       const pnl = parseFloat(p.unrealized_pnl || 0) / 1e6;
       const fund = parseFloat(p.funding_paid || 0) / 1e6;
       return `<tr class="border-t hover:bg-[rgba(255,255,255,0.02)] transition-colors fut-pos-row" style="border-color:var(--border-t)" data-pos-id="${p.id}">
         <td class="py-1.5 pr-3 pl-3 text-xs font-medium">${esc(p.symbol)}</td>
-        <td class="pr-3 text-xs">${p.mode === 'paper' ? '📄' : '⚡'}</td>
         <td class="pr-3 text-xs ${p.side === 'long' ? 'fut-bid' : 'fut-ask'}">${p.side}</td>
         <td class="pr-3 text-xs">${p.leverage}×</td>
         <td class="pr-3 font-mono text-xs">${parseFloat(p.quantity).toFixed(4)}</td>
@@ -4044,15 +4041,13 @@ async function renderFutures(sec) {
   async function initialRender() {
     sec.innerHTML = `<div class="flex justify-center py-12"><div class="spinner"></div></div>`;
     try {
-      const [marketsData, posData, pb] = await Promise.all([
+      const [marketsData, posData] = await Promise.all([
         api('GET', '/api/futures/markets'),
         api('GET', '/api/futures/positions'),
-        api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0),
       ]);
       await refreshBalances();
       _markets = marketsData.markets || [];
       _positions = posData.positions || [];
-      _paperBal = pb;
     } catch (e) {
       sec.innerHTML = `<div class="p-8 text-center text-[#4e5872] text-sm">Failed to load futures data: ${esc(e.message)}</div>`;
       return;
@@ -4064,7 +4059,6 @@ async function renderFutures(sec) {
 
     const mp = mkt ? parseFloat(mkt.mark_price) : 0;
     const prec = pricePrecision(mp);
-    const futTier = (S.kyc && S.kyc.status === 'approved') ? S.kyc.level : 'basic';
     const openPositions = _positions.filter(p => p.status === 'open');
     const closedPositions = _positions.filter(p => p.status !== 'open').slice(0, 20);
     const fundingRate = mkt ? parseFloat(mkt.funding_rate || 0) * 100 : 0;
@@ -4164,12 +4158,7 @@ async function renderFutures(sec) {
         <!-- Account row -->
         <div class="flex items-center justify-between gap-2">
           <div id="fut-balance-display" class="text-sm">${balHtml}</div>
-          <div class="flex gap-1">
-            <button class="text-xs px-2 py-0.5 rounded transition-all ${S.futuresMode === 'paper' ? 'border' : 'border border-[rgba(255,255,255,0.08)] text-[#8b95ab] hover:border-[rgba(255,255,255,0.2)]'}" style="${S.futuresMode === 'paper' ? 'background:rgba(38,166,154,0.12);color:#26a69a;border-color:rgba(38,166,154,0.4)' : ''}" onclick="futSetMode('paper')">Paper</button>
-            <button class="text-xs px-2 py-0.5 rounded transition-all ${S.futuresMode === 'live' ? 'border' : 'border border-[rgba(255,255,255,0.08)] text-[#8b95ab] hover:border-[rgba(255,255,255,0.2)]'}" style="${S.futuresMode === 'live' ? 'background:rgba(239,83,80,0.12);color:#ef5350;border-color:rgba(239,83,80,0.35)' : ''}" onclick="futSetMode('live')">Live</button>
-          </div>
         </div>
-        ${tierWarnHtml}
 
         <!-- Long / Short / Swap tabs -->
         <div class="grid grid-cols-3 gap-1">
@@ -4306,7 +4295,7 @@ async function renderFutures(sec) {
     <div class="fut-bottom-scroll overflow-x-auto">
       <div id="fut-positions-panel" class="${_futuresTab === 'positions' ? '' : 'hidden'}">
         <table class="w-full text-xs"><thead><tr class="text-[#4e5872]">
-          ${['Market','Mode','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1.5 pr-3 first:pl-3 font-normal">${h}</th>`).join('')}
+          ${['Market','Side','Lev','Size','Entry','Mark','Funding','PnL',''].map(h=>`<th class="text-left py-1.5 pr-3 first:pl-3 font-normal">${h}</th>`).join('')}
         </tr></thead><tbody id="fut-positions-body">${buildPositionsHtml(openPositions)}</tbody></table>
       </div>
       <div id="fut-history-panel" class="${_futuresTab === 'history' ? '' : 'hidden'}">
@@ -4358,14 +4347,12 @@ async function renderFutures(sec) {
   // ── refresh: update dynamic DOM without destroying chart ─────────────────────
   async function refresh() {
     try {
-      const [marketsData, posData, pb] = await Promise.all([
+      const [marketsData, posData] = await Promise.all([
         api('GET', '/api/futures/markets'),
         api('GET', '/api/futures/positions'),
-        api('GET', '/api/futures/paper-balance').then(d => d.balance).catch(() => 0),
       ]);
       _markets = marketsData.markets || [];
       _positions = posData.positions || [];
-      _paperBal = pb;
     } catch { return; }
 
     const mkt = _markets.find(m => m.id === S.futuresMarket?.id) || _markets[0];
@@ -4398,9 +4385,7 @@ async function renderFutures(sec) {
     setEl('fut-hist-count', '(' + closedPositions.length + ')', true);
 
     const balEl = document.getElementById('fut-balance-display');
-    if (balEl) balEl.innerHTML = S.futuresMode === 'paper'
-      ? `<span class="text-[#8b95ab] text-xs">Paper:</span> <span class="font-mono text-xs" style="color:var(--long)">$${fmtUSD(_paperBal)}</span>`
-      : `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+    if (balEl) balEl.innerHTML = `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
 
     updatePreviewDisplay(mkt);
 
@@ -4469,14 +4454,6 @@ async function renderFutures(sec) {
     clearInterval(_activeInterval); _activeInterval = null;
     const mkt = _markets.find(m => m.id === id);
     if (mkt) S.futuresMarket = mkt;
-    if (_chart) { try { _chart.remove(); } catch {} _chart = null; _areaSeries = null; }
-    await initialRender();
-    _activeInterval = setInterval(refresh, 5000);
-  };
-
-  window.futSetMode = async (mode) => {
-    S.futuresMode = mode;
-    clearInterval(_activeInterval); _activeInterval = null;
     if (_chart) { try { _chart.remove(); } catch {} _chart = null; _areaSeries = null; }
     await initialRender();
     _activeInterval = setInterval(refresh, 5000);
@@ -4748,7 +4725,6 @@ async function renderFutures(sec) {
       await api('POST', '/api/futures/positions', {
         market_id: S.futuresMarket.id, side, leverage,
         quantity: calcQty,
-        mode: S.futuresMode,
         idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now(),
         order_type: orderType,
         limit_price: orderType === 'limit' ? (parseFloat(limitPrice) || null) : null,
