@@ -161,7 +161,10 @@
       <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
+      <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">DeFi</div>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
+      <button class="nav-item" data-view="stake">🔒 Stake</button>
+      <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
@@ -639,7 +642,7 @@ const VIEW_SECTION = {
 const VIEW_TAB = {
   home: 'home', feed: 'home', market: 'market', swap: 'market', trade: 'trade', futures: 'trade',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
-  launchpad: 'earn', vault: null,
+  launchpad: 'earn', vault: 'earn',
   predict: 'predict', markets: 'predict', profile: 'profile',
 };
 
@@ -686,7 +689,9 @@ async function loadView(view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
-      case 'earn': case 'stake': case 'liquidity': case 'ico': await renderEarn(sec); break;
+      case 'earn': case 'ico': await renderEarn(sec); break;
+      case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
+      case 'liquidity': S.earnTab = 'liquidity'; await renderEarn(sec); break;
       case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
       case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
@@ -2561,7 +2566,7 @@ async function renderLiquidity(sec) {
     const { positions } = await api('GET', '/api/defi/liquidity');
     const [tA, tB] = pools[selPool];
     sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Liquidity Pools</h2>
+      <h2 class="text-xl font-bold mb-4">Pools</h2>
       <div class="card space-y-3 mb-4">
         <div class="flex gap-2">
           ${Object.keys(pools).map(p=>`<button class="btn ${p===selPool?'btn-v':'btn-z'}" onclick="selPool='${p}';load()">${p.replace('_','/')}</button>`).join('')}
@@ -2762,25 +2767,27 @@ async function renderICO(sec) {
   await load();
 }
 
-// ── Earn (composite: Stake / Liquidity / Launchpad / Vault link) ─────────────
+// ── DeFi tab bar (shared across all DeFi pages) ───────────────────────────────
+function defiTabBar(activeView) {
+  return `<div class="flex gap-2 mb-4 border-b border-[rgba(255,255,255,0.06)] pb-2 flex-wrap">
+    ${[['earn','🌱 Earn'],['stake','🔒 Stake'],['liquidity','💧 Pools'],['vault','🏦 Vault'],['launchpad','🚀 Launchpad']].map(([k,l])=>
+      `<button class="text-sm px-3 py-1 rounded-full transition-colors ${activeView===k?'pill-active':'pill-inactive'}" onclick="navigate('${k}')">${l}</button>`).join('')}
+  </div>`;
+}
+
+// ── Earn (composite: Stake / Liquidity / Launchpad) ───────────────────────────
 async function renderEarn(sec) {
   let tab = S.earnTab || 'stake';
   sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">🌱 Earn</h2>
-    <div class="flex gap-2 mb-4 border-b border-[rgba(255,255,255,0.06)] pb-2 flex-wrap">
-      ${[['stake','🔒 Stake'],['liquidity','💧 Liquidity'],['launchpad','🚀 Launchpad'],['vault','🏦 Vault']].map(([k,l])=>
-        `<button class="text-sm px-3 py-1 rounded-full transition-colors ${tab===k?'pill-active':'pill-inactive'}" onclick="${k==='vault'?`navigate('vault')`:`setEarnTab('${k}')`}">${l}</button>`).join('')}
-    </div>
+    ${defiTabBar(S.view || 'earn')}
     <div id="earn-sub"></div>`;
   const sub = document.getElementById('earn-sub');
   sub.innerHTML = spin();
   try {
     if (tab === 'stake') await renderStake(sub);
     else if (tab === 'liquidity') await renderLiquidity(sub);
-    else if (tab === 'vault') { sub.innerHTML = ''; navigate('vault'); }
     else await renderICO(sub);
   } catch (e) { sub.innerHTML = err(e.message); }
-  window.setEarnTab = (t) => { S.earnTab = t; renderEarn(sec); };
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -2797,6 +2804,7 @@ async function renderVault(sec) {
       return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
     };
     sec.innerHTML = `
+      ${defiTabBar('vault')}
       <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
       <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
       <h3 class="font-semibold mb-3">Strategies</h3>
