@@ -1665,7 +1665,7 @@ app.get('/api/futures/paper-balance', async (req, res) => {
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, mode, idempotency_key } = req.body;
+    const { market_id, side, leverage, quantity, mode, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
     const lev = Math.max(1, Math.min(20, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
@@ -1715,10 +1715,15 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
     }
 
+    const validOrderType = ['market', 'limit', 'twap'].includes(order_type) ? order_type : 'market';
+    const validLimitPrice = limit_price ? parseFloat(limit_price) : null;
+    const validSlippageBps = Math.max(0, Math.min(5000, parseInt(slippage_bps) || 50));
+    const validTwapMinutes = twap_duration_minutes ? Math.max(1, parseInt(twap_duration_minutes)) : null;
+    const validTwapParts = twap_parts ? Math.max(2, Math.min(100, parseInt(twap_parts))) : null;
     const { rows: [pos] } = await client.query(`
-      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
-    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice]);
+      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,order_type,limit_price,slippage_bps,twap_duration_minutes,twap_parts)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *
+    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice, validOrderType, validLimitPrice, validSlippageBps, validTwapMinutes, validTwapParts]);
     await client.query('UPDATE futures_markets SET open_interest=open_interest+$1 WHERE id=$2', [marginUnits, market_id]);
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
@@ -4016,6 +4021,11 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) DEFAULT 'market';
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS limit_price NUMERIC(20,6);
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS slippage_bps INTEGER DEFAULT 50;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_duration_minutes INTEGER;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_parts INTEGER;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS is_daily BOOLEAN DEFAULT FALSE;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS template_slug VARCHAR(40);
     ALTER TABLE opinion_markets ALTER COLUMN created_by_user_id DROP NOT NULL;

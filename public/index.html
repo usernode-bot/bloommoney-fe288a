@@ -386,6 +386,11 @@ select.inp option { background: var(--bg-card); }
 .fut-tab-active { color:#e8eaf0 !important; border-bottom-color:var(--long) !important; }
 @keyframes futPnlBlink { 0%,100%{opacity:1} 50%{opacity:0.35} }
 .fut-pnl-blink { animation: futPnlBlink 0.35s ease-in-out 3; }
+.fut-tab-swap { background: linear-gradient(135deg, #26a69a, #4e9af1) !important; color: #fff !important; }
+.twap-readonly { color: #4e5872; font-size: 0.75rem; }
+.order-type-pill { padding: 0.2rem 0.6rem; font-size: 0.7rem; border-radius: 9999px; background: #161b2a; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; cursor: pointer; }
+.order-type-pill:hover { color: #e8eaf0; }
+.order-type-pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1) !important; color: #fff !important; border-color: transparent !important; }
 @media (max-width: 767px) {
   .futures-terminal__main { grid-template-columns: 1fr; }
   .fut-panel-entry { order: 1; min-height: auto; }
@@ -3336,6 +3341,25 @@ window.messageUser = async (username) => {
 // ── Futures Terminal ──────────────────────────────────────────────────────────
 async function renderFutures(sec) {
   let side = 'long', leverage = 5, qty = '';
+  let orderType = 'market';
+  let payToken = 'USDC', receiveToken = 'BTC';
+  let payAmount = '', limitPrice = '';
+  let twapHours = 1, twapMinutes = 0, twapParts = 10;
+  let slippage = 0.5, slippageCustom = false;
+  const FUT_TOKENS = ['USDC','BTC','ETH','SOL','BNB','XRP','USDT','ADA','DOGE','TON','BLOOM'];
+  const FUT_TOKEN_COLORS = {
+    BTC:  { bg:'rgba(251,191,36,0.15)',  text:'#fbbf24', symbol:'₿' },
+    ETH:  { bg:'rgba(56,189,248,0.15)',  text:'#38bdf8', symbol:'Ξ' },
+    BNB:  { bg:'rgba(243,186,47,0.15)',  text:'#f3ba2f', symbol:'B' },
+    SOL:  { bg:'rgba(153,69,255,0.15)',  text:'#9945ff', symbol:'◎' },
+    XRP:  { bg:'rgba(0,149,207,0.15)',   text:'#0095cf', symbol:'X' },
+    USDC: { bg:'rgba(52,211,153,0.15)',  text:'#34d399', symbol:'$' },
+    USDT: { bg:'rgba(38,161,123,0.15)',  text:'#26a17b', symbol:'₮' },
+    ADA:  { bg:'rgba(0,140,255,0.15)',   text:'#008cff', symbol:'₳' },
+    DOGE: { bg:'rgba(203,155,31,0.15)',  text:'#cb9b1f', symbol:'Ð' },
+    TON:  { bg:'rgba(0,136,204,0.15)',   text:'#0088cc', symbol:'◆' },
+    BLOOM:{ bg:'rgba(167,139,250,0.15)', text:'#a78bfa', symbol:'✿' },
+  };
   let _chart = null, _areaSeries = null;
   let _futuresTab = 'positions';
   let _markets = [], _positions = [], _paperBal = 0;
@@ -3429,6 +3453,15 @@ async function renderFutures(sec) {
     }).join('');
   }
 
+  function futTokenListHtml(forSide) {
+    return FUT_TOKENS.map(function(sym) {
+      const tc = FUT_TOKEN_COLORS[sym] || { bg:'rgba(100,100,120,0.3)', text:'#a1a1aa', symbol:sym[0] };
+      return '<li onclick="futSelectToken(\'' + forSide + '\',\'' + sym + '\')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:12px;transition:background 0.1s" onmouseenter="this.style.background=\'rgba(255,255,255,0.06)\'" onmouseleave="this.style.background=\'\'">'
+        + '<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:' + tc.bg + ';font-size:10px;font-weight:700;color:' + tc.text + ';">' + tc.symbol + '</span>'
+        + '<span style="color:#e8eaf0">' + sym + '</span></li>';
+    }).join('');
+  }
+
   // ── initialRender: build full terminal skeleton ───────────────────────────────
   async function initialRender() {
     sec.innerHTML = `<div class="flex justify-center py-12"><div class="spinner"></div></div>`;
@@ -3480,6 +3513,22 @@ async function renderFutures(sec) {
     ).join('');
 
     const preview = calcPreview(mkt);
+
+    // Set receiveToken to market base asset for long/short mode
+    if (mkt && side !== 'swap') {
+      const base = mkt.symbol.split('-')[0];
+      if (FUT_TOKENS.includes(base)) receiveToken = base;
+    }
+
+    // Close open token dropdowns when clicking outside
+    document.addEventListener('click', function _futDropClose(e) {
+      if (!e.target.closest('#fut-pay-token-btn') && !e.target.closest('#fut-pay-token-list')) {
+        document.getElementById('fut-pay-token-list')?.classList.add('hidden');
+      }
+      if (!e.target.closest('#fut-receive-token-btn') && !e.target.closest('#fut-receive-token-list')) {
+        document.getElementById('fut-receive-token-list')?.classList.add('hidden');
+      }
+    }, true);
 
     sec.innerHTML = `
 <div class="futures-terminal" id="fut-root">
@@ -3534,14 +3583,22 @@ async function renderFutures(sec) {
         </div>
         ${tierWarnHtml}
 
-        <!-- Long / Short tabs -->
-        <div class="grid grid-cols-2 gap-1">
+        <!-- Long / Short / Swap tabs -->
+        <div class="grid grid-cols-3 gap-1">
           <button id="fut-side-long" class="py-2 rounded text-sm font-bold transition-all ${side === 'long' ? 'fut-side-long' : 'text-[#8b95ab] hover:text-[#26a69a] border border-[rgba(255,255,255,0.06)]'}" style="${side !== 'long' ? 'background:#161b2a' : ''}" onclick="futSetSide('long')">Long ▲</button>
           <button id="fut-side-short" class="py-2 rounded text-sm font-bold transition-all ${side === 'short' ? 'fut-side-short' : 'text-[#8b95ab] hover:text-[#ef5350] border border-[rgba(255,255,255,0.06)]'}" style="${side !== 'short' ? 'background:#161b2a' : ''}" onclick="futSetSide('short')">Short ▼</button>
+          <button id="fut-side-swap" class="py-2 rounded text-sm font-bold transition-all ${side === 'swap' ? 'fut-tab-swap' : 'text-[#8b95ab] hover:text-[#4e9af1] border border-[rgba(255,255,255,0.06)]'}" style="${side !== 'swap' ? 'background:#161b2a' : ''}" onclick="futSetSide('swap')">Swap ⟷</button>
         </div>
 
-        <!-- Leverage -->
-        <div>
+        <!-- Order Type pills -->
+        <div class="flex gap-1 flex-wrap">
+          <button class="order-type-pill ${orderType === 'market' ? 'order-type-pill-active' : ''}" data-order-type="market" onclick="futSetOrderType('market')">Market</button>
+          <button class="order-type-pill ${orderType === 'limit' ? 'order-type-pill-active' : ''}" data-order-type="limit" onclick="futSetOrderType('limit')">Limit</button>
+          <button class="order-type-pill ${orderType === 'twap' ? 'order-type-pill-active' : ''}" data-order-type="twap" onclick="futSetOrderType('twap')">TWAP</button>
+        </div>
+
+        <!-- Leverage (hidden in swap mode) -->
+        <div id="fut-leverage-block" ${side === 'swap' ? 'style="display:none"' : ''}>
           <div class="flex items-center justify-between mb-1">
             <label class="text-xs text-[#4e5872]">Leverage</label>
             <span id="fut-lev-display" class="text-xs font-mono text-[#e8eaf0]">${leverage}×</span>
@@ -3550,15 +3607,101 @@ async function renderFutures(sec) {
           <input id="fut-lev-custom" type="number" min="1" max="20" value="${leverage}" class="inp text-xs py-1 text-center" placeholder="Custom 1-20×" oninput="futSetLeverageCustom(parseInt(this.value)||1)">
         </div>
 
-        <!-- Size -->
+        <!-- Pay field -->
         <div>
-          <label class="text-xs text-[#4e5872]">Size</label>
-          <input id="fut-qty" type="number" class="inp mt-1 text-xs" placeholder="0.0000" min="0" step="0.0001" oninput="futUpdatePreview(this.value)">
-          <div id="fut-preview" class="mt-1.5 space-y-0.5 text-xs text-[#8b95ab]">${preview ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>` : ''}</div>
+          <label class="text-xs text-[#4e5872] block mb-1">Pay</label>
+          <div class="inp flex items-center gap-2 py-2 px-3" style="padding-top:0.45rem;padding-bottom:0.45rem">
+            <input id="fut-pay-amt" type="number" class="flex-1 bg-transparent border-0 outline-none text-sm p-0 min-w-0" placeholder="0.00" min="0" oninput="futPayAmtChanged(this.value)">
+            <div class="relative flex-shrink-0">
+              <button id="fut-pay-token-btn" onclick="futOpenTokenSelector('pay')" class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded" style="background:rgba(255,255,255,0.08);color:#e8eaf0">
+                <span id="fut-pay-token-label">${payToken}</span> <span style="color:#8b95ab;font-size:10px">▾</span>
+              </button>
+              <ul id="fut-pay-token-list" class="hidden absolute right-0 top-full mt-1 rounded-lg overflow-hidden" style="background:#131620;border:1px solid rgba(255,255,255,0.08);z-index:50;min-width:100px;box-shadow:0 8px 24px rgba(0,0,0,0.5)">
+                ${futTokenListHtml('pay')}
+              </ul>
+            </div>
+          </div>
         </div>
 
+        <!-- Flip button -->
+        <div class="flex justify-center" style="margin-top:-4px;margin-bottom:-4px">
+          <button onclick="futFlipTokens()" title="Flip tokens" class="text-[#4e5872] hover:text-[#8b95ab] transition-colors p-1.5 rounded-full" style="background:rgba(255,255,255,0.05)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+          </button>
+        </div>
+
+        <!-- Receive field -->
+        <div>
+          <label class="text-xs text-[#4e5872] block mb-1">Receive</label>
+          <div class="inp flex items-center gap-2 py-2 px-3" style="padding-top:0.45rem;padding-bottom:0.45rem">
+            <input id="fut-receive-amt" type="number" class="flex-1 bg-transparent border-0 outline-none text-sm p-0 min-w-0" placeholder="0.00" readonly>
+            <div class="relative flex-shrink-0">
+              <button id="fut-receive-token-btn" onclick="futOpenTokenSelector('receive')" class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded ${side !== 'swap' ? 'opacity-50 cursor-not-allowed' : ''}" style="background:rgba(255,255,255,0.08);color:#e8eaf0">
+                <span id="fut-receive-token-label">${receiveToken}</span>${side === 'swap' ? ' <span style="color:#8b95ab;font-size:10px">▾</span>' : ''}
+              </button>
+              <ul id="fut-receive-token-list" class="hidden absolute right-0 top-full mt-1 rounded-lg overflow-hidden" style="background:#131620;border:1px solid rgba(255,255,255,0.08);z-index:50;min-width:100px;box-shadow:0 8px 24px rgba(0,0,0,0.5)">
+                ${futTokenListHtml('receive')}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Limit price row -->
+        <div id="fut-limit-price-row" ${orderType !== 'limit' ? 'style="display:none"' : ''}>
+          <label class="text-xs text-[#4e5872] block mb-1">Limit price</label>
+          <div class="inp flex items-center gap-1">
+            <span class="text-xs text-[#4e5872] ml-1">$</span>
+            <input id="fut-limit-price-inp" type="number" class="flex-1 bg-transparent border-0 outline-none text-sm p-0 pl-1 min-w-0" placeholder="0.00" min="0" oninput="limitPrice=this.value">
+          </div>
+        </div>
+
+        <!-- TWAP fields -->
+        <div id="fut-twap-block" ${orderType !== 'twap' ? 'style="display:none"' : ''} class="space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-[#4e5872] block mb-1">Hours</label>
+              <input id="fut-twap-hours" type="number" class="inp text-xs text-center" value="${twapHours}" min="0" max="24" oninput="twapHours=parseInt(this.value)||0;futCalcTwap()">
+            </div>
+            <div>
+              <label class="text-xs text-[#4e5872] block mb-1">Minutes</label>
+              <input id="fut-twap-minutes" type="number" class="inp text-xs text-center" value="${twapMinutes}" min="0" max="59" oninput="twapMinutes=parseInt(this.value)||0;futCalcTwap()">
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-[#4e5872] block mb-1">Number of parts</label>
+            <input id="fut-twap-parts" type="number" class="inp text-xs" value="${twapParts}" min="2" max="100" oninput="twapParts=Math.max(2,Math.min(100,parseInt(this.value)||2));futCalcTwap()">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="p-2 rounded" style="background:rgba(255,255,255,0.04)">
+              <div class="text-[10px] text-[#4e5872] mb-0.5">Frequency</div>
+              <div id="twap-freq-display" class="twap-readonly">—</div>
+            </div>
+            <div class="p-2 rounded" style="background:rgba(255,255,255,0.04)">
+              <div class="text-[10px] text-[#4e5872] mb-0.5">Size / part</div>
+              <div id="twap-size-display" class="twap-readonly">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slippage -->
+        <div>
+          <label class="text-xs text-[#4e5872] block mb-1.5">Slippage</label>
+          <div class="flex gap-1 flex-wrap">
+            ${[0.3, 0.5, 1.0, 1.5].map(v => `<button class="order-type-pill ${slippage === v && !slippageCustom ? 'order-type-pill-active' : ''}" data-slippage="${v}" onclick="futSetSlippage(${v})">${v}%</button>`).join('')}
+            <button class="order-type-pill ${slippageCustom ? 'order-type-pill-active' : ''}" data-slippage="custom" onclick="futToggleCustomSlippage()">Custom</button>
+          </div>
+          <div id="fut-slippage-custom-row" class="mt-1.5 ${slippageCustom ? 'flex' : 'hidden'} items-center gap-2">
+            <input id="fut-slippage-custom-inp" type="number" class="inp text-xs flex-1" min="0.01" max="50" step="0.01" placeholder="e.g. 2.5" oninput="futCustomSlippageChanged(this.value)">
+            <span class="text-xs text-[#4e5872]">%</span>
+          </div>
+          <div id="fut-slippage-warn" class="hidden text-xs text-amber-400 mt-1">⚠ High slippage — you may receive significantly less</div>
+        </div>
+
+        <!-- Preview (long/short only) -->
+        <div id="fut-preview" class="${side === 'swap' ? 'hidden' : ''} space-y-0.5 text-xs text-[#8b95ab]">${preview ? '<div>Margin: <span class="text-[#e8eaf0] font-mono">' + preview.margin + ' USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$' + preview.liq + '</span></div>' : ''}</div>
+
         <!-- Place Order -->
-        <button id="fut-submit-btn" class="w-full py-2.5 rounded font-bold text-sm transition-all ${side === 'long' ? 'fut-side-long' : 'fut-side-short'}" onclick="futPlaceOrder()">${side === 'long' ? 'Buy / Long' : 'Sell / Short'}</button>
+        <button id="fut-submit-btn" class="w-full py-2.5 rounded font-bold text-sm transition-all ${side === 'long' ? 'fut-side-long' : side === 'short' ? 'fut-side-short' : 'fut-tab-swap'}" onclick="futPlaceOrder()">${side === 'long' ? 'Buy / Long' : side === 'short' ? 'Sell / Short' : 'Swap ⟷'}</button>
         <div id="fut-msg" class="text-xs text-center min-h-[1rem]"></div>
       </div>
     </div>
@@ -3678,12 +3821,16 @@ async function renderFutures(sec) {
   }
 
   function updatePreviewDisplay(mkt) {
-    const preview = calcPreview(mkt);
     const el = document.getElementById('fut-preview');
     if (!el) return;
-    el.innerHTML = preview
-      ? `<div>Margin: <span class="text-[#e8eaf0] font-mono">${preview.margin} USDC</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${preview.liq}</span></div>`
-      : '';
+    if (!mkt || side === 'swap') { el.innerHTML = ''; return; }
+    const mp = parseFloat(mkt.mark_price);
+    const prec = pricePrecision(mp);
+    const pa = parseFloat(payAmount);
+    if (!pa || isNaN(pa) || pa <= 0) { el.innerHTML = ''; return; }
+    const posSize = (pa * leverage / mp).toFixed(6);
+    const liqP = side === 'long' ? mp * (1 - 0.9 / leverage) : mp * (1 + 0.9 / leverage);
+    el.innerHTML = `<div>Position size: <span class="text-[#e8eaf0] font-mono">${posSize} ${receiveToken}</span></div><div>Liq. Price: <span class="text-[#e8eaf0] font-mono">$${liqP.toFixed(prec)}</span></div>`;
   }
 
   function updateLevUI() {
@@ -3699,10 +3846,27 @@ async function renderFutures(sec) {
   function updateSideUI() {
     const lBtn = document.getElementById('fut-side-long');
     const sBtn = document.getElementById('fut-side-short');
+    const swBtn = document.getElementById('fut-side-swap');
     const subBtn = document.getElementById('fut-submit-btn');
-    if (lBtn) { lBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'long' ? 'fut-side-long' : 'text-[#8b95ab] hover:text-[#26a69a] border border-[rgba(255,255,255,0.06)]'}`; if (side !== 'long') lBtn.style.background = '#161b2a'; else lBtn.style.background = ''; }
-    if (sBtn) { sBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'short' ? 'fut-side-short' : 'text-[#8b95ab] hover:text-[#ef5350] border border-[rgba(255,255,255,0.06)]'}`; if (side !== 'short') sBtn.style.background = '#161b2a'; else sBtn.style.background = ''; }
-    if (subBtn) { subBtn.className = `w-full py-2.5 rounded font-bold text-sm transition-all ${side === 'long' ? 'fut-side-long' : 'fut-side-short'}`; subBtn.textContent = side === 'long' ? 'Buy / Long' : 'Sell / Short'; }
+    const levBlock = document.getElementById('fut-leverage-block');
+    const prevBlock = document.getElementById('fut-preview');
+    const recvBtn = document.getElementById('fut-receive-token-btn');
+    if (lBtn) { lBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'long' ? 'fut-side-long' : 'text-[#8b95ab] hover:text-[#26a69a] border border-[rgba(255,255,255,0.06)]'}`; lBtn.style.background = side !== 'long' ? '#161b2a' : ''; }
+    if (sBtn) { sBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'short' ? 'fut-side-short' : 'text-[#8b95ab] hover:text-[#ef5350] border border-[rgba(255,255,255,0.06)]'}`; sBtn.style.background = side !== 'short' ? '#161b2a' : ''; }
+    if (swBtn) { swBtn.className = `py-2 rounded text-sm font-bold transition-all ${side === 'swap' ? 'fut-tab-swap' : 'text-[#8b95ab] hover:text-[#4e9af1] border border-[rgba(255,255,255,0.06)]'}`; swBtn.style.background = side !== 'swap' ? '#161b2a' : ''; }
+    if (levBlock) levBlock.style.display = side === 'swap' ? 'none' : '';
+    if (prevBlock) prevBlock.classList.toggle('hidden', side === 'swap');
+    if (recvBtn) {
+      recvBtn.classList.toggle('opacity-50', side !== 'swap');
+      recvBtn.classList.toggle('cursor-not-allowed', side !== 'swap');
+      const recvLabel = document.getElementById('fut-receive-token-label');
+      if (recvLabel) recvLabel.textContent = receiveToken;
+    }
+    if (subBtn) {
+      const cls = side === 'long' ? 'fut-side-long' : side === 'short' ? 'fut-side-short' : 'fut-tab-swap';
+      subBtn.className = `w-full py-2.5 rounded font-bold text-sm transition-all ${cls}`;
+      subBtn.textContent = side === 'long' ? 'Buy / Long' : side === 'short' ? 'Sell / Short' : 'Swap ⟷';
+    }
     const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
     updatePreviewDisplay(mkt);
   }
@@ -3725,7 +3889,148 @@ async function renderFutures(sec) {
     _activeInterval = setInterval(refresh, 5000);
   };
 
-  window.futSetSide = (s) => { side = s; updateSideUI(); };
+  window.futSetSide = (s) => {
+    side = s;
+    if (s !== 'swap') {
+      payToken = 'USDC';
+      const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+      if (mkt) {
+        const base = mkt.symbol.split('-')[0];
+        if (FUT_TOKENS.includes(base)) receiveToken = base;
+      }
+      const payLabel = document.getElementById('fut-pay-token-label');
+      if (payLabel) payLabel.textContent = payToken;
+    }
+    // Recalculate receive amount
+    const mkt2 = _markets.find(m => m.id === S.futuresMarket?.id);
+    if (mkt2 && s !== 'swap') {
+      const mp = parseFloat(mkt2.mark_price);
+      const pa = parseFloat(payAmount);
+      const recvEl = document.getElementById('fut-receive-amt');
+      if (recvEl) recvEl.value = (pa > 0 && mp > 0) ? (pa * leverage / mp).toFixed(6) : '';
+    }
+    updateSideUI();
+  };
+
+  window.futSetOrderType = (t) => {
+    orderType = t;
+    const limitRow = document.getElementById('fut-limit-price-row');
+    const twapBlock = document.getElementById('fut-twap-block');
+    if (limitRow) limitRow.style.display = t === 'limit' ? '' : 'none';
+    if (twapBlock) twapBlock.style.display = t === 'twap' ? '' : 'none';
+    document.querySelectorAll('[data-order-type]').forEach(btn => {
+      btn.classList.toggle('order-type-pill-active', btn.dataset.orderType === t);
+    });
+  };
+
+  window.futSetSlippage = (v) => {
+    slippage = v;
+    slippageCustom = false;
+    const row = document.getElementById('fut-slippage-custom-row');
+    if (row) row.classList.add('hidden');
+    document.querySelectorAll('[data-slippage]').forEach(btn => {
+      const bv = btn.dataset.slippage;
+      btn.classList.toggle('order-type-pill-active', bv !== 'custom' && parseFloat(bv) === v);
+      if (bv === 'custom') btn.classList.remove('order-type-pill-active');
+    });
+    document.getElementById('fut-slippage-warn')?.classList.add('hidden');
+  };
+
+  window.futToggleCustomSlippage = () => {
+    slippageCustom = !slippageCustom;
+    const row = document.getElementById('fut-slippage-custom-row');
+    if (row) row.classList.toggle('hidden', !slippageCustom);
+    document.querySelectorAll('[data-slippage]').forEach(btn => {
+      const bv = btn.dataset.slippage;
+      if (bv === 'custom') btn.classList.toggle('order-type-pill-active', slippageCustom);
+      else btn.classList.remove('order-type-pill-active');
+    });
+    if (slippageCustom) document.getElementById('fut-slippage-custom-inp')?.focus();
+  };
+
+  window.futCustomSlippageChanged = (val) => {
+    const v = parseFloat(val);
+    if (!isNaN(v) && v > 0) {
+      slippage = Math.max(0.01, Math.min(50, v));
+      const warnEl = document.getElementById('fut-slippage-warn');
+      if (warnEl) warnEl.classList.toggle('hidden', slippage <= 5);
+    }
+  };
+
+  window.futFlipTokens = () => {
+    if (side !== 'swap') return;
+    [payToken, receiveToken] = [receiveToken, payToken];
+    const payLabel = document.getElementById('fut-pay-token-label');
+    const recvLabel = document.getElementById('fut-receive-token-label');
+    if (payLabel) payLabel.textContent = payToken;
+    if (recvLabel) recvLabel.textContent = receiveToken;
+  };
+
+  window.futOpenTokenSelector = (forSide) => {
+    if (forSide === 'receive' && side !== 'swap') return;
+    const listId = forSide === 'pay' ? 'fut-pay-token-list' : 'fut-receive-token-list';
+    const otherId = forSide === 'pay' ? 'fut-receive-token-list' : 'fut-pay-token-list';
+    document.getElementById(otherId)?.classList.add('hidden');
+    document.getElementById(listId)?.classList.toggle('hidden');
+  };
+
+  window.futSelectToken = (forSide, sym) => {
+    if (forSide === 'pay') {
+      payToken = sym;
+      const label = document.getElementById('fut-pay-token-label');
+      if (label) label.textContent = sym;
+      document.getElementById('fut-pay-token-list')?.classList.add('hidden');
+    } else {
+      if (side !== 'swap') return;
+      receiveToken = sym;
+      const label = document.getElementById('fut-receive-token-label');
+      if (label) label.textContent = sym;
+      document.getElementById('fut-receive-token-list')?.classList.add('hidden');
+    }
+  };
+
+  window.futCalcTwap = () => {
+    const totalMinutes = twapHours * 60 + twapMinutes;
+    const freqEl = document.getElementById('twap-freq-display');
+    const sizeEl = document.getElementById('twap-size-display');
+    if (freqEl) {
+      if (twapParts >= 2 && totalMinutes > 0) {
+        const freqMin = totalMinutes / twapParts;
+        if (freqMin >= 1) {
+          const m = Math.floor(freqMin);
+          const s = Math.round((freqMin - m) * 60);
+          freqEl.textContent = s > 0 ? m + 'm ' + s + 's' : m + 'm';
+        } else {
+          freqEl.textContent = Math.round(freqMin * 60) + 's';
+        }
+      } else {
+        freqEl.textContent = '—';
+      }
+    }
+    if (sizeEl) {
+      const pa = parseFloat(payAmount);
+      sizeEl.textContent = (pa > 0 && twapParts >= 2) ? '$' + (pa / twapParts).toFixed(2) + ' / part' : '—';
+    }
+  };
+
+  window.futPayAmtChanged = (val) => {
+    payAmount = val;
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    if (mkt && side !== 'swap') {
+      const mp = parseFloat(mkt.mark_price);
+      const pa = parseFloat(payAmount);
+      const recvEl = document.getElementById('fut-receive-amt');
+      if (pa > 0 && mp > 0) {
+        qty = String(pa * leverage / mp);
+        if (recvEl) recvEl.value = (pa * leverage / mp).toFixed(6);
+      } else {
+        qty = '';
+        if (recvEl) recvEl.value = '';
+      }
+    }
+    updatePreviewDisplay(mkt);
+    futCalcTwap();
+  };
 
   window.futSetLeverage = (l) => {
     leverage = l;
@@ -3733,6 +4038,13 @@ async function renderFutures(sec) {
     if (custom) custom.value = l;
     updateLevUI();
     const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    // Recalculate receive amount
+    if (mkt && side !== 'swap') {
+      const mp = parseFloat(mkt.mark_price);
+      const pa = parseFloat(payAmount);
+      const recvEl = document.getElementById('fut-receive-amt');
+      if (pa > 0 && mp > 0) { qty = String(pa * leverage / mp); if (recvEl) recvEl.value = (pa * leverage / mp).toFixed(6); }
+    }
     updatePreviewDisplay(mkt);
   };
 
@@ -3741,6 +4053,12 @@ async function renderFutures(sec) {
     leverage = l;
     updateLevUI();
     const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    if (mkt && side !== 'swap') {
+      const mp = parseFloat(mkt.mark_price);
+      const pa = parseFloat(payAmount);
+      const recvEl = document.getElementById('fut-receive-amt');
+      if (pa > 0 && mp > 0) { qty = String(pa * leverage / mp); if (recvEl) recvEl.value = (pa * leverage / mp).toFixed(6); }
+    }
     updatePreviewDisplay(mkt);
   };
 
@@ -3781,18 +4099,61 @@ async function renderFutures(sec) {
 
   window.futPlaceOrder = async () => {
     const msg = document.getElementById('fut-msg');
-    const qtyEl = document.getElementById('fut-qty');
     if (!S.futuresMarket) return;
     if (msg) { msg.textContent = ''; msg.className = 'text-xs text-center min-h-[1rem]'; }
+
+    if (side === 'swap') {
+      const pa = parseFloat(payAmount);
+      if (!pa || pa <= 0) {
+        if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-ask'; msg.textContent = 'Enter an amount'; }
+        return;
+      }
+      try {
+        await api('POST', '/api/defi/swap', {
+          from_token: payToken, to_token: receiveToken, amount: pa,
+          slippage_bps: Math.round(slippage * 100),
+          order_type: orderType,
+          ...(orderType === 'limit' ? { limit_price: parseFloat(limitPrice) || null } : {}),
+          ...(orderType === 'twap' ? { twap_duration_minutes: twapHours * 60 + twapMinutes, twap_parts: twapParts } : {}),
+        });
+        if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-bid'; msg.textContent = '✓ Swap submitted'; }
+        const payEl = document.getElementById('fut-pay-amt');
+        const recvEl = document.getElementById('fut-receive-amt');
+        if (payEl) { payEl.value = ''; payAmount = ''; }
+        if (recvEl) recvEl.value = '';
+        await refreshBalances();
+      } catch (e) {
+        if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-ask'; msg.textContent = e.message; }
+      }
+      return;
+    }
+
+    const mkt = _markets.find(m => m.id === S.futuresMarket?.id);
+    const mp = mkt ? parseFloat(mkt.mark_price) : 0;
+    const pa = parseFloat(payAmount);
+    if (!pa || pa <= 0 || !mp) {
+      if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-ask'; msg.textContent = 'Enter pay amount'; }
+      return;
+    }
+    const calcQty = pa * leverage / mp;
     try {
       await api('POST', '/api/futures/positions', {
         market_id: S.futuresMarket.id, side, leverage,
-        quantity: parseFloat(qtyEl?.value || 0),
+        quantity: calcQty,
         mode: S.futuresMode,
         idempotency_key: 'fut-' + S.user.user_id + '-' + Date.now(),
+        order_type: orderType,
+        limit_price: orderType === 'limit' ? (parseFloat(limitPrice) || null) : null,
+        slippage_bps: Math.round(slippage * 100),
+        twap_duration_minutes: orderType === 'twap' ? twapHours * 60 + twapMinutes : null,
+        twap_parts: orderType === 'twap' ? twapParts : null,
       });
       if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-bid'; msg.textContent = '✓ Order placed'; }
-      if (qtyEl) { qtyEl.value = ''; qty = ''; updatePreviewDisplay(S.futuresMarket); }
+      const payEl = document.getElementById('fut-pay-amt');
+      const recvEl = document.getElementById('fut-receive-amt');
+      if (payEl) { payEl.value = ''; payAmount = ''; qty = ''; }
+      if (recvEl) recvEl.value = '';
+      updatePreviewDisplay(S.futuresMarket);
       await refreshBalances();
       await refresh();
     } catch (e) {
