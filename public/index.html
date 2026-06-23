@@ -688,7 +688,7 @@ async function loadView(view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
-      case 'earn': case 'ico': await renderEarn(sec); break;
+      case 'earn': case 'ico': S.earnTab = null; S.earnHubFilter = 'all'; await renderEarn(sec); break;
       case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
       case 'liquidity': S.earnTab = 'liquidity'; await renderEarn(sec); break;
       case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
@@ -3051,12 +3051,59 @@ function defiTabBar(activeView) {
   </div>`;
 }
 
+// ── Earn Hub (EarnPark-style yield marketplace landing) ───────────────────────
+function renderEarnHub(sec) {
+  const PRODUCTS = [
+    { id: 'stake',           label: 'BLOOM Staking',       apy: 12,   apyLabel: 'Up to 12% APY',   risk: 'Low',    desc: 'Daily rewards',      iconText: 'BLM', iconBg: 'bg-violet-700',  cats: ['top','altcoins'], nav: 'stake'     },
+    { id: 'vault-cons',      label: 'Vault: Conservative', apy: 6.5,  apyLabel: 'Up to 6.5% APY',  risk: 'Low',    desc: 'Auto-compounding',   iconText: 'CON', iconBg: 'bg-teal-700',    cats: ['top'],            nav: 'vault'     },
+    { id: 'vault-bal',       label: 'Vault: Balanced',     apy: 11,   apyLabel: 'Up to 11% APY',   risk: 'Medium', desc: 'Auto-compounding',   iconText: 'BAL', iconBg: 'bg-blue-700',    cats: ['top'],            nav: 'vault'     },
+    { id: 'vault-growth',    label: 'Vault: Growth',       apy: 18.5, apyLabel: 'Up to 18.5% APY', risk: 'High',   desc: 'Auto-compounding',   iconText: 'GRW', iconBg: 'bg-indigo-700',  cats: ['top'],            nav: 'vault'     },
+    { id: 'pool-bloom-usdc', label: 'BLOOM/USDC Pool',     apy: null, apyLabel: 'Variable APY',     risk: 'Medium', desc: 'Earn trading fees',  iconText: 'LP',  iconBg: 'bg-emerald-700', cats: ['altcoins'],       nav: 'liquidity' },
+    { id: 'pool-eth-usdc',   label: 'ETH/USDC Pool',       apy: null, apyLabel: 'Variable APY',     risk: 'Medium', desc: 'Earn trading fees',  iconText: 'LP2', iconBg: 'bg-blue-800',    cats: ['top'],            nav: 'liquidity' },
+    { id: 'launchpad',       label: 'Launchpad',           apy: null, apyLabel: 'Token bonuses',    risk: 'High',   desc: 'Early token access', iconText: '🚀',  iconBg: 'bg-amber-700',   cats: ['new'],            nav: 'launchpad' },
+  ];
+
+  function earnCard(p) {
+    return `<div class="card flex flex-col gap-2">
+      <div class="w-12 h-12 rounded-full ${p.iconBg} flex items-center justify-center text-sm font-bold text-white shrink-0">${p.iconText}</div>
+      <div class="font-bold text-sm leading-tight">${p.label}</div>
+      <div class="text-emerald-400 font-bold text-xl leading-tight">${p.apyLabel}</div>
+      <div class="text-[#8b95ab] text-xs">${p.risk} risk · ${p.desc}</div>
+      <button class="btn btn-g w-full mt-1 text-sm" onclick="navigate('${p.nav}')">Earn Now</button>
+    </div>`;
+  }
+
+  function render() {
+    const f = S.earnHubFilter || 'all';
+    let list;
+    if (f === 'all') list = PRODUCTS;
+    else if (f === 'top') list = PRODUCTS.filter(p => p.cats.includes('top')).sort((a,b) => (b.apy||0)-(a.apy||0));
+    else list = PRODUCTS.filter(p => p.cats.includes(f));
+    sec.innerHTML = `
+      <div class="mb-6 pt-2">
+        <h1 class="text-2xl font-bold leading-tight">Earn crypto yield.<br><span class="text-emerald-400">Up to 18.5% APY.</span></h1>
+        <p class="text-[#8b95ab] text-sm mt-1">Stake, pool, and vault — all in one place.</p>
+      </div>
+      <div class="flex gap-2 mb-5 overflow-x-auto scrollbar-hide">
+        ${[['all','All'],['top','Top'],['altcoins','Altcoins'],['new','New']].map(([k,l]) =>
+          `<button class="text-sm px-4 py-1.5 rounded-full shrink-0 font-medium transition-colors ${f===k ? 'bg-emerald-500 text-white' : 'pill-inactive'}" onclick="earnHubSetFilter('${k}')">${l}</button>`
+        ).join('')}
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        ${list.length ? list.map(earnCard).join('') : '<p class="text-[#4e5872] text-sm col-span-2">No products in this category.</p>'}
+      </div>`;
+  }
+
+  window.earnHubSetFilter = (f) => { S.earnHubFilter = f; render(); };
+  render();
+}
+
 // ── Earn (composite: Stake / Liquidity / Launchpad) ───────────────────────────
 async function renderEarn(sec) {
-  let tab = S.earnTab || 'stake';
-  sec.innerHTML = `
-    ${defiTabBar(S.view || 'earn')}
-    <div id="earn-sub"></div>`;
+  const tab = S.earnTab;
+  if (!tab) { renderEarnHub(sec); return; }
+  const backLink = `<button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>`;
+  sec.innerHTML = `${backLink}${defiTabBar(S.view || tab)}<div id="earn-sub"></div>`;
   const sub = document.getElementById('earn-sub');
   sub.innerHTML = spin();
   try {
@@ -3080,6 +3127,7 @@ async function renderVault(sec) {
       return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
     };
     sec.innerHTML = `
+      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>
       ${defiTabBar('vault')}
       <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
       <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
