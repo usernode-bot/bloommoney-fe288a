@@ -4158,13 +4158,13 @@ window.messageUser = async (username) => {
 // Branches are mutually exclusive and cover every state — it never throws.
 function futTierHintHtml(tier, zkVerified) {
   if (tier === 'basic')
-    return `<div class="text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+    return `<div class="fut-tier-hint text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
   if (tier === 'social')
-    return `<div class="text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
   if (tier === 'premium' && !zkVerified)
-    return `<div class="text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
   if (zkVerified)
-    return `<div class="text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
   return '';
 }
 
