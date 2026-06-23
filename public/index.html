@@ -1706,7 +1706,7 @@ async function renderProfile(sec) {
       ? `<label class="group relative cursor-pointer" title="Change photo">
            ${avatarImg(username, 'w-20 h-20 ring-4 ring-[var(--bg-deep)]', user.avatar_url)}
            ${editMode ? `<div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none"><span class="text-white text-sm">📷</span></div>
-           <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">` : ''}
+           <input id="avatar-file-input" type="file" accept="image/jpeg,image/png" class="hidden" onchange="handleAvatarUpload(this)">` : ''}
          </label>`
       : avatarImg(username, 'w-20 h-20 ring-4 ring-[var(--bg-deep)]', user.avatar_url);
 
@@ -1814,33 +1814,32 @@ async function renderProfile(sec) {
     } catch (e) { alert(e.message); }
   };
 
-  window.handleAvatarUpload = (input) => {
+  window.handleAvatarUpload = async (input) => {
     const file = input.files && input.files[0];
     if (!file) return;
-    if (file.size > 1024 * 1024) { alert('Image must be under 1 MB'); input.value = ''; return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = async () => {
-        const SIZE = 200;
-        const canvas = document.createElement('canvas');
-        canvas.width = SIZE;
-        canvas.height = SIZE;
-        const ctx = canvas.getContext('2d');
-        const scale = Math.max(SIZE / img.width, SIZE / img.height);
-        const w = img.width * scale, h = img.height * scale;
-        ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
-        const dataUri = canvas.toDataURL('image/jpeg', 0.80);
-        try {
-          await api('PATCH', '/api/me', { avatar_url: dataUri });
-          user.avatar_url = dataUri;
-          if (S.user && S.user.user_id === user.user_id) S.user.avatar_url = dataUri;
-          await fullRender();
-        } catch (e) { alert(e.message); }
-      };
-      img.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
+    // Client-side validation (server re-validates type + size authoritatively).
+    if (file.type !== 'image/jpeg' && file.type !== 'image/png') {
+      alert('Avatar must be a JPG or PNG image'); input.value = ''; return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Image must be under 2 MB'); input.value = ''; return;
+    }
+    try {
+      // Upload the raw file bytes; the server stores them in Postgres and
+      // returns a cache-busted serve URL we point the avatar at.
+      const h = { 'Content-Type': file.type };
+      if (S.token) h['x-usernode-token'] = S.token;
+      const res = await fetch('/api/avatar', { method: 'POST', headers: h, body: file });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      user.avatar_url = data.avatar_url;
+      if (S.user && S.user.user_id === user.user_id) S.user.avatar_url = data.avatar_url;
+      await fullRender();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      input.value = '';
+    }
   };
   window.handleCoverUpload = (input) => {
     const file = input.files && input.files[0];
