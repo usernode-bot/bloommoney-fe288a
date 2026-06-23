@@ -177,6 +177,7 @@
     { "name": "Landing page hero renders", "path": "/landing.html", "expectSelector": "#landing-hero" },
     { "name": "Vault section in DOM", "path": "/?demo=1", "expectSelector": "#section-vault" },
     { "name": "Launchpad nav item in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='launchpad']" },
+    { "name": "Launchpad stats bar renders", "path": "/?demo=1", "expectSelector": "[data-launchpad-stats]" },
     { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
     { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" },
     { "name": "Trade Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
