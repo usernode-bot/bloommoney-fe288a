@@ -64,7 +64,10 @@
   })();
   </script>
 
-  <title>BloomMoney</title>
+  <script>
+  (function(){var t=localStorage.getItem('bloom_theme');if(t==='light'){document.documentElement.classList.remove('dark');}else{document.documentElement.classList.add('dark');}})();
+  </script>
+    <title>BloomMoney</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
@@ -72,7 +75,7 @@
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
 <!-- ───── Wallet Gate ───── -->
-<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-6 p-8 text-center" style="background: radial-gradient(ellipse at 50% 60%, rgba(124,92,252,0.12) 0%, transparent 70%), #0f1117;">
+<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-6 p-8 text-center" style="background: radial-gradient(ellipse at 50% 60%, rgba(124,92,252,0.12) 0%, transparent 70%), var(--bg-deep);">
   <div class="text-7xl">🌸</div>
   <h1 class="text-3xl font-bold text-[#e8eaf0]">BloomMoney</h1>
   <p class="text-[#8b95ab] max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
@@ -112,7 +115,9 @@
       </button>
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="hidden sm:flex items-center gap-2 text-xs">
+    <div class="flex items-center gap-1">
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <div class="hidden sm:flex items-center gap-2 text-xs">
       <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
       <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
         <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
@@ -135,6 +140,7 @@
           <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
           <span class="text-[#4e5872]">USDC</span>
         </div>
+      </div>
       </div>
     </div>
   </header>
@@ -257,6 +263,21 @@
 
 <style>
 :root {
+  --bg-deep:        #f4f5f8;
+  --bg-surface:     #ffffff;
+  --bg-card:        #f0f1f6;
+  --bg-card-hover:  #e6e8f0;
+  --bg-input:       #f8f8fb;
+  --border-subtle:  rgba(0,0,0,0.07);
+  --border-hover:   rgba(124,92,252,0.25);
+  --border-focus:   #7c5cfc;
+  --accent-purple:  #7c5cfc;
+  --accent-blue:    #4e9af1;
+  --text-primary:   #1c1e2d;
+  --text-secondary: #525875;
+  --text-muted:     #9499b3;
+}
+html.dark {
   --bg-deep:        #0f1117;
   --bg-surface:     #131620;
   --bg-card:        #161b2a;
@@ -271,6 +292,39 @@
   --text-secondary: #8b95ab;
   --text-muted:     #4e5872;
 }
+/* Light-mode: override Tailwind hardcoded arbitrary-value colour classes.
+   [class~="..."] attribute selectors need no escaping and cover both static HTML
+   and dynamically injected innerHTML. */
+html:not(.dark) [class~="text-[#e8eaf0]"] { color: var(--text-primary) !important; }
+html:not(.dark) [class~="text-[#8b95ab]"] { color: var(--text-secondary) !important; }
+html:not(.dark) [class~="text-[#4e5872]"] { color: var(--text-muted) !important; }
+html:not(.dark) [class~="bg-[#0f1117]"]   { background-color: var(--bg-deep) !important; }
+html:not(.dark) [class~="bg-[#131620]"]   { background-color: var(--bg-surface) !important; }
+html:not(.dark) [class~="bg-[#161b2a]"]   { background-color: var(--bg-card) !important; }
+html:not(.dark) [class~="bg-[#1c2236]"]   { background-color: var(--bg-card-hover) !important; }
+html:not(.dark) [class~="bg-[#0d1021]"]   { background-color: var(--bg-input) !important; }
+html:not(.dark) [class~="hover:bg-[#1c2236]"]:hover { background-color: var(--bg-card-hover) !important; }
+html:not(.dark) [class~="border-[rgba(255,255,255,0.06)]"] { border-color: var(--border-subtle) !important; }
+html:not(.dark) [class~="border-[rgba(255,255,255,0.08)]"] { border-color: var(--border-subtle) !important; }
+html:not(.dark) [class~="border-[rgba(255,255,255,0.15)]"] { border-color: rgba(0,0,0,0.12) !important; }
+html:not(.dark) .inp { background: var(--bg-input) !important; border-color: rgba(0,0,0,0.1) !important; color: var(--text-primary) !important; }
+html:not(.dark) select.inp option { background: var(--bg-card); color: var(--text-primary); }
+/* SVG chart fill-attribute overrides */
+html:not(.dark) svg rect[fill="#0d1021"] { fill: var(--bg-input); }
+html:not(.dark) svg text[fill="#4e5872"] { fill: var(--text-muted); }
+html:not(.dark) svg text[fill="#e8eaf0"] { fill: var(--text-primary); }
+/* Futures terminal: always dark. Higher specificity (.futures-terminal ancestor)
+   overrides the global colour overrides above. */
+html:not(.dark) .futures-terminal [class~="text-[#e8eaf0]"] { color: #e8eaf0 !important; }
+html:not(.dark) .futures-terminal [class~="text-[#8b95ab]"] { color: #8b95ab !important; }
+html:not(.dark) .futures-terminal [class~="text-[#4e5872]"] { color: #4e5872 !important; }
+html:not(.dark) .futures-terminal [class~="bg-[#161b2a]"]   { background-color: #161b2a !important; }
+html:not(.dark) .futures-terminal [class~="bg-[#0d1021]"]   { background-color: #0d1021 !important; }
+html:not(.dark) .futures-terminal [class~="bg-[#1c2236]"]   { background-color: #1c2236 !important; }
+html:not(.dark) .futures-terminal [class~="bg-[#131620]"]   { background-color: #131620 !important; }
+html:not(.dark) .futures-terminal [class~="border-[rgba(255,255,255,0.06)]"] { border-color: rgba(255,255,255,0.06) !important; }
+html:not(.dark) .futures-terminal [class~="hover:bg-[#1c2236]"]:hover { background-color: #1c2236 !important; }
+html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-color: rgba(255,255,255,0.08) !important; color: #e8eaf0 !important; }
 .nav-item {
   width: 100%; text-align: left; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
   font-size: 0.875rem; color: var(--text-secondary); transition: color 0.15s, background 0.15s;
@@ -579,6 +633,20 @@ function navigate(view, opts) {
   document.getElementById('main-scroll').scrollTo(0, 0);
 }
 
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('bloom_theme', isDark ? 'dark' : 'light');
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = isDark ? '☀️' : '🌙';
+  const notice = document.getElementById('fut-dark-notice');
+  if (notice) notice.style.display = isDark ? 'none' : 'flex';
+}
+function initThemeBtn() {
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+}
+
 async function loadView(view) {
   const sec = document.getElementById(VIEW_SECTION[view]);
   if (!sec) return;
@@ -653,6 +721,7 @@ function showWalletGate() {
 }
 
 function showApp() {
+  initThemeBtn();
   document.getElementById('wallet-gate').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   updateHeader();
@@ -3492,7 +3561,9 @@ async function renderFutures(sec) {
 
     const preview = calcPreview(mkt);
 
+    const _isLightMode = !document.documentElement.classList.contains('dark');
     sec.innerHTML = `
+<div id="fut-dark-notice" style="display:${_isLightMode ? 'flex' : 'none'};align-items:center;gap:8px;padding:6px 12px;font-size:0.75rem;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);background:var(--bg-surface);">🌙 <span style="font-weight:500">Terminal always dark</span></div>
 <div class="futures-terminal" id="fut-root">
 
   <!-- ── Market Header Bar ── -->
