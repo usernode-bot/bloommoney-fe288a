@@ -18,6 +18,17 @@ const FUTURES_GAS = 1 * UNITS;   // 1 BLOOM gas fee per futures open/close
 // Post-to-Earn: points credited for each successful top-level post to the feed.
 const POST_REWARD_POINTS = 5;
 
+// Stakeable token registry — shared by POST /api/defi/stake validation and
+// the frontend card grid. apy_bps: annual yield in basis points.
+const STAKEABLE_TOKENS = {
+  BLOOM: { apy_bps: 1200, name: 'BloomMoney' },
+  ETH:   { apy_bps:  600, name: 'Ethereum'   },
+  SOL:   { apy_bps:  800, name: 'Solana'     },
+  BTC:   { apy_bps:  400, name: 'Bitcoin'    },
+};
+// Fixed play-money BLOOM price (USD) used when CoinGecko has no BLOOM entry.
+const BLOOM_PLAY_PRICE_USD = 0.10;
+
 const DAILY_TEMPLATES = [
   {
     slug: 'eth_above_price',
@@ -70,7 +81,7 @@ function normalizeCategory(c) {
   return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
 }
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '2mb' }));
@@ -1615,20 +1626,24 @@ app.get('/api/defi/stakes', async (req, res) => {
 app.post('/api/defi/stake', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
+    const token = (req.body.token || 'BLOOM').toUpperCase();
+    if (!STAKEABLE_TOKENS[token]) return res.status(400).json({ error: 'Unsupported token' });
     const amount = toUnits(req.body.amount);
     if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    const apy_bps = STAKEABLE_TOKENS[token].apy_bps;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
-      [req.user.id]
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, token]
     );
-    if (!bal || Number(bal.balance) < amount) throw new Error('Insufficient BLOOM');
+    if (!bal || Number(bal.balance) < amount) throw new Error(`Insufficient ${token}`);
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
-      [amount, req.user.id]
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amount, req.user.id, token]
     );
     const { rows: [stake] } = await client.query(
-      'INSERT INTO defi_stakes(user_id,amount) VALUES($1,$2) RETURNING *', [req.user.id, amount]
+      'INSERT INTO defi_stakes(user_id,token,amount,apy_bps) VALUES($1,$2,$3,$4) RETURNING *',
+      [req.user.id, token, amount, apy_bps]
     );
     await client.query('COMMIT');
     res.json({ stake });
@@ -1650,17 +1665,68 @@ app.delete('/api/defi/stakes/:id', async (req, res) => {
     const elapsed = (Date.now() - new Date(stake.staked_at).getTime()) / 1000;
     const reward = Math.floor(Number(stake.amount) * (stake.apy_bps / 10000) * elapsed / 31536000);
     const total = Number(stake.amount) + reward;
-    await client.query('UPDATE defi_stakes SET unstaked_at=NOW() WHERE id=$1', [stake.id]);
+    await client.query('UPDATE defi_stakes SET unstaked_at=NOW(), reward_amount=$1 WHERE id=$2', [reward, stake.id]);
     await client.query(
-      "UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
-      [total, req.user.id]
+      'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [total, req.user.id, stake.token]
     );
     await client.query('COMMIT');
-    res.json({ ok: true, returned: fromUnits(total), reward: fromUnits(reward) });
+    res.json({ ok: true, returned: fromUnits(total), reward: fromUnits(reward), token: stake.token });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
+});
+
+// ── DeFi: Staking stats (public) ─────────────────────────────────────────────
+
+app.get('/api/defi/staking-stats', async (req, res) => {
+  try {
+    const [stakersRow, tokenTotals, rewardTotals] = await Promise.all([
+      pool.query("SELECT COUNT(DISTINCT user_id)::int AS n FROM defi_stakes WHERE unstaked_at IS NULL"),
+      pool.query("SELECT token, SUM(amount)::bigint AS total FROM defi_stakes WHERE unstaked_at IS NULL GROUP BY token"),
+      pool.query("SELECT token, COALESCE(SUM(reward_amount),0)::bigint AS total FROM defi_stakes WHERE unstaked_at IS NOT NULL GROUP BY token"),
+    ]);
+
+    const prices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices().catch(() => STAGING_TICKER_PRICES);
+
+    function tokenPriceUsd(sym) {
+      if (sym === 'BLOOM') return BLOOM_PLAY_PRICE_USD;
+      return prices[sym] || 0;
+    }
+
+    let totalStakedUsd = 0;
+    for (const row of tokenTotals.rows) {
+      totalStakedUsd += (Number(row.total) / UNITS) * tokenPriceUsd(row.token);
+    }
+
+    let totalRewardsPaidUsd = 0;
+    for (const row of rewardTotals.rows) {
+      totalRewardsPaidUsd += (Number(row.total) / UNITS) * tokenPriceUsd(row.token);
+    }
+
+    res.json({
+      total_stakers: stakersRow.rows[0].n,
+      total_staked_usd: Math.round(totalStakedUsd),
+      total_rewards_paid_usd: Math.round(totalRewardsPaidUsd),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DeFi: Staking activity feed (public) ──────────────────────────────────────
+
+app.get('/api/defi/staking-activity', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT ds.id, u.username, ds.token, ds.amount, ds.staked_at, ds.unstaked_at,
+             CASE WHEN ds.unstaked_at IS NULL THEN 'staked' ELSE 'unstaked' END AS action
+      FROM defi_stakes ds
+      JOIN users u ON u.user_id = ds.user_id
+      ORDER BY GREATEST(ds.staked_at, COALESCE(ds.unstaked_at, ds.staked_at)) DESC
+      LIMIT 10
+    `);
+    res.json({ activity: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── DeFi: Liquidity ────────────────────────────────────────────────────────────
@@ -4239,8 +4305,10 @@ async function start() {
       amount BIGINT NOT NULL,
       apy_bps INTEGER NOT NULL DEFAULT 1200,
       staked_at TIMESTAMPTZ DEFAULT NOW(),
-      unstaked_at TIMESTAMPTZ
+      unstaked_at TIMESTAMPTZ,
+      reward_amount BIGINT DEFAULT 0
     );
+    ALTER TABLE defi_stakes ADD COLUMN IF NOT EXISTS reward_amount BIGINT DEFAULT 0;
     CREATE TABLE IF NOT EXISTS defi_liquidity_positions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -5407,6 +5475,22 @@ async function start() {
         (9006,'adjust_balance',9001,'Staging demo — compensation USDC +50')
       ) v(admin_user_id,action_type,target_user_id,reason)
       WHERE NOT EXISTS (SELECT 1 FROM admin_actions WHERE reason='Staging demo — spam activity detected')
+    `).catch(() => {});
+
+    // Staking demo seeds — defi_stakes is staging:private so needs explicit rows.
+    // Creates a mix of active and completed stakes across tokens so the hero
+    // counters and activity feed are non-empty.
+    await pool.query(`
+      INSERT INTO defi_stakes(id,user_id,token,amount,apy_bps,staked_at,unstaked_at,reward_amount) VALUES
+        (990101,9001,'BLOOM',300000000,1200,NOW()-INTERVAL '14 days',NULL,0),
+        (990102,9002,'ETH',500000,600,NOW()-INTERVAL '7 days',NULL,0),
+        (990103,9003,'SOL',5000000,800,NOW()-INTERVAL '21 days',NOW()-INTERVAL '3 days',32000),
+        (990104,9004,'BTC',50000,400,NOW()-INTERVAL '30 days',NULL,0),
+        (990105,9005,'BLOOM',800000000,1200,NOW()-INTERVAL '5 days',NULL,0),
+        (990106,9001,'BLOOM',150000000,1200,NOW()-INTERVAL '60 days',NOW()-INTERVAL '10 days',2953424),
+        (990107,9002,'BLOOM',200000000,1200,NOW()-INTERVAL '2 days',NULL,0),
+        (990108,9003,'ETH',300000,600,NOW()-INTERVAL '3 days',NOW()-INTERVAL '1 day',1480)
+      ON CONFLICT (id) DO NOTHING
     `).catch(() => {});
   }
 
