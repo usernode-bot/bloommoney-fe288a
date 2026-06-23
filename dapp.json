@@ -143,6 +143,8 @@
     { "name": "Market grid card renders", "path": "/?demo=1", "expectSelector": ".pm-market-card" },
     { "name": "How-it-works section renders", "path": "/?demo=1", "expectSelector": ".pm-how-it-works" },
     { "name": "Trade terminal in DOM", "path": "/?demo=1", "expectSelector": "#section-trade" },
+    { "name": "Trade terminal renders (no crash)", "path": "/?demo=1", "expectSelector": "#section-trade .futures-terminal" },
+    { "name": "Trade verification hint renders", "path": "/?demo=1", "expectSelector": "#section-trade .fut-tier-hint" },
     { "name": "Verify screen in DOM", "path": "/?demo=1", "expectSelector": "#section-verify" },
     { "name": "Explore screen in DOM", "path": "/?demo=1", "expectSelector": "#section-explore" },
     { "name": "Admin panel in DOM", "path": "/?demo=1", "expectSelector": "#section-admin" },
