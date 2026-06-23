@@ -190,7 +190,7 @@
       <section id="app-feed" class="view max-w-2xl mx-auto py-4 px-4 space-y-4"></section>
 
       <!-- Profile -->
-      <section id="section-profile" class="view hidden max-w-2xl mx-auto py-4 px-4">
+      <section id="section-profile" class="view hidden max-w-2xl mx-auto overflow-hidden">
         <!-- CI test anchor populated by renderProfile() -->
         <div id="linked-accounts-section" class="hidden"></div>
       </section>
@@ -241,7 +241,7 @@
       <section id="section-admin" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Messages -->
-      <section id="section-messages" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-messages" class="view hidden h-full overflow-hidden"></section>
 
     </main>
   </div>
@@ -331,6 +331,19 @@ select.inp option { background: var(--bg-card); }
 .pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff !important; border-radius: 9999px; border: none; }
 .pill-inactive { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 9999px; }
 .pill-inactive:hover { color: var(--text-primary); border-color: var(--border-hover); }
+/* Underline-style tab buttons (Twitter/X style) */
+.tab-ul-active { color: var(--text-primary); border-bottom: 2px solid var(--accent-purple); font-weight: 600; }
+.tab-ul-inactive { color: var(--text-secondary); border-bottom: 2px solid transparent; }
+.tab-ul-inactive:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+/* Flat post row (Twitter/X style) */
+.feed-post { display: flex; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); }
+.feed-post:hover { background: rgba(255,255,255,0.02); }
+/* Flat inbox row */
+.inbox-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; cursor: pointer; transition: background 0.15s; }
+.inbox-row:hover { background: var(--bg-card-hover); }
+/* Messages split pane */
+#msg-inbox-panel { min-height: 0; }
+#msg-thread-panel { min-height: 0; }
 /* Futures table zebra rows — kept for fallback compatibility */
 #section-futures tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
 /* Avatar hue override — purple/blue band */
@@ -893,17 +906,20 @@ async function renderFeed(sec) {
     const isBot = !!p.is_bot;
     const cheerCls = p.liked_by_me ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
     const isLockedForMe = p.locked && !p.unlocked;
+    const liked = p.liked_by_me;
+    const heartCls = liked ? 'text-rose-400' : 'text-[#4e5872] hover:text-rose-400';
+    const displayName = p.author_display_name || p.username;
     const body = isLockedForMe
-      ? `<div class="relative rounded-lg overflow-hidden">
+      ? `<div class="relative rounded-lg overflow-hidden mt-1">
            <p class="text-sm text-[#8b95ab] leading-relaxed select-none blur-sm pointer-events-none">Locked alpha — pay 5 TOK to reveal this premium post. Locked alpha — pay 5 TOK to reveal.</p>
            <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-2" style="background: linear-gradient(to bottom, transparent, rgba(15,17,23,0.8));">
              <span class="text-xs font-semibold text-[#7c5cfc]">🔒 Pay 5 TOK to read alpha</span>
              <button class="btn btn-v text-xs px-3 py-1" onclick="unlockPost(${p.id})">Pay 5 TOK</button>
            </div>
          </div>`
-      : `<p class="text-sm text-[#8b95ab] leading-relaxed">${esc(p.content)}</p>`;
+      : `<p class="text-sm text-[#8b95ab] leading-relaxed mt-1">${esc(p.content)}</p>`;
     const milestoneBanner = isMilestone
-      ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
+      ? `<div class="milestone-banner text-xs font-semibold px-2 py-1 rounded bg-amber-900/40 text-amber-300 mb-1 mt-1">${esc(MILESTONE_LABELS[p.milestone_type] || p.milestone_type)}</div>`
       : '';
     const sourcePill = isBot && p.bot_source
       ? `<span class="inline-flex items-center text-xs bg-[#161b2a] border border-[rgba(78,154,241,0.25)] rounded-full px-2 py-0.5 text-[#4e9af1] ml-1">${esc(p.bot_source)}</span>`
@@ -914,28 +930,48 @@ async function renderFeed(sec) {
     const likeBtn = isMilestone
       ? `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">🎉 ${p.like_count}</button>`
       : `<button class="${cheerCls} flex items-center gap-1 text-xs transition-colors" onclick="likePost(${p.id})">♥ ${p.like_count}</button>`;
-    return `<div class="card space-y-2" data-post-id="${p.id}">
-      <div class="flex items-start justify-between gap-2">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <button class="shrink-0 leading-none" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10', p.author_avatar_url)}</button>
-          <div class="min-w-0">
-            <button class="text-sm font-semibold text-[#e8eaf0] hover:text-[#7c5cfc] truncate" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">@${esc(p.username)}</button>
-            ${isBot ? '<span class="text-xs ml-1" title="Automated news bot">🤖</span>' : ''}
-            ${sourcePill}
-            ${p.is_premium ? '<span class="tag-zk-verified ml-1">⊛</span>' : ''}
-            ${p.locked ? '<span class="text-amber-400 text-xs ml-1" title="Premium locked post">🔒</span>' : ''}
-            <span class="text-[#4e5872] text-xs ml-2">${tsAgo(p.created_at)}</span>
+    const overflowMenu = S.user && p.user_id !== S.user.user_id
+      ? `<details class="relative ml-auto">
+          <summary class="list-none cursor-pointer text-[#4e5872] hover:text-[#8b95ab] transition-colors text-base leading-none px-1" onclick="event.stopPropagation()">···</summary>
+          <div class="absolute right-0 bottom-6 z-10 bg-[#1c2236] border border-[var(--border-subtle)] rounded-lg shadow-lg py-1 min-w-[9rem]" onclick="this.closest('details').removeAttribute('open')">
+            <button class="w-full text-left px-3 py-2 text-sm text-[#e8eaf0] hover:bg-[var(--bg-card)] transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>
+            <button class="w-full text-left px-3 py-2 text-sm text-[#e8eaf0] hover:bg-[var(--bg-card)] transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow @${esc(p.username)}</button>
           </div>
+        </details>`
+      : '';
+    return `<div class="feed-post" data-post-id="${p.id}">
+      <button class="shrink-0 leading-none self-start" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})" aria-label="@${esc(p.username)} profile">${avatarImg(p.username, 'post-avatar w-10 h-10', p.author_avatar_url)}</button>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1 flex-wrap min-w-0">
+          <button class="text-sm font-bold text-[#e8eaf0] hover:underline truncate max-w-[10rem]" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})"> ${esc(displayName)}</button>
+          ${p.is_premium ? '<span class="tag-zk-verified">⊛</span>' : ''}
+          <span class="text-[#4e5872] text-sm truncate">@${esc(p.username)}</span>
+          <span class="text-[#4e5872] text-sm">·</span>
+          <span class="text-[#4e5872] text-sm shrink-0">${tsAgo(p.created_at)}</span>
+          ${p.locked ? '<span class="text-amber-400 text-xs shrink-0" title="Premium locked post">🔒</span>' : ''}
         </div>
-      </div>
-      ${milestoneBanner}
-      ${body}
-      <div class="flex items-center gap-4">
-        ${likeBtn}
-        <button class="text-[#4e5872] hover:text-[#8b95ab] flex items-center gap-1 text-xs transition-colors" onclick="openThread(${p.id})">💬 ${p.reply_count}</button>
-        ${readMoreLink}
-        ${!isBot && S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-amber-400 text-xs transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>` : ''}
-        ${!isBot && S.user && p.user_id !== S.user.user_id ? `<button class="text-[#4e5872] hover:text-[#7c5cfc] text-xs transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow</button>` : ''}
+        ${milestoneBanner}
+        ${body}
+        <div class="flex items-center gap-5 mt-2">
+          <button class="flex items-center gap-1.5 text-xs text-[#4e5872] hover:text-[#4e9af1] transition-colors" onclick="openThread(${p.id})">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.364.466.037.893.281 1.153.671L12 21l2.652-3.978c.26-.39.687-.634 1.153-.671 1.09-.085 2.17-.207 3.238-.364 1.584-.233 2.707-1.626 2.707-3.227V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            <span>${p.reply_count}</span>
+          </button>
+          <button class="flex items-center gap-1.5 text-xs opacity-30 cursor-default" disabled title="Repost (coming soon)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"/></svg>
+          </button>
+          <button class="${heartCls} flex items-center gap-1.5 text-xs transition-colors" onclick="likePost(${p.id})">
+            ${liked
+              ? `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z"/></svg>`
+              : `<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`
+            }
+            <span>${p.like_count}</span>
+          </button>
+          <button class="flex items-center gap-1.5 text-xs opacity-30 cursor-default" disabled title="Bookmark (coming soon)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z"/></svg>
+          </button>
+          ${overflowMenu}
+        </div>
       </div>
     </div>`;
   }
@@ -959,41 +995,47 @@ async function renderFeed(sec) {
   function render() {
     if (feedState.thread) return;
     const isNewsTab = feedState.tab === 'news';
+    const myAvatar = S.user ? avatarImg(S.user.username, 'w-10 h-10 shrink-0 mt-1', S.user.avatar_url) : '';
     sec.innerHTML = `
-      ${isNewsTab ? '' : `<div class="card space-y-2">
-        <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
-        <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
-        <select id="compose-milestone" class="inp text-xs py-1">
-          <option value="">— Just posting —</option>
-          <option value="debt_free">Paid off debt 💳</option>
-          <option value="savings_goal">Hit my savings goal 🎯</option>
-          <option value="investment_win">Investment win 📈</option>
-          <option value="income_milestone">Income milestone 💼</option>
-          <option value="emergency_fund">Emergency fund complete 🛡️</option>
-          <option value="net_worth">Net worth milestone 💰</option>
-          <option value="other_win">Other win 🏆</option>
-        </select>
-        <div class="flex justify-between items-center">
-          <div class="flex items-center gap-3">
-            <span id="compose-count" class="text-xs text-[#4e5872]">0/280</span>
-            <label class="flex items-center gap-1.5 text-xs text-[#8b95ab] cursor-pointer select-none" title="Lock this post behind a 5 TOK paywall">
-              <input id="compose-lock" type="checkbox" class="accent-violet-600 w-3.5 h-3.5">
-              <span>🔒 Lock Post</span>
-            </label>
+      ${isNewsTab ? '' : `<div class="border-b border-[var(--border-subtle)] pb-3">
+        <div class="flex gap-3 px-1 pt-1">
+          <div class="shrink-0">${myAvatar}</div>
+          <div class="flex-1 min-w-0">
+            <textarea id="compose-box" class="w-full bg-transparent border-none outline-none resize-none text-[#e8eaf0] text-base placeholder-[#4e5872] pt-2" rows="3" placeholder="What is happening?" maxlength="280"></textarea>
+            <div id="compose-ticker-badge" class="flex flex-wrap gap-2 mt-1" style="display:none"></div>
+            <div class="flex items-center gap-2 mt-2 flex-wrap">
+              <select id="compose-milestone" class="inp text-xs py-1 flex-1 min-w-0">
+                <option value="">— Just posting —</option>
+                <option value="debt_free">Paid off debt 💳</option>
+                <option value="savings_goal">Hit my savings goal 🎯</option>
+                <option value="investment_win">Investment win 📈</option>
+                <option value="income_milestone">Income milestone 💼</option>
+                <option value="emergency_fund">Emergency fund complete 🛡️</option>
+                <option value="net_worth">Net worth milestone 💰</option>
+                <option value="other_win">Other win 🏆</option>
+              </select>
+              <label class="flex items-center gap-1.5 text-xs text-[#8b95ab] cursor-pointer select-none shrink-0" title="Lock this post behind a 5 TOK paywall">
+                <input id="compose-lock" type="checkbox" class="accent-violet-600 w-3.5 h-3.5">
+                <span>🔒 Lock</span>
+              </label>
+            </div>
+            <div class="flex justify-between items-center mt-2">
+              <span id="compose-count" class="text-xs text-[#4e5872]">0/280</span>
+              <button class="btn btn-v px-5 py-1.5 text-sm" onclick="submitPost()">Post</button>
+            </div>
           </div>
-          <button class="btn btn-v" onclick="submitPost()">Post</button>
         </div>
       </div>`}
-      <div class="flex gap-2 border-b border-[rgba(255,255,255,0.06)] pb-3">
-        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
-        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
-        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='wins'?'pill-active':'pill-inactive'}" onclick="switchTab('wins')">Wins 🏆</button>
-        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='news'?'pill-active':'pill-inactive'}" onclick="switchTab('news')">News 📰</button>
+      <div class="flex border-b border-[var(--border-subtle)]">
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='global'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('global')">For You</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='following'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('following')">Following</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='wins'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('wins')">Highlights</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='news'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('news')">News 📰</button>
       </div>
-      <div id="feed-list" class="space-y-3">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
+      <div id="feed-list">
+        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>'}
       </div>
-      ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
+      ${feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
     `;
     const box = document.getElementById('compose-box');
     if (box) {
@@ -1486,71 +1528,108 @@ async function renderProfile(sec) {
       ${nextCursor ? `<button id="activity-load-more" class="btn btn-z w-full mt-2" onclick="loadMoreActivity()">Load more</button>` : ''}`;
   }
 
+  async function renderMediaTab() {
+    const d = await api('GET', `/api/feed?tab=global&limit=50`);
+    const mediaPosts = d.posts.filter(p => p.username === username && (p.nft_id != null || p.image_url != null));
+    if (!mediaPosts.length) return '<p class="text-[#4e5872] text-sm px-4 py-6">No media yet</p>';
+    return `<div class="grid grid-cols-3 gap-1 px-1">${mediaPosts.map(p =>
+      `<div class="aspect-square rounded overflow-hidden bg-[var(--bg-card)] flex items-center justify-center">
+        ${p.image_url ? `<img src="${esc(p.image_url)}" class="w-full h-full object-cover" loading="lazy">` : `<div class="text-[#4e5872] text-xs text-center p-2">${esc(p.content?.slice(0,60))}…</div>`}
+      </div>`
+    ).join('')}</div>`;
+  }
+
   async function fullRender() {
     let tabContent = spin();
     if (activeTab === 'posts') tabContent = await renderPostTab(null).catch(() => '');
     else if (activeTab === 'replies') tabContent = await renderPostTab(true).catch(() => '');
+    else if (activeTab === 'media') tabContent = await renderMediaTab().catch(e => err(e.message));
     else if (activeTab === 'portfolio') tabContent = await renderPortfolioTab().catch(e => err(e.message));
 
+    const joinedDate = user.created_at
+      ? new Date(user.created_at).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      : null;
+
+    // Cover photo area
+    const coverStyle = user.cover_url
+      ? `background: url('${esc(user.cover_url)}') center/cover no-repeat`
+      : `background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue))`;
+    const coverArea = editMode
+      ? `<div class="relative h-[200px]" style="${coverStyle}">
+           <label class="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer hover:bg-black/50 transition-colors" title="Change cover photo">
+             <div class="flex flex-col items-center gap-1 text-white/80 hover:text-white transition-colors">
+               <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"/></svg>
+               <span class="text-xs font-medium">Change cover</span>
+             </div>
+             <input type="file" accept="image/*" class="hidden" onchange="handleCoverUpload(this)">
+           </label>
+         </div>`
+      : `<div class="h-[200px]" style="${coverStyle}"></div>`;
+
+    // Avatar
+    const avatarBlock = isMe
+      ? `<label class="group relative cursor-pointer" title="Change photo">
+           ${avatarImg(username, 'w-20 h-20 ring-4 ring-[var(--bg-deep)]', user.avatar_url)}
+           ${editMode ? `<div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none"><span class="text-white text-sm">📷</span></div>
+           <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">` : ''}
+         </label>`
+      : avatarImg(username, 'w-20 h-20 ring-4 ring-[var(--bg-deep)]', user.avatar_url);
+
+    const profileTabs = ['posts', 'replies', 'media', 'portfolio'];
+
     sec.innerHTML = `
-      <div class="space-y-4">
-        <div class="card">
+      <div>
+        ${coverArea}
+        <div class="relative px-4">
+          <div class="flex items-end justify-between" style="margin-top:-40px">
+            <div class="shrink-0">${avatarBlock}</div>
+            <div class="flex gap-2 pb-1">
+              ${editMode
+                ? `<button class="btn btn-v text-sm" onclick="saveProfile()">Save</button>
+                   <button class="btn btn-z text-sm" onclick="editMode=false;fullRender()">Cancel</button>`
+                : isMe
+                  ? `<button class="btn btn-z text-sm" onclick="editMode=true;fullRender()">Edit profile</button>`
+                  : `<button class="btn ${isFollowing?'btn-z':'btn-v'} text-sm" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Following':'Follow'}</button>`
+              }
+            </div>
+          </div>
           ${editMode ? `
-            <div class="space-y-3">
-              <div class="flex items-center gap-3">
-                <label class="group relative cursor-pointer shrink-0" title="Change photo">
-                  ${avatarImg(username, 'w-14 h-14', user.avatar_url)}
-                  <div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
-                    <span class="text-white text-lg">📷</span>
-                  </div>
-                  <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">
-                </label>
-                <button class="btn btn-z text-xs" onclick="document.getElementById('avatar-file-input').click()">Change photo</button>
-              </div>
+            <div class="mt-4 space-y-3">
               <input id="edit-name" class="inp" value="${esc(user.display_name||'')}" placeholder="Display name">
               <textarea id="edit-bio" class="inp" rows="3" placeholder="Bio">${esc(user.bio||'')}</textarea>
-              <div class="flex gap-2">
-                <button class="btn btn-v" onclick="saveProfile()">Save</button>
-                <button class="btn btn-z" onclick="editMode=false;fullRender()">Cancel</button>
-              </div>
-            </div>` : `
-            <div class="flex items-start justify-between gap-3">
-              <div class="flex items-center gap-3">
-                ${isMe ? `
-                  <label class="group relative cursor-pointer shrink-0" title="Upload profile photo">
-                    ${avatarImg(username, 'w-14 h-14', user.avatar_url)}
-                    <div class="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
-                      <span class="text-white text-lg">📷</span>
-                    </div>
-                    <input id="avatar-file-input" type="file" accept="image/*" class="hidden" onchange="handleAvatarUpload(this)">
-                  </label>
-                ` : avatarImg(username, 'w-14 h-14 shrink-0', user.avatar_url)}
-                <div>
-                  <div class="font-bold text-lg flex items-center gap-2">${esc(user.display_name || username)}${roiData && roiData.closed_trade_count > 0 ? `<span class="${roiData.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} text-xs font-semibold">📈 ${roiData.all_time_roi_pct >= 0 ? '+' : ''}${roiData.all_time_roi_pct}%</span>` : ''}${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-sm hover:text-emerald-300 leading-none" title="Verified — manage verification" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-sm leading-none" title="Verified">✓</span>`) : ''}</div>
-                  <div class="text-[#8b95ab] text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-[#7c5cfc] hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
-                  ${user.usernode_pubkey ? `<div class="text-[#4e5872] text-xs font-mono">${shortAddr(user.usernode_pubkey)}</div>` : ''}
-                  <div class="flex gap-1 flex-wrap mt-0.5">${kyc?.level ? kycTag(kyc.level) : ''}</div>
-                </div>
-              </div>
-              <div class="flex gap-2">
-                ${isMe ? `<button class="btn btn-z" onclick="editMode=true;fullRender()">Edit</button>` :
-                  `<button class="btn btn-z text-xs" onclick="messageUser('${esc(username)}')">💬 Message</button>
-                   <button class="btn btn-v text-xs" onclick="openCopyTradeModal('${esc(username)}')">Copy Trade</button>
-                   <button class="btn ${isFollowing?'btn-z':'btn-v'}" onclick="doFollow('${esc(username)}',${isFollowing})">${isFollowing?'Unfollow':'Follow'}</button>`}
-              </div>
             </div>
-            ${user.bio ? `<p class="text-sm text-[#8b95ab] mt-2">${esc(user.bio)}</p>` : ''}
-            <div class="flex gap-4 mt-3 text-sm">
-              <span><strong>${counts.followers}</strong> <span class="text-[#8b95ab]">followers</span></span>
-              <span><strong>${counts.following}</strong> <span class="text-[#8b95ab]">following</span></span>
-              <span><strong>${counts.post_count}</strong> <span class="text-[#8b95ab]">posts</span></span>
-            </div>`}
+          ` : `
+            <div class="mt-4 space-y-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold text-xl text-[#e8eaf0]">${esc(user.display_name || username)}</span>
+                ${(kyc?.level === 'social' || kyc?.level === 'premium') ? (isMe ? `<button class="text-emerald-400 text-base hover:text-emerald-300" title="Verified" onclick="navigate('verify')">✓</button>` : `<span class="text-emerald-400 text-base" title="Verified">✓</span>`) : ''}
+                ${roiData && roiData.closed_trade_count > 0 ? `<span class="${roiData.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} text-xs font-semibold">📈 ${roiData.all_time_roi_pct >= 0 ? '+' : ''}${roiData.all_time_roi_pct}%</span>` : ''}
+              </div>
+              <div class="text-[#8b95ab] text-sm">@${esc(username)}${(isMe && (!kyc?.level || kyc?.level === 'basic')) ? ` <button class="text-xs text-[#7c5cfc] hover:underline" onclick="navigate('verify')">Get verified →</button>` : ''}</div>
+              ${user.bio ? `<p class="text-sm text-[#e8eaf0] mt-2">${esc(user.bio)}</p>` : ''}
+              <div class="flex flex-wrap gap-3 mt-2 text-sm text-[#4e5872]">
+                ${user.usernode_pubkey ? `<span class="font-mono">${shortAddr(user.usernode_pubkey)}</span>` : ''}
+                ${joinedDate ? `<span class="flex items-center gap-1">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+                  Joined ${joinedDate}</span>` : ''}
+                ${kyc?.level ? kycTag(kyc.level) : ''}
+              </div>
+              <div class="flex gap-4 mt-2 text-sm">
+                <span><strong class="text-[#e8eaf0]">${counts.following}</strong> <span class="text-[#8b95ab]">Following</span></span>
+                <span><strong class="text-[#e8eaf0]">${counts.followers}</strong> <span class="text-[#8b95ab]">Followers</span></span>
+              </div>
+              ${!isMe ? `<div class="flex gap-2 mt-3 flex-wrap">
+                <button class="btn btn-z text-xs" onclick="messageUser('${esc(username)}')">💬 Message</button>
+                <button class="btn btn-z text-xs" onclick="openCopyTradeModal('${esc(username)}')">📊 Copy Trade</button>
+              </div>` : ''}
+            </div>
+          `}
         </div>
-        ${isMe && S.user?.is_admin ? `<a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a>` : ''}
-        <div class="flex gap-2 flex-wrap border-b border-[rgba(255,255,255,0.06)] pb-3">
-          ${['posts','replies','portfolio'].map(t => `<button class="text-sm px-4 py-1 font-medium transition-colors ${activeTab===t?'pill-active':'pill-inactive'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
+        ${isMe && S.user?.is_admin ? `<div class="mx-4 mt-3"><a class="card block text-amber-400 text-sm hover:border-amber-700" href="/admin${S.token?('?token='+encodeURIComponent(S.token)):''}" target="_blank" rel="noopener">⚙️ Open Admin console →</a></div>` : ''}
+        <div class="flex border-b border-[var(--border-subtle)] mt-4">
+          ${profileTabs.map(t => `<button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${activeTab===t?'tab-ul-active':'tab-ul-inactive'}" onclick="switchProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}
         </div>
-        <div id="profile-tab-content" class="space-y-3">${tabContent}</div>
+        <div id="profile-tab-content" class="py-3">${tabContent}</div>
       </div>`;
   }
 
@@ -1621,6 +1700,32 @@ async function renderProfile(sec) {
           await api('PATCH', '/api/me', { avatar_url: dataUri });
           user.avatar_url = dataUri;
           if (S.user && S.user.user_id === user.user_id) S.user.avatar_url = dataUri;
+          await fullRender();
+        } catch (e) { alert(e.message); }
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  window.handleCoverUpload = (input) => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('Cover image must be under 2 MB'); input.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = async () => {
+        const W = 1200, H = 400;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        const scale = Math.max(W / img.width, H / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+        const dataUri = canvas.toDataURL('image/jpeg', 0.82);
+        try {
+          await api('PUT', '/api/profile/cover', { cover_url: dataUri });
+          user.cover_url = dataUri;
           await fullRender();
         } catch (e) { alert(e.message); }
       };
@@ -3341,117 +3446,215 @@ async function renderJournal(sec) {
 // Inbox + thread live in one section; S.msgOpenConv decides which renders.
 // Thread polling reuses the shared _activeInterval (navigate clears it).
 async function renderMessages(sec) {
+  const isMobile = window.innerWidth < 768;
   const openId = S.msgOpenConv; S.msgOpenConv = null;
-  if (openId) { await openThread(sec, openId); }
-  else { await renderInbox(sec); }
+
+  if (isMobile) {
+    if (openId) { await openThread(sec, openId); }
+    else { await renderInbox(sec); }
+    return;
+  }
+
+  // Desktop: persistent two-panel split
+  if (openId) S.msgActiveConv = openId;
+  sec.innerHTML = `
+    <div class="flex h-full">
+      <div id="msg-inbox-panel" class="w-80 shrink-0 border-r border-[var(--border-subtle)] flex flex-col h-full overflow-hidden"></div>
+      <div id="msg-thread-panel" class="flex-1 flex flex-col h-full overflow-hidden"></div>
+    </div>`;
+  const inboxPanel = document.getElementById('msg-inbox-panel');
+  const threadPanel = document.getElementById('msg-thread-panel');
+  await renderInboxPanel(inboxPanel);
+  if (S.msgActiveConv) {
+    await openThreadInPanel(threadPanel, S.msgActiveConv);
+  } else {
+    renderThreadEmptyState(threadPanel);
+  }
 }
 
+// Shared inbox row renderer — used by both full-screen mobile and left-panel desktop
+function buildInboxRows(convos) {
+  const row = (c) => {
+    const isGroup = c.type === 'group';
+    const title = isGroup ? (c.title || 'Group') : (c.other_display_name || c.other_username || 'Unknown');
+    const subtitle = isGroup ? null : (c.other_username ? '@' + c.other_username : null);
+    const avatarName = isGroup ? (c.title || 'Group') : (c.other_username || '?');
+    const preview = c.last_message
+      ? (isGroup ? esc(c.last_message.sender_username) + ': ' : '') + esc(c.last_message.content)
+      : '<span class="italic text-[#4e5872]">No messages yet</span>';
+    const when = c.last_message ? tsAgo(c.last_message.created_at) : '';
+    const unread = c.unread > 0;
+    return `<button class="inbox-row w-full text-left ${unread ? 'bg-[rgba(124,92,252,0.04)]' : ''}" onclick="openConversation(${c.id})">
+      ${avatarImg(avatarName, 'w-11 h-11 shrink-0')}
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1.5">
+          <span class="font-semibold text-sm truncate ${unread ? 'text-[#e8eaf0]' : 'text-[#c5c8d0]'}">${esc(title)}</span>
+          ${isGroup ? `<span class="text-xs text-[#4e5872] shrink-0">👥 ${c.member_count}</span>` : ''}
+          <span class="ml-auto text-xs text-[#4e5872] shrink-0">${when}</span>
+        </div>
+        ${subtitle ? `<div class="text-xs text-[#4e5872] truncate">${esc(subtitle)}</div>` : ''}
+        <div class="flex items-center gap-2 mt-0.5">
+          <span class="text-xs truncate ${unread ? 'text-[#8b95ab]' : 'text-[#4e5872]'}">${preview}</span>
+          ${unread ? `<span class="ml-auto shrink-0 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-[var(--accent-purple)] text-white text-[0.6rem] font-bold text-center leading-none">${c.unread}</span>` : ''}
+        </div>
+      </div>
+    </button>`;
+  };
+  return convos.map(row).join('');
+}
+
+// Desktop left-panel inbox renderer
+async function renderInboxPanel(panel) {
+  panel.innerHTML = `<div class="flex justify-center py-8">${spin()}</div>`;
+  let data;
+  try { data = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : '')); }
+  catch (e) { panel.innerHTML = err(e.message); return; }
+  setUnreadBadge(Number(data.total_unread) || 0);
+  const convos = data.conversations || [];
+  panel.innerHTML = `
+    <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)] shrink-0">
+      <span class="font-bold text-lg text-[#e8eaf0]">Messages</span>
+      <button class="text-[#4e5872] hover:text-[#e8eaf0] transition-colors p-1" onclick="openNewMessageModal()" title="New message">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg>
+      </button>
+    </div>
+    <div class="px-3 py-2 shrink-0">
+      <input id="msg-search-input" class="inp w-full text-sm py-1.5" placeholder="Search messages…" oninput="filterInboxRows(this.value)">
+    </div>
+    <div id="inbox-list" class="overflow-y-auto flex-1">
+      ${convos.length
+        ? buildInboxRows(convos)
+        : `<div class="text-center py-10 text-[#4e5872] text-sm px-4">
+             <div class="text-3xl mb-2">✉️</div>
+             <p class="mb-3">No conversations yet</p>
+             <button class="btn btn-v text-xs" onclick="openNewMessageModal()">Start a conversation</button>
+           </div>`}
+    </div>`;
+}
+
+window.filterInboxRows = (q) => {
+  const list = document.getElementById('inbox-list');
+  if (!list) return;
+  const lower = q.toLowerCase();
+  list.querySelectorAll('.inbox-row').forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = text.includes(lower) ? '' : 'none';
+  });
+};
+
+function renderThreadEmptyState(panel) {
+  panel.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-center px-8 gap-4 text-[#4e5872]">
+    <svg class="w-14 h-14 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.068.157 2.148.279 3.238.364.466.037.893.281 1.153.671L12 21l2.652-3.978c.26-.39.687-.634 1.153-.671 1.09-.085 2.17-.207 3.238-.364 1.584-.233 2.707-1.626 2.707-3.227V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+    <div>
+      <p class="font-semibold text-[#8b95ab] text-base">Select a message</p>
+      <p class="text-sm mt-1">Choose from your existing conversations or start a new one</p>
+    </div>
+    <button class="btn btn-v text-sm" onclick="openNewMessageModal()">New message</button>
+  </div>`;
+}
+
+// Mobile full-screen inbox
 async function renderInbox(sec) {
   clearInterval(_activeInterval); _activeInterval = null;
-  sec.innerHTML = spin();
+  sec.innerHTML = `<div class="flex justify-center py-8">${spin()}</div>`;
   let data;
   try { data = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : '')); }
   catch (e) { sec.innerHTML = err(e.message); return; }
   setUnreadBadge(Number(data.total_unread) || 0);
   const convos = data.conversations || [];
-  const row = (c) => {
-    const isGroup = c.type === 'group';
-    const title = isGroup ? (c.title || 'Group') : ('@' + (c.other_username || 'unknown'));
-    const avatarName = isGroup ? (c.title || 'Group') : (c.other_username || '?');
-    const preview = c.last_message
-      ? (isGroup ? esc(c.last_message.sender_username) + ': ' : '') + esc(c.last_message.content)
-      : '<span class="italic text-zinc-600">No messages yet</span>';
-    const when = c.last_message ? tsAgo(c.last_message.created_at) : '';
-    const unread = c.unread > 0;
-    return `<button class="card w-full text-left flex items-center gap-3 hover:border-zinc-600 ${unread ? 'border-violet-500/40 bg-violet-600/5' : ''}" onclick="openConversation(${c.id})">
-      ${avatarImg(avatarName, 'w-10 h-10')}
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <span class="font-medium truncate ${unread ? 'text-white' : 'text-zinc-200'}">${esc(title)}</span>
-          ${isGroup ? `<span class="text-xs text-zinc-500 shrink-0">👥 ${c.member_count}</span>` : ''}
-          <span class="ml-auto text-xs text-zinc-500 shrink-0">${when}</span>
-        </div>
-        <div class="flex items-center gap-2 mt-0.5">
-          <span class="text-sm truncate ${unread ? 'text-zinc-200' : 'text-zinc-500'}">${preview}</span>
-          ${unread ? `<span class="ml-auto shrink-0 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">${c.unread}</span>` : ''}
-        </div>
-      </div>
-    </button>`;
-  };
   sec.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-bold">💬 Messages</h2>
+    <div class="flex items-center justify-between mb-3 px-1">
+      <h2 class="text-xl font-bold">Messages</h2>
       <div class="flex gap-2">
         <button class="btn btn-z text-xs" onclick="openNewGroupModal()">New group</button>
         <button class="btn btn-v text-xs" onclick="openNewMessageModal()">New message</button>
       </div>
     </div>
-    ${convos.length ? `<div class="space-y-2">${convos.map(row).join('')}</div>`
-      : `<div class="card text-center py-10 text-zinc-500">
-           <div class="text-3xl mb-2">✉️</div>
-           <p class="mb-3">No conversations yet</p>
-           <button class="btn btn-v text-xs" onclick="openNewMessageModal()">Start a conversation</button>
-         </div>`}
-  `;
+    <div class="mb-3">
+      <input class="inp w-full text-sm" placeholder="Search messages…" oninput="filterInboxRows(this.value)">
+    </div>
+    <div id="inbox-list">
+      ${convos.length
+        ? buildInboxRows(convos)
+        : `<div class="card text-center py-10 text-[#4e5872]">
+             <div class="text-3xl mb-2">✉️</div>
+             <p class="mb-3">No conversations yet</p>
+             <button class="btn btn-v text-xs" onclick="openNewMessageModal()">Start a conversation</button>
+           </div>`}
+    </div>`;
 }
 
-async function openThread(sec, convId) {
+// Shared thread renderer — used by mobile full-screen and desktop right panel
+async function openThreadInPanel(panel, convId) {
   clearInterval(_activeInterval); _activeInterval = null;
-  sec.innerHTML = spin();
+  panel.innerHTML = `<div class="flex justify-center py-8">${spin()}</div>`;
   let data;
   try { data = await api('GET', `/api/conversations/${convId}/messages`); }
-  catch (e) { sec.innerHTML = err(e.message); return; }
-  refreshUnreadBadge(); // server marked this thread read
+  catch (e) { panel.innerHTML = err(e.message); return; }
+  refreshUnreadBadge();
   const conv = data.conversation;
   const isGroup = conv.type === 'group';
-  const title = isGroup ? (conv.title || 'Group') : ('@' + (conv.other_username || 'unknown'));
+  const displayName = isGroup
+    ? (conv.title || 'Group')
+    : (conv.other_display_name || conv.other_username || 'Unknown');
+  const subtitle = isGroup
+    ? `${conv.member_count} members`
+    : (conv.other_username ? '@' + conv.other_username : null);
   const myId = S.user && S.user.user_id;
 
   const paint = (msgs) => {
-    const box = sec.querySelector('#msg-scroll');
+    const box = panel.querySelector('#msg-scroll');
     if (!box) return;
     box.innerHTML = (msgs || []).map(m => {
       const mine = m.sender_user_id === myId;
       if (mine) {
-        return `<div class="flex justify-end"><div class="max-w-[75%]">
-          <div class="bg-violet-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words whitespace-pre-wrap">${esc(m.content)}</div>
-          <div class="text-[0.65rem] text-zinc-500 text-right mt-0.5">${tsAgo(m.created_at)}</div>
+        return `<div class="flex justify-end px-4 py-0.5"><div class="max-w-[75%]">
+          <div class="bg-[#4e9af1] text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words whitespace-pre-wrap">${esc(m.content)}</div>
+          <div class="text-[0.65rem] text-[#4e5872] text-right mt-0.5">${tsAgo(m.created_at)}</div>
         </div></div>`;
       }
-      return `<div class="flex gap-2">
-        ${avatarImg(m.sender_username, 'w-7 h-7')}
+      return `<div class="flex gap-2 px-4 py-0.5">
+        ${avatarImg(m.sender_username, 'w-7 h-7 shrink-0 mt-0.5')}
         <div class="max-w-[75%]">
-          ${isGroup ? `<div class="text-xs text-zinc-500 mb-0.5">@${esc(m.sender_username)}</div>` : ''}
-          <div class="bg-zinc-800 rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words whitespace-pre-wrap">${esc(m.content)}</div>
-          <div class="text-[0.65rem] text-zinc-500 mt-0.5">${tsAgo(m.created_at)}</div>
+          ${isGroup ? `<div class="text-xs text-[#4e5872] mb-0.5">@${esc(m.sender_username)}</div>` : ''}
+          <div class="bg-[#1c2236] rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words whitespace-pre-wrap text-[#e8eaf0]">${esc(m.content)}</div>
+          <div class="text-[0.65rem] text-[#4e5872] mt-0.5">${tsAgo(m.created_at)}</div>
         </div>
       </div>`;
-    }).join('') || '<p class="text-zinc-600 text-sm text-center py-6">No messages yet — say hi!</p>';
+    }).join('') || '<p class="text-[#4e5872] text-sm text-center py-8">No messages yet — say hi!</p>';
     box.scrollTop = box.scrollHeight;
   };
 
-  sec.innerHTML = `
-    <div class="flex items-center gap-2 mb-3">
-      <button class="text-lg text-zinc-400 hover:text-white px-1" onclick="backToInbox()" title="Back">←</button>
-      ${avatarImg(isGroup ? (conv.title || 'Group') : (conv.other_username || '?'), 'w-8 h-8')}
-      <div class="min-w-0">
-        <div class="font-semibold truncate">${esc(title)}</div>
-        ${isGroup ? `<div class="text-xs text-zinc-500">${conv.member_count} members</div>` : ''}
+  const avatarName = isGroup ? (conv.title || 'Group') : (conv.other_username || '?');
+  panel.innerHTML = `
+    <div class="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-subtle)] shrink-0">
+      <button class="md:hidden text-[#4e5872] hover:text-[#e8eaf0] mr-1" onclick="backToInbox()" title="Back">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+      </button>
+      ${avatarImg(avatarName, 'w-9 h-9')}
+      <div class="min-w-0 flex-1">
+        <div class="font-semibold text-[#e8eaf0] truncate">${esc(displayName)}</div>
+        ${subtitle ? `<div class="text-xs text-[#4e5872] truncate">${esc(subtitle)}</div>` : ''}
       </div>
-      ${isGroup ? `<button class="btn btn-z text-xs ml-auto" onclick="openAddPeopleModal(${conv.id})">Add people</button>` : ''}
+      ${isGroup ? `<button class="text-[#4e5872] hover:text-[#e8eaf0] p-1" onclick="openAddPeopleModal(${conv.id})" title="Add people">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 019.374 21c-2.331 0-4.512-.645-6.374-1.766z"/></svg>
+      </button>` : ''}
     </div>
-    <div id="msg-scroll" class="space-y-2 mb-3 h-[60vh] overflow-y-auto pr-1"></div>
-    <form id="msg-form" class="flex gap-2">
-      <input id="msg-input" class="inp flex-1" placeholder="Type a message…" autocomplete="off" maxlength="4000">
-      <button class="btn btn-v shrink-0" type="submit">Send</button>
-    </form>
-  `;
+    <div id="msg-scroll" class="flex-1 overflow-y-auto py-2 space-y-0.5"></div>
+    <div class="px-3 py-3 border-t border-[var(--border-subtle)] shrink-0">
+      <form id="msg-form" class="flex items-center gap-2 bg-[var(--bg-card)] rounded-full border border-[var(--border-subtle)] px-4 py-1.5 focus-within:border-[var(--border-focus)]">
+        <input id="msg-input" class="flex-1 bg-transparent outline-none text-sm text-[#e8eaf0] placeholder-[#4e5872]" placeholder="Start a new message" autocomplete="off" maxlength="4000">
+        <button type="submit" class="shrink-0 text-[#4e9af1] hover:text-[#7cb8f8] transition-colors" title="Send">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+        </button>
+      </form>
+    </div>`;
   paint(data.messages);
 
-  const form = sec.querySelector('#msg-form');
+  const form = panel.querySelector('#msg-form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const input = sec.querySelector('#msg-input');
+    const input = panel.querySelector('#msg-input');
     const content = input.value.trim();
     if (!content) return;
     input.value = '';
@@ -3461,17 +3664,44 @@ async function openThread(sec, convId) {
       paint(d.messages);
     } catch (e2) { alert(e2.message); input.value = content; }
   });
-  sec.querySelector('#msg-input')?.focus();
+  panel.querySelector('#msg-input')?.focus();
 
-  // Live refresh while the thread is open.
   _activeInterval = setInterval(async () => {
     try { const d = await api('GET', `/api/conversations/${convId}/messages`); paint(d.messages); }
     catch (_) {}
   }, 4000);
 }
 
-window.openConversation = (id) => navigate('messages', { msgOpenConv: id });
-window.backToInbox = () => navigate('messages');
+// Mobile full-screen thread (wraps openThreadInPanel)
+async function openThread(sec, convId) {
+  await openThreadInPanel(sec, convId);
+}
+
+window.openConversation = async (id) => {
+  const isMobile = window.innerWidth < 768;
+  if (isMobile) {
+    navigate('messages', { msgOpenConv: id });
+  } else {
+    S.msgActiveConv = id;
+    const threadPanel = document.getElementById('msg-thread-panel');
+    if (threadPanel) {
+      clearInterval(_activeInterval);
+      await openThreadInPanel(threadPanel, id);
+    } else {
+      navigate('messages', { msgOpenConv: id });
+    }
+  }
+};
+window.backToInbox = () => {
+  const isMobile = window.innerWidth < 768;
+  if (isMobile) {
+    navigate('messages');
+  } else {
+    S.msgActiveConv = null;
+    const threadPanel = document.getElementById('msg-thread-panel');
+    if (threadPanel) renderThreadEmptyState(threadPanel);
+  }
+};
 
 // ── Messaging: recipient picker + modals ────────────────────────────────────────
 // Removes any existing messaging modal first so re-opens don't stack.

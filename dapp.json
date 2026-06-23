@@ -170,6 +170,7 @@
     { "name": "Composer ticker badge in DOM", "path": "/?demo=1", "expectSelector": "#compose-ticker-badge" },
     { "name": "Tip button appears on post cards", "path": "/?demo=1", "expectText": "💰 Tip" },
     { "name": "Lock Post toggle in composer", "path": "/?demo=1", "expectSelector": "#compose-lock" },
+    { "name": "Highlights tab button in feed DOM", "path": "/?demo=1", "expectText": "Highlights" },
     { "name": "Landing page hero renders", "path": "/landing.html", "expectSelector": "#landing-hero" },
     { "name": "Vault section in DOM", "path": "/?demo=1", "expectSelector": "#section-vault" },
     { "name": "Launchpad nav item in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='launchpad']" },

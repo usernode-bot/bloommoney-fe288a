@@ -585,10 +585,26 @@ app.patch('/api/me', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.put('/api/profile/cover', async (req, res) => {
+  try {
+    const { cover_url } = req.body;
+    if (cover_url !== undefined && cover_url !== null) {
+      if (typeof cover_url !== 'string' || !cover_url.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'Invalid cover image' });
+      }
+      if (Buffer.byteLength(cover_url, 'utf8') > 1024 * 1024) {
+        return res.status(400).json({ error: 'Cover image too large (max 1 MB)' });
+      }
+    }
+    await pool.query('UPDATE users SET cover_url=$1 WHERE user_id=$2', [cover_url || null, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,avatar_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,avatar_url,cover_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -629,7 +645,7 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
@@ -642,8 +658,11 @@ app.get('/api/feed', async (req, res) => {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+        FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
@@ -660,7 +679,7 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
@@ -3906,6 +3925,7 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT;
     CREATE TABLE IF NOT EXISTS wallet_balances (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
