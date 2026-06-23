@@ -2660,47 +2660,176 @@ async function renderTokenDetail(sec) {
 
 // ── Stake ─────────────────────────────────────────────────────────────────────
 async function renderStake(sec) {
-  async function load() {
-    await refreshBalances();
-    const { stakes } = await api('GET', '/api/defi/stakes');
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">BLOOM Staking</h2>
-      <div class="card space-y-3 mb-4">
-        <p class="text-sm text-[#8b95ab]">Stake BLOOM to earn <span class="text-[#7c5cfc] font-semibold">12% APY</span></p>
-        <div class="flex gap-2">
-          <input id="stake-amt" type="number" class="inp flex-1" placeholder="Amount (BLOOM)" min="0">
-          <button class="btn btn-v shrink-0" onclick="doStake()">Stake</button>
-        </div>
-        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('BLOOM')} BLOOM</div>
-        <p id="stake-msg" class="text-sm"></p>
-      </div>
-      <h3 class="font-semibold mb-2">Active Stakes</h3>
-      ${stakes.length ? `<div class="space-y-3">${stakes.map(s => `
-        <div class="card flex items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-semibold">${fmtAmt('BLOOM', s.amount)} BLOOM</div>
-            <div class="text-xs text-[#8b95ab]">Staked ${tsAgo(s.staked_at)} ago · Reward: <span class="text-emerald-400">${fmtAmt('BLOOM', s.accrued_reward)} BLOOM</span></div>
-          </div>
-          <button class="btn btn-z shrink-0" onclick="doUnstake(${s.id})">Unstake</button>
-        </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No active stakes</p>'}`;
+  const STAKING_OPTIONS = [
+    { token: 'BLOOM', name: 'BloomMoney', apy: 12, minStake: '10 BLOOM',   step: '1'      },
+    { token: 'ETH',   name: 'Ethereum',   apy:  6, minStake: '0.01 ETH',   step: '0.01'   },
+    { token: 'SOL',   name: 'Solana',     apy:  8, minStake: '1 SOL',      step: '1'      },
+    { token: 'BTC',   name: 'Bitcoin',    apy:  4, minStake: '0.001 BTC',  step: '0.0001' },
+  ];
+  const TC = {
+    BLOOM: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', sym: '✿' },
+    ETH:   { bg: 'rgba(56,189,248,0.15)',  text: '#38bdf8', sym: 'Ξ'  },
+    SOL:   { bg: 'rgba(153,69,255,0.15)',  text: '#9945ff', sym: '◎' },
+    BTC:   { bg: 'rgba(251,191,36,0.15)',  text: '#fbbf24', sym: '₿'  },
+  };
+
+  function fmtStatNum(n) {
+    if (n == null) return '—';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+    return String(Math.round(n));
   }
 
-  window.doStake = async () => {
-    const amt = document.getElementById('stake-amt')?.value;
-    const msg = document.getElementById('stake-msg');
-    try {
-      await api('POST', '/api/defi/stake', { amount: amt });
-      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Staked!'; }
-      await load();
-    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+  function tokenBadge(token, size) {
+    const c = TC[token] || TC.BLOOM;
+    const sz = size === 'sm' ? 'w-7 h-7 text-xs' : 'w-10 h-10 text-sm';
+    return '<div class="' + sz + ' rounded-full flex items-center justify-center font-bold shrink-0" style="background:' + c.bg + ';color:' + c.text + ';">' + c.sym + '</div>';
+  }
+
+  async function load() {
+    sec.innerHTML = spin();
+    await refreshBalances();
+    const [stakesData, statsRes, activityRes] = await Promise.all([
+      api('GET', '/api/defi/stakes').catch(() => ({ stakes: [] })),
+      fetch('/api/defi/staking-stats').then(function(r){ return r.json(); }).catch(() => ({})),
+      fetch('/api/defi/staking-activity').then(function(r){ return r.json(); }).catch(() => ({ activity: [] })),
+    ]);
+
+    const stakes    = stakesData.stakes   || [];
+    const stats     = statsRes            || {};
+    const activity  = (activityRes.activity || []);
+
+    // ── Zone 1: Hero ────────────────────────────────────────────────
+    const heroHtml = '<div class="rounded-2xl mb-6 p-6 relative overflow-hidden" style="background:linear-gradient(135deg,#0a0d14 0%,#131620 100%);border:1px solid rgba(52,211,153,0.2);">'
+      + '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 50% 0%,rgba(52,211,153,0.09) 0%,transparent 65%);pointer-events:none;"></div>'
+      + '<div class="relative">'
+      + '<h2 class="text-2xl sm:text-3xl font-bold text-white mb-1">Stake. Earn. Grow.</h2>'
+      + '<p class="text-[#8b95ab] text-sm mb-6">Put your play-money to work. Earn yield every second on BloomMoney.</p>'
+      + '<div class="grid grid-cols-3 gap-2 sm:gap-4">'
+      + '<div class="text-center"><div class="text-xl sm:text-2xl font-bold text-emerald-400">' + fmtStatNum(stats.total_stakers) + '</div><div class="text-xs text-[#8b95ab] mt-1">Total Stakers</div></div>'
+      + '<div class="text-center"><div class="text-xl sm:text-2xl font-bold text-emerald-400">$' + fmtStatNum(stats.total_staked_usd) + '</div><div class="text-xs text-[#8b95ab] mt-1">Total Staked <span class="text-[#4e5872]">(est.)</span></div></div>'
+      + '<div class="text-center"><div class="text-xl sm:text-2xl font-bold text-emerald-400">$' + fmtStatNum(stats.total_rewards_paid_usd) + '</div><div class="text-xs text-[#8b95ab] mt-1">Rewards Paid <span class="text-[#4e5872]">(est.)</span></div></div>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+
+    // ── Zone 2: Staking Options Grid ────────────────────────────────
+    const cardsHtml = STAKING_OPTIONS.map(function(opt) {
+      const c = TC[opt.token] || TC.BLOOM;
+      return '<div class="card" id="stake-card-' + opt.token + '">'
+        + '<div class="flex items-center gap-3 mb-4">'
+        + tokenBadge(opt.token, 'lg')
+        + '<div><div class="font-semibold">' + esc(opt.name) + '</div><div class="text-xs text-[#8b95ab]">' + opt.token + '</div></div>'
+        + '</div>'
+        + '<div class="text-3xl font-bold text-emerald-400 mb-3">' + opt.apy + '%<span class="text-sm font-normal text-[#8b95ab] ml-1">APY</span></div>'
+        + '<div class="flex justify-between text-xs text-[#8b95ab] mb-4">'
+        + '<span>Unstake: <span class="text-[#e8eaf0]">Instant</span></span>'
+        + '<span>Min: <span class="text-[#e8eaf0]">' + opt.minStake + '</span></span>'
+        + '</div>'
+        + '<button class="btn btn-v w-full" onclick="stakeToggle(\'' + opt.token + '\')">STAKE</button>'
+        + '<div id="stake-form-' + opt.token + '" class="hidden mt-3 space-y-2">'
+        + '<div class="text-xs text-[#8b95ab]">Balance: ' + getBal(opt.token) + ' ' + opt.token + '</div>'
+        + '<div class="flex gap-2">'
+        + '<input id="stake-input-' + opt.token + '" type="number" class="inp flex-1" placeholder="Amount (' + opt.token + ')" step="' + opt.step + '" min="0">'
+        + '<button class="btn btn-v shrink-0" onclick="stakeConfirm(\'' + opt.token + '\')">Confirm</button>'
+        + '<button class="btn btn-z shrink-0" onclick="stakeToggle(\'' + opt.token + '\')">Cancel</button>'
+        + '</div>'
+        + '<p id="stake-form-msg-' + opt.token + '" class="text-xs"></p>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+    const gridHtml = '<h3 class="font-semibold mb-3">Staking Options</h3>'
+      + '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">' + cardsHtml + '</div>';
+
+    // ── Zone 3: Activity Feed ────────────────────────────────────────
+    let actHtml = '';
+    if (activity.length) {
+      const rows = activity.map(function(a) {
+        const c = TC[a.token] || TC.BLOOM;
+        const when = tsAgo(a.action === 'unstaked' ? a.unstaked_at : a.staked_at);
+        const actionCls = a.action === 'staked' ? 'text-emerald-400' : 'text-amber-400';
+        return '<div class="flex items-center justify-between gap-3 py-2 border-b border-[rgba(255,255,255,0.04)] last:border-0">'
+          + '<div class="flex items-center gap-2 min-w-0">'
+          + tokenBadge(a.token, 'sm')
+          + '<div class="text-sm truncate"><span class="font-medium">@' + esc(a.username) + '</span>'
+          + ' <span class="text-[#8b95ab]">' + a.action + '</span>'
+          + ' <span class="font-semibold ' + actionCls + '">' + fmtAmt(a.token, a.amount) + ' ' + a.token + '</span></div>'
+          + '</div>'
+          + '<div class="text-xs text-[#4e5872] shrink-0">' + when + ' ago</div>'
+          + '</div>';
+      }).join('');
+      actHtml = '<h3 class="font-semibold mb-3">Latest Staking Activity</h3>'
+        + '<div class="card mb-6"><div class="space-y-0">' + rows + '</div></div>';
+    }
+
+    // ── Zone 4: Why stake ────────────────────────────────────────────
+    const whyHtml = '<h3 class="font-semibold mb-3">Why stake with BloomMoney?</h3>'
+      + '<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">'
+      + '<div class="card text-center"><div class="text-2xl mb-2">⚡</div><div class="font-semibold text-sm mb-1">Always Earning</div><div class="text-xs text-[#8b95ab]">Rewards accrue every second. Withdraw anytime with no lockup.</div></div>'
+      + '<div class="card text-center"><div class="text-2xl mb-2">🎮</div><div class="font-semibold text-sm mb-1">Play-Money Safe</div><div class="text-xs text-[#8b95ab]">All balances are simulated. Explore DeFi mechanics risk-free.</div></div>'
+      + '<div class="card text-center"><div class="text-2xl mb-2">🔓</div><div class="font-semibold text-sm mb-1">Instant Unstake</div><div class="text-xs text-[#8b95ab]">No waiting period. Unstake and receive principal + rewards immediately.</div></div>'
+      + '</div>';
+
+    // ── Zone 5: Active Stakes ────────────────────────────────────────
+    let activeHtml;
+    if (stakes.length) {
+      const stakeRows = stakes.map(function(s) {
+        const c = TC[s.token] || TC.BLOOM;
+        return '<div class="card flex items-center justify-between gap-3">'
+          + '<div class="flex items-center gap-3 min-w-0">'
+          + tokenBadge(s.token, 'lg')
+          + '<div class="min-w-0"><div class="text-sm font-semibold">' + fmtAmt(s.token, s.amount) + ' ' + s.token + '</div>'
+          + '<div class="text-xs text-[#8b95ab]">Staked ' + tsAgo(s.staked_at) + ' ago · Reward: <span class="text-emerald-400">' + fmtAmt(s.token, s.accrued_reward) + ' ' + s.token + '</span></div>'
+          + '</div></div>'
+          + '<button class="btn btn-z shrink-0" onclick="doUnstake(' + s.id + ')">Unstake</button>'
+          + '</div>';
+      }).join('');
+      activeHtml = '<div class="space-y-3 mb-4">' + stakeRows + '</div>';
+    } else {
+      activeHtml = '<p class="text-[#4e5872] text-sm mb-4">No active stakes yet. Pick an asset above to get started.</p>';
+    }
+    const yourStakesHtml = '<h3 class="font-semibold mb-3">Your Active Stakes</h3>' + activeHtml;
+
+    sec.innerHTML = heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
+  }
+
+  window.stakeToggle = function(token) {
+    STAKING_OPTIONS.forEach(function(o) {
+      const f = document.getElementById('stake-form-' + o.token);
+      if (f && o.token !== token) f.classList.add('hidden');
+    });
+    const form = document.getElementById('stake-form-' + token);
+    if (form) form.classList.toggle('hidden');
   };
-  window.doUnstake = async (id) => {
+
+  window.stakeConfirm = async function(token) {
+    const input = document.getElementById('stake-input-' + token);
+    const msg   = document.getElementById('stake-form-msg-' + token);
+    if (!input || !msg) return;
     try {
-      const d = await api('DELETE', `/api/defi/stakes/${id}`);
-      alert(`Unstaked! Received ${d.returned.toFixed(2)} BLOOM (reward: ${d.reward.toFixed(4)} BLOOM)`);
+      msg.className = 'text-xs text-[#8b95ab]'; msg.textContent = 'Staking…';
+      await api('POST', '/api/defi/stake', { token, amount: input.value });
+      msg.className = 'text-xs text-emerald-400'; msg.textContent = 'Staked successfully!';
+      input.value = '';
+      setTimeout(load, 800);
+    } catch (e) { msg.className = 'text-xs text-red-400'; msg.textContent = e.message; }
+  };
+
+  // Legacy alias kept for any external callers
+  window.doStake = async function() {
+    const amt = document.getElementById('stake-amt')?.value;
+    if (amt) await window.stakeConfirm('BLOOM');
+  };
+
+  window.doUnstake = async function(id) {
+    try {
+      const d = await api('DELETE', '/api/defi/stakes/' + id);
+      const tok = d.token || 'BLOOM';
+      alert('Unstaked! Received ' + d.returned.toFixed(4) + ' ' + tok + ' (reward: ' + d.reward.toFixed(6) + ' ' + tok + ')');
       await load();
     } catch (e) { alert(e.message); }
   };
+
   await load();
 }
 
