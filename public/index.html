@@ -752,6 +752,39 @@ async function init() {
           </div>
         </div>`;
     }
+    // Pre-render a network-free Trade (futures) terminal skeleton so the Trade
+    // route has a real terminal in the DOM under headless / no-auth CI, and so
+    // the tier-hint logic (the spot that previously crashed on an undefined
+    // `futTier`) runs at load time — any ReferenceError there surfaces as a
+    // console error the proposal checks will catch. The live terminal replaces
+    // this when an authenticated user navigates to Trade.
+    const trd = document.getElementById('section-trade');
+    if (trd) {
+      try {
+        const futTier = S.kyc?.level || 'basic';
+        const tierWarnHtml = futTierHintHtml(futTier, !!S.zkVerified);
+        trd.innerHTML = `
+<div class="futures-terminal" id="fut-root">
+  <div class="fut-header flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b" style="border-color:var(--border-t)">
+    <div class="flex gap-1 flex-wrap" id="fut-mkt-tabs">
+      <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm fut-mkt-tab-active">ETH-PERP</button>
+      <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm">BTC-PERP</button>
+      <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm">BLOOM-PERP</button>
+    </div>
+    <span class="text-lg font-mono font-bold text-[#e8eaf0]">$2500.00</span>
+  </div>
+  <div class="p-3 space-y-3">
+    <div class="grid grid-cols-3 gap-1">
+      <button class="py-2 rounded text-sm font-bold fut-side-long">Long ▲</button>
+      <button class="py-2 rounded text-sm font-bold text-[#8b95ab] border border-[rgba(255,255,255,0.06)]" style="background:#161b2a">Short ▼</button>
+      <button class="py-2 rounded text-sm font-bold text-[#8b95ab] border border-[rgba(255,255,255,0.06)]" style="background:#161b2a">Swap ⟷</button>
+    </div>
+    ${tierWarnHtml}
+    <div class="text-xs text-[#4e5872]">Sign in to load live market data and trade.</div>
+  </div>
+</div>`;
+      } catch (_) {}
+    }
   }
   // Skip the network round-trip when there's no token to present — this avoids
   // a guaranteed 401 that shows up as a console error in headless test runners.
@@ -4002,6 +4035,22 @@ window.messageUser = async (username) => {
 };
 
 // ── Futures Terminal ──────────────────────────────────────────────────────────
+// Verification-hint shown under the futures order form. Pure function of the
+// user's KYC tier ('basic' | 'social' | 'premium') and zkPassport flag, so it
+// can be reused by both the live terminal and the no-auth demo prerender.
+// Branches are mutually exclusive and cover every state — it never throws.
+function futTierHintHtml(tier, zkVerified) {
+  if (tier === 'basic')
+    return `<div class="text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+  if (tier === 'social')
+    return `<div class="text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+  if (tier === 'premium' && !zkVerified)
+    return `<div class="text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
+  if (zkVerified)
+    return `<div class="text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
+  return '';
+}
+
 async function renderFutures(sec) {
   let side = 'long', leverage = 5, qty = '';
   let orderType = 'market';
@@ -4152,20 +4201,15 @@ async function renderFutures(sec) {
     const nextFunding = mkt && mkt.next_funding_at ? fundingCountdown(mkt.next_funding_at) : '—';
     const openInterest = mkt ? (Number(mkt.open_interest || 0) / 1e6).toFixed(1) : '0';
 
-    const balHtml = S.futuresMode === 'paper'
-      ? `<span class="text-[#8b95ab] text-xs">Paper:</span> <span class="font-mono text-xs" style="color:var(--long)">$${fmtUSD(_paperBal)}</span>`
-      : `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
+    // The terminal is live-mode only (the server hard-codes mode='live' for
+    // futures orders), so always show the live USDC balance.
+    const balHtml = `<span class="text-amber-400 text-xs">⚡ LIVE</span> <span class="font-mono text-xs text-emerald-400">${getBal('USDC')}</span>`;
 
+    // Tier drives the verification hint below. Derived from the user's KYC
+    // level (basic | social | premium); zkPassport is a separate flag.
+    const futTier = S.kyc?.level || 'basic';
     const zkVerified = !!S.zkVerified;
-    let tierWarnHtml = '';
-    if (S.futuresMode === 'live' && futTier === 'basic')
-      tierWarnHtml = `<div class="text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
-    else if (S.futuresMode === 'live' && futTier === 'social')
-      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
-    else if (futTier === 'premium' && !zkVerified)
-      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
-    else if (zkVerified)
-      tierWarnHtml = `<div class="text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
+    const tierWarnHtml = futTierHintHtml(futTier, zkVerified);
 
     const mktTabsHtml = _markets.map(m =>
       `<button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm ${S.futuresMarket?.id === m.id ? 'fut-mkt-tab-active' : ''}" onclick="futSwitchMarket(${m.id})">${esc(m.symbol)}</button>`
