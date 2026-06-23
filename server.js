@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const Parser = require('rss-parser');
 const verify = require('./lib/verify');
 
 const app = express();
@@ -69,7 +70,7 @@ function normalizeCategory(c) {
   return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
 }
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '2mb' }));
@@ -143,7 +144,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|vault|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -499,6 +500,51 @@ async function runFunding() {
     );
   }
 }
+
+// ── Crypto news bot ──────────────────────────────────────────────────────────
+const NEWS_SOURCES = [
+  { name: 'CoinDesk',      url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
+  { name: 'CoinTelegraph', url: 'https://cointelegraph.com/rss' },
+];
+const NEWS_BOT_USER_ID = -1;
+const NEWS_BOT_USERNAME = 'CryptoNewsBot';
+const MAX_NEW_PER_SOURCE = 3;
+
+const rssParser = new Parser({ timeout: 8000 });
+
+async function fetchAndPostNews() {
+  for (const source of NEWS_SOURCES) {
+    try {
+      const feed = await rssParser.parseURL(source.url);
+      const items = (feed.items || []).slice(0, 10);
+      let posted = 0;
+      for (const item of items) {
+        if (posted >= MAX_NEW_PER_SOURCE) break;
+        const guid = item.guid || item.link;
+        if (!guid) continue;
+        const { rows } = await pool.query('SELECT 1 FROM news_dedup WHERE guid=$1', [guid]);
+        if (rows.length > 0) continue;
+        const title = (item.title || '').trim().slice(0, 275);
+        if (!title) continue;
+        await pool.query(
+          `INSERT INTO posts (user_id, username, content, is_bot, source_url, bot_source)
+           VALUES ($1, $2, $3, TRUE, $4, $5)`,
+          [NEWS_BOT_USER_ID, NEWS_BOT_USERNAME, title, item.link || null, source.name]
+        );
+        await pool.query('INSERT INTO news_dedup (guid) VALUES ($1) ON CONFLICT DO NOTHING', [guid]);
+        posted++;
+      }
+    } catch (e) {
+      console.error(`news bot fetch error (${source.name}):`, e.message);
+    }
+  }
+  // Prune old dedup entries to prevent unbounded growth.
+  await pool.query("DELETE FROM news_dedup WHERE created_at < NOW() - INTERVAL '7 days'").catch(() => {});
+}
+
+setInterval(fetchAndPostNews, 60 * 60 * 1000).unref?.();
+setTimeout(fetchAndPostNews, 5000).unref?.();
+
 // ── /api/me ───────────────────────────────────────────────────────────────────
 
 app.get('/api/me', async (req, res) => {
@@ -587,7 +633,7 @@ app.get('/api/feed', async (req, res) => {
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
@@ -601,6 +647,14 @@ app.get('/api/feed', async (req, res) => {
         WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
+    } else if (tab === 'news') {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.* FROM posts p
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = TRUE ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
     } else {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
@@ -610,7 +664,7 @@ app.get('/api/feed', async (req, res) => {
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
     }
@@ -1492,6 +1546,90 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── Vault ─────────────────────────────────────────────────────────────────────
+
+app.get('/api/vault/strategies', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM vault_strategies WHERE is_active=true ORDER BY id');
+    res.json({ strategies: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/vault/positions', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT vp.*, vs.name AS strategy_name, vs.target_apy,
+        FLOOR(vp.amount * vs.target_apy / 100.0 * EXTRACT(EPOCH FROM (NOW() - vp.deposited_at)) / 31536000)::bigint AS accrued_yield
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.user_id = $1
+      ORDER BY vp.deposited_at DESC
+    `, [req.user.id]);
+    res.json({ positions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/vault/deposit', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { strategy_id, token, amount } = req.body;
+    const amtUnits = toUnits(amount);
+    if (!strategy_id || !token || amtUnits <= 0) return res.status(400).json({ error: 'Invalid parameters' });
+    const sym = String(token).toUpperCase().slice(0, 20);
+    await client.query('BEGIN');
+    const { rows: [strategy] } = await client.query(
+      'SELECT * FROM vault_strategies WHERE id=$1 AND is_active=true', [strategy_id]
+    );
+    if (!strategy) throw new Error('Strategy not found');
+    if (!strategy.supported_tokens.includes(sym)) throw new Error(`${sym} not supported by this strategy`);
+    const { rows: [bal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    if (!bal || Number(bal.balance) < amtUnits) throw new Error(`Insufficient ${sym}`);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amtUnits, req.user.id, sym]
+    );
+    const { rows: [pos] } = await client.query(
+      'INSERT INTO vault_positions(user_id,username,strategy_id,token,amount) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [req.user.id, req.user.username, strategy_id, sym, amtUnits]
+    );
+    await client.query('COMMIT');
+    res.json({ position: pos });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/vault/positions/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [pos] } = await client.query(`
+      SELECT vp.*, vs.target_apy
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.id=$1 AND vp.user_id=$2 FOR UPDATE
+    `, [req.params.id, req.user.id]);
+    if (!pos) throw new Error('Position not found');
+    const elapsed = (Date.now() - new Date(pos.deposited_at).getTime()) / 1000;
+    const accruedYield = Math.floor(Number(pos.amount) * Number(pos.target_apy) / 100 * elapsed / 31536000);
+    const total = Number(pos.amount) + accruedYield;
+    await client.query('DELETE FROM vault_positions WHERE id=$1', [pos.id]);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [total, pos.user_id, pos.token]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, returned: fromUnits(total), yield: fromUnits(accruedYield) });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── Opinion Markets ────────────────────────────────────────────────────────────
 
 app.get('/api/markets', async (req, res) => {
@@ -1711,7 +1849,7 @@ app.get('/api/futures/paper-balance', async (req, res) => {
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, mode, idempotency_key } = req.body;
+    const { market_id, side, leverage, quantity, mode, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
     const lev = Math.max(1, Math.min(20, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
@@ -1768,16 +1906,21 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
     }
 
+    const validOrderType = ['market', 'limit', 'twap'].includes(order_type) ? order_type : 'market';
+    const validLimitPrice = limit_price ? parseFloat(limit_price) : null;
+    const validSlippageBps = Math.max(0, Math.min(5000, parseInt(slippage_bps) || 50));
+    const validTwapMinutes = twap_duration_minutes ? Math.max(1, parseInt(twap_duration_minutes)) : null;
+    const validTwapParts = twap_parts ? Math.max(2, Math.min(100, parseInt(twap_parts))) : null;
+
     // Deduct BLOOM gas fee
     await client.query(
       "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
       [FUTURES_GAS, req.user.id]
     );
-
     const { rows: [pos] } = await client.query(`
-      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
-    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice]);
+      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,order_type,limit_price,slippage_bps,twap_duration_minutes,twap_parts)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *
+    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice, validOrderType, validLimitPrice, validSlippageBps, validTwapMinutes, validTwapParts]);
     await client.query('UPDATE futures_markets SET open_interest=open_interest+$1 WHERE id=$2', [marginUnits, market_id]);
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
@@ -4057,6 +4200,25 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS vault_strategies (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      risk_level TEXT,
+      target_apy NUMERIC(6,2),
+      supported_tokens TEXT[],
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS vault_positions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      strategy_id INTEGER REFERENCES vault_strategies(id),
+      token TEXT NOT NULL,
+      amount BIGINT NOT NULL,
+      deposited_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS trade_journal_entries (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -4113,6 +4275,11 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) DEFAULT 'market';
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS limit_price NUMERIC(20,6);
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS slippage_bps INTEGER DEFAULT 50;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_duration_minutes INTEGER;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_parts INTEGER;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS is_daily BOOLEAN DEFAULT FALSE;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS template_slug VARCHAR(40);
     ALTER TABLE opinion_markets ALTER COLUMN created_by_user_id DROP NOT NULL;
@@ -4184,6 +4351,7 @@ async function start() {
   await pool.query(`
     COMMENT ON TABLE funding_payments IS 'staging:private';
     COMMENT ON TABLE idempotency_keys IS 'staging:private';
+    COMMENT ON TABLE vault_positions IS 'staging:private';
     COMMENT ON TABLE wallet_balances IS 'staging:private';
     COMMENT ON TABLE paper_balances IS 'staging:private';
     COMMENT ON TABLE defi_swaps IS 'staging:private';
@@ -4206,6 +4374,20 @@ async function start() {
     COMMENT ON TABLE nft_listings IS 'staging:private';
     COMMENT ON TABLE nft_bids IS 'staging:private';
     COMMENT ON TABLE nft_transfers IS 'staging:private';
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_url TEXT;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS bot_source VARCHAR(50);
+    CREATE TABLE IF NOT EXISTS news_dedup (
+      guid TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Ensure bot user exists (all environments)
+  await pool.query(`
+    INSERT INTO users (user_id, username, display_name)
+    VALUES (-1, 'CryptoNewsBot', 'Crypto News Bot 🤖')
+    ON CONFLICT (user_id) DO NOTHING
   `);
 
   // Seed initial market prices
@@ -4788,6 +4970,23 @@ async function start() {
       await pool.query("UPDATE opinion_markets SET category='Crypto' WHERE id IN (9010,9011,9012,9013) AND category='General'");
     }
 
+    // Seed vault strategies (all environments get these)
+    await pool.query(`
+      INSERT INTO vault_strategies(id,name,description,risk_level,target_apy,supported_tokens,is_active) VALUES
+        (1,'Conservative','Low-volatility strategy using stablecoin lending pools.','low',6.5,ARRAY['USDC','BLOOM'],true),
+        (2,'Balanced','Mixed allocation: stablecoins + blue-chip crypto lending.','medium',11.0,ARRAY['USDC','BLOOM','ETH'],true),
+        (3,'Growth','Higher-yield DeFi strategies with active rebalancing.','high',18.5,ARRAY['BLOOM','ETH'],true)
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed vault positions for staging-alice
+    await pool.query(`
+      INSERT INTO vault_positions(id,user_id,username,strategy_id,token,amount,deposited_at) VALUES
+        (9001,9001,'staging-alice',1,'USDC',500000000000,NOW()-INTERVAL '30 days'),
+        (9002,9001,'staging-alice',2,'BLOOM',250000000000,NOW()-INTERVAL '7 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
     // Seed trade journal entries (staging:private table — always empty in prod copy).
     await pool.query(`
       INSERT INTO trade_entries(id,user_id,asset_type,ticker,direction,quantity,entry_price,exit_price,trade_date,notes) VALUES
@@ -4815,6 +5014,23 @@ async function start() {
 
     // Seed demo conversations + messages (private tables → empty in staging).
     await ensureMessagingSeed();
+
+    // Seed crypto news bot posts for the News tab
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,is_bot,bot_source,source_url) VALUES
+        (900030,-1,'CryptoNewsBot','Staging demo: BTC reaches simulated test milestone in staging environment',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900031,-1,'CryptoNewsBot','Staging demo: ETH upgrade simulation completes successfully on test chain',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900032,-1,'CryptoNewsBot','Staging demo: Crypto market conditions are normal in this staging run',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900033,-1,'CryptoNewsBot','Staging demo: Institutional adoption test story for QA of news tab UI',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900034,-1,'CryptoNewsBot','Staging demo: Stablecoin regulatory clarity headline for feed rendering test',TRUE,'CoinDesk','https://example.com/staging-test-article')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    await pool.query(`
+      INSERT INTO news_dedup(guid) VALUES
+        ('staging-demo-guid-1'),
+        ('staging-demo-guid-2')
+      ON CONFLICT DO NOTHING
+    `);
 
     // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
     // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
