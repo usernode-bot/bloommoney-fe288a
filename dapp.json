@@ -162,6 +162,7 @@
     { "name": "Public portfolio API returns JSON", "path": "/explorer-api/portfolio/staging-alice", "expectSelector": "body" },
     { "name": "ICO offerings render in Earn tab", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Market page top coins list renders", "path": "/?demo=1", "expectSelector": ".token-market-row" },
+    { "name": "Market global stats bar renders", "path": "/?demo=1", "expectSelector": "#market-global-stats" },
     { "name": "Points available badge in DOM", "path": "/?demo=1", "expectSelector": "#points-available" },
     { "name": "ROI API returns JSON", "path": "/api/users/staging-alice/roi", "expectSelector": "body" },
     { "name": "Open positions API returns JSON", "path": "/api/users/staging-charlie/open-positions", "expectSelector": "body" },

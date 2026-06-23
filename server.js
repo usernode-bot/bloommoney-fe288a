@@ -369,11 +369,40 @@ const STAGING_TOP_COINS = [
   { rank:25, symbol:'BLOOM', name:'BloomMoney',       price_usd:1.25,       market_cap:125000000,     volume_24h:4500000,     price_change_24h_pct:5.23,  circulating_supply:100000000,      high_24h:1.28,      low_24h:1.22,     swappable:true  },
 ];
 
+// Augment the staging fixtures with the fields the redesigned Market table
+// needs (1h/7d change, logo fallback, 7-day sparkline). Deterministic and
+// obviously fake — derived from each coin's base price so staging renders the
+// full dashboard without any external data key. Only ever served when
+// IS_STAGING, so production behaviour is untouched.
+for (const c of STAGING_TOP_COINS) {
+  c.price_change_1h_pct = +(((c.price_change_24h_pct || 0) / 3)).toFixed(2);
+  c.price_change_7d_pct = +(((c.price_change_24h_pct || 0) * 2.4)).toFixed(2);
+  c.logo_url = null; // forces the deterministic letter-badge path in staging
+  const base = c.price_usd || 1;
+  const amp = (c.symbol === 'USDC' || c.symbol === 'USDT') ? 0.0008 : 0.045;
+  const spark = [];
+  for (let i = 0; i < 24; i++) {
+    spark.push(+(base * (1 + Math.sin(i * 0.5 + (c.rank || 1)) * amp)).toFixed(8));
+  }
+  c.sparkline_7d = spark;
+}
+
 const topCoinsCache = { data: null, fetchedAt: 0 };
+
+// Demo global market totals for staging (no CoinGecko key there). Obviously
+// fake, deterministic, no-op outside staging.
+const STAGING_GLOBAL_STATS = {
+  total_market_cap_usd: 2.35e12,
+  total_volume_24h_usd: 9.8e10,
+  btc_dominance_pct: 52.4,
+  market_cap_change_24h_pct: 1.8,
+  active_coins: 12000,
+};
+const globalStatsCache = { data: null, fetchedAt: 0 };
 
 app.get('/api/coins/top', async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 25, 100);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
     if (IS_STAGING) {
       return res.json({ coins: STAGING_TOP_COINS.slice(0, limit) });
     }
@@ -382,7 +411,7 @@ app.get('/api/coins/top', async (req, res) => {
       return res.json({ coins: topCoinsCache.data.slice(0, limit) });
     }
     const apiKey = process.env.COINGECKO_API_KEY;
-    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h';
+    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=true&price_change_percentage=1h%2C24h%2C7d';
     const headers = { 'Accept': 'application/json' };
     if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
     const cgRes = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
@@ -401,16 +430,20 @@ app.get('/api/coins/top', async (req, res) => {
         price_usd: coin.current_price || 0,
         market_cap: coin.market_cap || 0,
         volume_24h: coin.total_volume || 0,
-        price_change_24h_pct: coin.price_change_percentage_24h || 0,
+        price_change_1h_pct: coin.price_change_percentage_1h_in_currency ?? null,
+        price_change_24h_pct: coin.price_change_percentage_24h ?? null,
+        price_change_7d_pct: coin.price_change_percentage_7d_in_currency ?? null,
         circulating_supply: coin.circulating_supply || 0,
         high_24h: coin.high_24h || 0,
         low_24h: coin.low_24h || 0,
+        logo_url: coin.image || null,
+        sparkline_7d: (coin.sparkline_in_7d && Array.isArray(coin.sparkline_in_7d.price)) ? coin.sparkline_in_7d.price : [],
         swappable: symbol in COINGECKO_TICKER_MAP,
       });
     }
     if (!coins.find(c => c.symbol === 'BLOOM')) {
       const livePrices = await getCoinGeckoPrices();
-      coins.push({ rank: coins.length + 1, symbol: 'BLOOM', name: 'BloomMoney', price_usd: livePrices['BLOOM'] || 0, market_cap: 0, volume_24h: 0, price_change_24h_pct: 0, circulating_supply: 0, high_24h: livePrices['BLOOM'] || 0, low_24h: livePrices['BLOOM'] || 0, swappable: true });
+      coins.push({ rank: coins.length + 1, symbol: 'BLOOM', name: 'BloomMoney', price_usd: livePrices['BLOOM'] || 0, market_cap: 0, volume_24h: 0, price_change_1h_pct: 0, price_change_24h_pct: 0, price_change_7d_pct: 0, circulating_supply: 0, high_24h: livePrices['BLOOM'] || 0, low_24h: livePrices['BLOOM'] || 0, logo_url: null, sparkline_7d: [], swappable: true });
     }
     topCoinsCache.data = coins;
     topCoinsCache.fetchedAt = now;
@@ -418,6 +451,43 @@ app.get('/api/coins/top', async (req, res) => {
   } catch (e) {
     console.warn('coins/top error:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Global market stats (/api/coins/global) ───────────────────────────────────
+// Powers the Market dashboard's global stats bar (total market cap, 24h
+// volume, BTC dominance, active coins). Auth-gated like the rest of /api/* —
+// NOT added to PUBLIC_API_PATHS. Never 500s on a provider hiccup: falls back to
+// the last cached value (or zeros) so the page always renders.
+app.get('/api/coins/global', async (req, res) => {
+  try {
+    if (IS_STAGING) {
+      return res.json({ stats: STAGING_GLOBAL_STATS });
+    }
+    const now = Date.now();
+    if (now - globalStatsCache.fetchedAt < 60000 && globalStatsCache.data) {
+      return res.json({ stats: globalStatsCache.data });
+    }
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+    const cgRes = await fetch('https://api.coingecko.com/api/v3/global', { headers, signal: AbortSignal.timeout(8000) });
+    if (!cgRes.ok) throw new Error(`CoinGecko /global non-200: ${cgRes.status}`);
+    const body = await cgRes.json();
+    const d = body && body.data ? body.data : {};
+    const stats = {
+      total_market_cap_usd: (d.total_market_cap && d.total_market_cap.usd) || 0,
+      total_volume_24h_usd: (d.total_volume && d.total_volume.usd) || 0,
+      btc_dominance_pct: (d.market_cap_percentage && d.market_cap_percentage.btc) || 0,
+      market_cap_change_24h_pct: d.market_cap_change_percentage_24h_usd || 0,
+      active_coins: d.active_cryptocurrencies || 0,
+    };
+    globalStatsCache.data = stats;
+    globalStatsCache.fetchedAt = now;
+    res.json({ stats });
+  } catch (e) {
+    console.warn('coins/global error:', e.message);
+    res.json({ stats: globalStatsCache.data || { total_market_cap_usd: 0, total_volume_24h_usd: 0, btc_dominance_pct: 0, market_cap_change_24h_pct: 0, active_coins: 0 } });
   }
 });
 

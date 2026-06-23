@@ -203,7 +203,7 @@
       </section>
 
       <!-- Market -->
-      <section id="section-market" class="view hidden max-w-md mx-auto py-4 px-4"></section>
+      <section id="section-market" class="view hidden max-w-5xl mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
       <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -488,6 +488,7 @@ const S = {
   prices: {},
   marketId: null,
   tradeToken: null,
+  tradePrefillSymbol: null,
   topCoinsData: [],
   profileUser: null,
   futuresMarket: null,
@@ -737,18 +738,26 @@ async function init() {
     if (mkr) {
       mkr.innerHTML = `
         <div id="market-list-wrap">
-          <div class="flex items-center justify-between mb-4">
-            <h2 class="text-xl font-bold text-[#e8eaf0]">Markets</h2>
-            <div class="flex gap-2">
-              <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
-              <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
-              <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
-            </div>
+          <div class="flex items-center justify-between mb-4 gap-3">
+            <h2 class="text-xl font-bold text-[#e8eaf0]">Market</h2>
+            <input id="mkt-search" type="text" placeholder="Search coins…" class="bg-[#161b2a] border border-[rgba(255,255,255,0.08)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] w-40 sm:w-56">
           </div>
+          <div id="market-global-stats" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+            <div class="bg-[#161b2a] rounded-xl px-3 py-2.5"><div class="text-xs text-[#4e5872] mb-0.5">Market Cap</div><div class="text-sm font-semibold text-[#e8eaf0]">$2.35T</div><div class="text-xs font-medium text-emerald-400">+1.80% 24h</div></div>
+            <div class="bg-[#161b2a] rounded-xl px-3 py-2.5"><div class="text-xs text-[#4e5872] mb-0.5">24h Volume</div><div class="text-sm font-semibold text-[#e8eaf0]">$98.00B</div></div>
+            <div class="bg-[#161b2a] rounded-xl px-3 py-2.5"><div class="text-xs text-[#4e5872] mb-0.5">BTC Dominance</div><div class="text-sm font-semibold text-[#e8eaf0]">52.4%</div></div>
+            <div class="bg-[#161b2a] rounded-xl px-3 py-2.5"><div class="text-xs text-[#4e5872] mb-0.5">Active Coins</div><div class="text-sm font-semibold text-[#e8eaf0]">12,000</div></div>
+          </div>
+          <div class="flex gap-2 mb-3 flex-wrap">
+            <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active" onclick="setMarketTab('most_active')">Most Active</button>
+            <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainers</button>
+            <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Losers</button>
+          </div>
+          <div id="market-table-head" class="hidden md:flex items-center gap-3 px-3 py-2 text-xs text-[#4e5872] font-medium"></div>
           <div id="market-coin-rows" class="space-y-2">
-            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(251,191,36,0.15);color:#fbbf24;">BTC</div><div class="flex-1"><div class="text-sm font-semibold">BTC</div><div class="text-xs text-[#8b95ab]">Bitcoin</div></div></div>
-            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(56,189,248,0.15);color:#38bdf8;">ETH</div><div class="flex-1"><div class="text-sm font-semibold">ETH</div><div class="text-xs text-[#8b95ab]">Ethereum</div></div></div>
-            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style="background:rgba(167,139,250,0.15);color:#a78bfa;">BLOOM</div><div class="flex-1"><div class="text-sm font-semibold">BLOOM</div><div class="text-xs text-[#8b95ab]">BloomMoney</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(251,191,36,0.15);color:#fbbf24;">BTC</div><div class="flex-1"><div class="text-sm font-semibold">BTC</div><div class="text-xs text-[#8b95ab]">Bitcoin</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(56,189,248,0.15);color:#38bdf8;">ETH</div><div class="flex-1"><div class="text-sm font-semibold">ETH</div><div class="text-xs text-[#8b95ab]">Ethereum</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(167,139,250,0.15);color:#a78bfa;">BLOOM</div><div class="flex-1"><div class="text-sm font-semibold">BLOOM</div><div class="text-xs text-[#8b95ab]">BloomMoney</div></div></div>
           </div>
         </div>`;
     }
@@ -1947,6 +1956,10 @@ window.doCopyTrade = async (username) => {
 // ── Token detail ──────────────────────────────────────────────────────────────
 window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('market'); };
 
+// Leave the coin detail and jump to the Trade page focused on this token.
+// Clearing tradeToken prevents the Market tab from re-opening the detail later.
+window.openTradeForToken = (sym) => { S.tradeToken = null; navigate('trade', { tradePrefillSymbol: sym }); };
+
 // ── Swap Card (reusable helper) ────────────────────────────────────────────────
 function renderSwapCard(containerEl, prefilledFrom) {
   const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
@@ -2210,40 +2223,28 @@ async function renderMarket(sec) {
   };
 
   let topCoins = [];
-  let histories = {};
   let marketStats = {};
+  let globalStats = null;
 
   try {
-    const [topData, statsData] = await Promise.all([
-      api('GET', '/api/coins/top?limit=25').catch(() => ({ coins: [] })),
+    const [topData, statsData, globalData] = await Promise.all([
+      api('GET', '/api/coins/top?limit=50').catch(() => ({ coins: [] })),
       api('GET', '/api/trade/market-stats').catch(() => ({ stats: [] })),
+      api('GET', '/api/coins/global').catch(() => ({ stats: null })),
     ]);
     topCoins = topData.coins || [];
     S.topCoinsData = topCoins;
     (statsData.stats || []).forEach(s => { marketStats[s.symbol] = s.swap_count; });
-
-    const histResults = await Promise.all(
-      topCoins.map(c => api('GET', `/api/price-history?symbol=${c.symbol}&hours=24`).catch(() => ({ history: [] })))
-    );
-    topCoins.forEach((c, i) => { histories[c.symbol] = (histResults[i] && histResults[i].history) || []; });
+    globalStats = globalData.stats || null;
   } catch {}
 
-  let marketTab = 'most_active';
+  // ── UI state ──
+  let activeTab = 'most_active';        // quick-filter chip: most_active | top_gainer | top_loser | ''
+  let sortKey = 'most_active';          // most_active | rank | price | c1h | c24h | c7d | mcap | vol
+  let sortDir = 'desc';                 // asc | desc
+  let searchTerm = '';
 
-  function buildSparkline(hist, color) {
-    if (!hist || hist.length < 2) {
-      return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
-    }
-    const prices = hist.map(h => parseFloat(h.price_usd));
-    const mn = Math.min(...prices), mx = Math.max(...prices);
-    const rng = Math.max(mx - mn, 0.000001);
-    const xStep = 60 / (prices.length - 1);
-    const pts = prices.map((p, i) =>
-      `${(i * xStep).toFixed(1)},${(22 - ((p - mn) / rng) * 20).toFixed(1)}`
-    ).join(' ');
-    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
-  }
-
+  // ── formatters ──
   function fmtCoinPrice(p) {
     if (p == null) return '—';
     if (p >= 1000) return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -2251,74 +2252,195 @@ async function renderMarket(sec) {
     if (p >= 0.01) return '$' + p.toFixed(4);
     return '$' + p.toFixed(8);
   }
+  function fmtLargeNum(n) {
+    if (n == null || n === 0) return '—';
+    if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3)  return '$' + (n / 1e3).toFixed(2) + 'K';
+    return '$' + Number(n).toLocaleString();
+  }
+  function pctCell(pct) {
+    if (pct == null) return `<span class="text-[#8b95ab]">—</span>`;
+    const cls = pct > 0.05 ? 'text-emerald-400' : pct < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
+    const str = pct >= 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`;
+    return `<span class="${cls}">${str}</span>`;
+  }
 
-  function getSortedCoins(tab) {
-    const coins = [...topCoins];
-    if (tab === 'most_active') {
+  function buildSparkline(arr, color) {
+    if (!arr || arr.length < 2) {
+      return `<svg viewBox="0 0 72 24" width="72" height="24"><line x1="0" y1="12" x2="72" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+    const prices = arr.map(Number).filter(n => !isNaN(n));
+    if (prices.length < 2) {
+      return `<svg viewBox="0 0 72 24" width="72" height="24"><line x1="0" y1="12" x2="72" y2="12" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+    const mn = Math.min(...prices), mx = Math.max(...prices);
+    const rng = Math.max(mx - mn, 1e-9);
+    const xStep = 72 / (prices.length - 1);
+    const pts = prices.map((p, i) =>
+      `${(i * xStep).toFixed(1)},${(22 - ((p - mn) / rng) * 20).toFixed(1)}`
+    ).join(' ');
+    return `<svg viewBox="0 0 72 24" width="72" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  // Logo fallback to a coloured letter badge when the image fails to load.
+  window._mktLogoErr = (img) => {
+    const d = img.dataset;
+    img.outerHTML = `<div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0" style="background:${d.bg};color:${d.fg}">${d.sym}</div>`;
+  };
+
+  function getRows() {
+    let coins = topCoins.slice();
+    // search
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      coins = coins.filter(c =>
+        (c.symbol && c.symbol.toLowerCase().includes(q)) ||
+        (c.name && c.name.toLowerCase().includes(q))
+      );
+    }
+    // sort
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (sortKey === 'most_active') {
       coins.sort((a, b) => (marketStats[b.symbol] || 0) - (marketStats[a.symbol] || 0));
-    } else if (tab === 'top_gainer') {
-      coins.sort((a, b) => (b.price_change_24h_pct || 0) - (a.price_change_24h_pct || 0));
-    } else if (tab === 'top_loser') {
-      coins.sort((a, b) => (a.price_change_24h_pct || 0) - (b.price_change_24h_pct || 0));
+    } else if (sortKey === 'rank') {
+      coins.sort((a, b) => (a.rank || 999) - (b.rank || 999));
+    } else {
+      const field = { price: 'price_usd', c1h: 'price_change_1h_pct', c24h: 'price_change_24h_pct', c7d: 'price_change_7d_pct', mcap: 'market_cap', vol: 'volume_24h' }[sortKey] || 'market_cap';
+      coins.sort((a, b) => {
+        const av = a[field] == null ? -Infinity : a[field];
+        const bv = b[field] == null ? -Infinity : b[field];
+        return (av - bv) * dir;
+      });
     }
     return coins;
   }
 
-  function renderCoinRows(tab) {
+  const caret = (key) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  function renderHeader() {
+    const headEl = document.getElementById('market-table-head');
+    if (!headEl) return;
+    headEl.innerHTML = `
+      <div class="w-6 text-right shrink-0">#</div>
+      <div class="w-8 shrink-0"></div>
+      <div class="flex-1 min-w-0">Name</div>
+      <button class="w-24 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('price')">Price${caret('price')}</button>
+      <button class="hidden lg:block w-16 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('c1h')">1h${caret('c1h')}</button>
+      <button class="w-16 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('c24h')">24h${caret('c24h')}</button>
+      <button class="hidden lg:block w-16 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('c7d')">7d${caret('c7d')}</button>
+      <button class="hidden md:block w-28 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('mcap')">Market Cap${caret('mcap')}</button>
+      <button class="hidden xl:block w-28 text-right hover:text-[#e8eaf0] transition-colors" onclick="setMarketSort('vol')">Volume (24h)${caret('vol')}</button>
+      <div class="w-[72px] text-right shrink-0">Last 7d</div>`;
+  }
+
+  function renderCoinRows() {
     const rowsEl = document.getElementById('market-coin-rows');
     if (!rowsEl) return;
     const tabBtns = { most_active: 'mkt-tab-most-active', top_gainer: 'mkt-tab-top-gainer', top_loser: 'mkt-tab-top-loser' };
     Object.entries(tabBtns).forEach(([t, id]) => {
       const btn = document.getElementById(id);
-      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${tab === t ? 'pill-active' : 'pill-inactive'}`;
+      if (btn) btn.className = `text-sm px-3 py-1 font-medium transition-colors ${activeTab === t ? 'pill-active' : 'pill-inactive'}`;
     });
-    const sorted = getSortedCoins(tab);
-    rowsEl.innerHTML = sorted.map((coin, idx) => {
+    const rows = getRows();
+    if (!rows.length) {
+      rowsEl.innerHTML = `<div class="card text-center py-8 text-[#8b95ab] text-sm">No coins match "${esc(searchTerm)}".</div>`;
+      return;
+    }
+    rowsEl.innerHTML = rows.map((coin, idx) => {
       const clrText = TOKEN_COLORS[coin.symbol] || '#8b95ab';
       const clrBg   = TOKEN_BG[coin.symbol]    || 'rgba(100,100,120,0.2)';
-      const hist    = histories[coin.symbol] || [];
-      const pct     = coin.price_change_24h_pct;
-      const changeStr  = pct == null ? '—' : (pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`);
-      const changeCls  = pct == null ? 'text-[#8b95ab]' : pct > 0.05 ? 'text-emerald-400' : pct < -0.05 ? 'text-red-400' : 'text-[#8b95ab]';
-      const sparkline  = buildSparkline(hist, clrText);
+      const pct7    = coin.price_change_7d_pct;
+      const sparkColor = pct7 == null ? clrText : pct7 >= 0 ? '#34d399' : '#f87171';
+      const sparkline  = buildSparkline(coin.sparkline_7d, sparkColor);
       const displaySym = coin.symbol.length > 4 ? coin.symbol.slice(0, 4) : coin.symbol;
-      const rankNum    = tab === 'most_active' ? (coin.rank || idx + 1) : idx + 1;
+      const rankNum    = coin.rank || idx + 1;
+      const logo = coin.logo_url
+        ? `<img src="${esc(coin.logo_url)}" alt="" data-sym="${displaySym}" data-bg="${clrBg}" data-fg="${clrText}" class="w-8 h-8 rounded-full shrink-0 object-cover bg-[#161b2a]" onerror="_mktLogoErr(this)">`
+        : `<div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0" style="background:${clrBg};color:${clrText}">${displaySym}</div>`;
       return `
-        <div class="token-market-row card flex items-center gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3"
+        <div class="token-market-row card flex items-center gap-2 sm:gap-3 cursor-pointer hover:bg-[#1c2236]/60 transition-colors py-3 px-2 sm:px-3"
              onclick="openTokenDetail('${coin.symbol}')">
-          <div class="text-xs text-[#4e5872] font-mono w-5 text-right shrink-0">${rankNum}</div>
-          <div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-               style="background:${clrBg};color:${clrText};">${displaySym}</div>
+          <div class="text-xs text-[#4e5872] font-mono w-6 text-right shrink-0">${rankNum}</div>
+          ${logo}
           <div class="flex-1 min-w-0">
-            <div class="text-sm font-semibold">${coin.symbol}</div>
+            <div class="text-sm font-semibold leading-tight">${coin.symbol}</div>
             <div class="text-xs text-[#8b95ab] truncate">${esc(coin.name)}</div>
           </div>
-          <div class="text-right shrink-0">
-            <div class="text-sm font-semibold">${fmtCoinPrice(coin.price_usd)}</div>
-            <div class="text-xs font-medium ${changeCls}">${changeStr}</div>
-          </div>
-          <div class="shrink-0">${sparkline}</div>
+          <div class="w-24 text-right text-sm font-semibold shrink-0">${fmtCoinPrice(coin.price_usd)}</div>
+          <div class="hidden lg:block w-16 text-right text-xs font-medium">${pctCell(coin.price_change_1h_pct)}</div>
+          <div class="w-16 text-right text-xs font-medium">${pctCell(coin.price_change_24h_pct)}</div>
+          <div class="hidden lg:block w-16 text-right text-xs font-medium">${pctCell(coin.price_change_7d_pct)}</div>
+          <div class="hidden md:block w-28 text-right text-sm text-[#e8eaf0]">${fmtLargeNum(coin.market_cap)}</div>
+          <div class="hidden xl:block w-28 text-right text-sm text-[#cfd4e0]">${fmtLargeNum(coin.volume_24h)}</div>
+          <div class="w-[72px] text-right shrink-0">${sparkline}</div>
         </div>`;
     }).join('');
   }
 
+  function rerender() { renderHeader(); renderCoinRows(); }
+
   window.setMarketTab = (tab) => {
-    marketTab = tab;
-    renderCoinRows(tab);
+    activeTab = tab;
+    if (tab === 'most_active') { sortKey = 'most_active'; sortDir = 'desc'; }
+    else if (tab === 'top_gainer') { sortKey = 'c24h'; sortDir = 'desc'; }
+    else if (tab === 'top_loser') { sortKey = 'c24h'; sortDir = 'asc'; }
+    rerender();
+  };
+  window.setMarketSort = (key) => {
+    activeTab = ''; // column sort overrides the quick-filter chips
+    if (sortKey === key) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+    else { sortKey = key; sortDir = 'desc'; }
+    rerender();
+  };
+  window.setMarketSearch = (val) => {
+    searchTerm = (val || '').trim();
+    renderCoinRows();
   };
 
-  mwrap.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-bold text-[#e8eaf0]">Markets</h2>
-      <div class="flex gap-2">
-        <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active"  onclick="setMarketTab('most_active')">Most Active</button>
-        <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainer</button>
-        <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Loser</button>
+  // ── Global stats bar ──
+  const g = globalStats || {};
+  const mcChange = g.market_cap_change_24h_pct;
+  const mcChangeCls = mcChange == null ? 'text-[#8b95ab]' : mcChange >= 0 ? 'text-emerald-400' : 'text-red-400';
+  const mcChangeStr = mcChange == null ? '' : (mcChange >= 0 ? `+${mcChange.toFixed(2)}%` : `${mcChange.toFixed(2)}%`);
+  const statsBar = `
+    <div id="market-global-stats" class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+      <div class="bg-[#161b2a] rounded-xl px-3 py-2.5">
+        <div class="text-xs text-[#4e5872] mb-0.5">Market Cap</div>
+        <div class="text-sm font-semibold text-[#e8eaf0]">${fmtLargeNum(g.total_market_cap_usd)}</div>
+        ${mcChangeStr ? `<div class="text-xs font-medium ${mcChangeCls}">${mcChangeStr} 24h</div>` : ''}
       </div>
+      <div class="bg-[#161b2a] rounded-xl px-3 py-2.5">
+        <div class="text-xs text-[#4e5872] mb-0.5">24h Volume</div>
+        <div class="text-sm font-semibold text-[#e8eaf0]">${fmtLargeNum(g.total_volume_24h_usd)}</div>
+      </div>
+      <div class="bg-[#161b2a] rounded-xl px-3 py-2.5">
+        <div class="text-xs text-[#4e5872] mb-0.5">BTC Dominance</div>
+        <div class="text-sm font-semibold text-[#e8eaf0]">${g.btc_dominance_pct != null ? g.btc_dominance_pct.toFixed(1) + '%' : '—'}</div>
+      </div>
+      <div class="bg-[#161b2a] rounded-xl px-3 py-2.5">
+        <div class="text-xs text-[#4e5872] mb-0.5">Active Coins</div>
+        <div class="text-sm font-semibold text-[#e8eaf0]">${g.active_coins ? Number(g.active_coins).toLocaleString() : '—'}</div>
+      </div>
+    </div>`;
+
+  mwrap.innerHTML = `
+    <div class="flex items-center justify-between mb-4 gap-3">
+      <h2 class="text-xl font-bold text-[#e8eaf0]">Market</h2>
+      <input id="mkt-search" type="text" placeholder="Search coins…" oninput="setMarketSearch(this.value)"
+             class="bg-[#161b2a] border border-[rgba(255,255,255,0.08)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#7c5cfc] w-40 sm:w-56">
     </div>
+    ${statsBar}
+    <div class="flex gap-2 mb-3 flex-wrap">
+      <button id="mkt-tab-most-active" class="text-sm px-3 py-1 font-medium transition-colors pill-active"  onclick="setMarketTab('most_active')">Most Active</button>
+      <button id="mkt-tab-top-gainer"  class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_gainer')">Top Gainers</button>
+      <button id="mkt-tab-top-loser"   class="text-sm px-3 py-1 font-medium transition-colors pill-inactive" onclick="setMarketTab('top_loser')">Top Losers</button>
+    </div>
+    <div id="market-table-head" class="hidden md:flex items-center gap-3 px-3 py-2 text-xs text-[#4e5872] font-medium"></div>
     <div id="market-coin-rows" class="space-y-2"></div>`;
 
-  renderCoinRows(marketTab);
+  rerender();
 }
 
 // ── Token Detail ──────────────────────────────────────────────────────────────
@@ -2494,7 +2616,7 @@ async function renderTokenDetail(sec) {
       </div>` : '';
 
     const swapSection = swappable
-      ? `<div id="detail-swap-wrap" class="mt-4"></div>`
+      ? `<button id="token-detail-trade-btn" class="token-detail-trade-btn w-full mt-4 py-3 rounded-xl font-bold text-sm text-white transition-all" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1)" onclick="window.openTradeForToken('${esc(sym)}')">Trade ${esc(sym)} →</button>`
       : `<div class="card mt-4 text-center py-6 text-[#8b95ab] text-sm">Swapping ${esc(sym)} is not yet available.</div>`;
 
     sec.innerHTML = `
@@ -2521,11 +2643,6 @@ async function renderTokenDetail(sec) {
       mountTradingViewChart(sym);
     } else {
       await renderChart();
-    }
-
-    if (swappable) {
-      const swapWrap = document.getElementById('detail-swap-wrap');
-      if (swapWrap) renderSwapCard(swapWrap, sym);
     }
   }
 
@@ -4187,6 +4304,21 @@ async function renderFutures(sec) {
     } catch (e) {
       sec.innerHTML = `<div class="p-8 text-center text-[#4e5872] text-sm">Failed to load futures data: ${esc(e.message)}</div>`;
       return;
+    }
+
+    // Consume a one-shot prefill from the coin/token detail "Trade" button.
+    if (S.tradePrefillSymbol) {
+      const want = _markets.find(m => m.symbol.split('-')[0] === S.tradePrefillSymbol);
+      if (want) {
+        // BTC/ETH/BLOOM have a perp market — select it, keep the default Long side.
+        S.futuresMarket = want;
+      } else if (FUT_TOKENS.includes(S.tradePrefillSymbol)) {
+        // No perp market — open the Swap tab pre-targeted at this token.
+        side = 'swap';
+        payToken = 'USDC';
+        receiveToken = S.tradePrefillSymbol;
+      }
+      S.tradePrefillSymbol = null;
     }
 
     if (!S.futuresMarket && _markets.length) S.futuresMarket = _markets[0];
