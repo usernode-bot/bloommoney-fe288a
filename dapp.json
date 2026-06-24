@@ -210,6 +210,7 @@
     { "name": "Stake section in DOM", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Earn hub hero renders with max APY", "path": "/?demo=1", "expectText": "Up to 18.5% APY" },
     { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" },
+    { "name": "Theme toggle button in top bar", "path": "/?demo=1", "expectSelector": "#theme-toggle" },
     { "name": "Portfolio section in DOM", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
     { "name": "Portfolio nav button in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='portfolio']" },
     { "name": "Portfolio bottom nav tab in DOM", "path": "/?demo=1", "expectSelector": "[data-tab='portfolio']" },

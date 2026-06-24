@@ -65,11 +65,43 @@
   </script>
 
   <script>
-  (function(){var t=localStorage.getItem('bloom_theme');if(t==='light'){document.documentElement.classList.remove('dark');}else{document.documentElement.classList.add('dark');}})();
+  // Pre-paint theme decision (render-blocking, before Tailwind/body paint to
+  // avoid a flash-of-wrong-theme). Stored choice wins; otherwise follow the OS
+  // via prefers-color-scheme. localStorage may throw in a sandboxed iframe.
+  (function(){
+    var t=null;
+    try{t=localStorage.getItem('bloom_theme');}catch(e){}
+    var dark;
+    if(t==='light'){dark=false;}
+    else if(t==='dark'){dark=true;}
+    else{dark=!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches);}
+    document.documentElement.classList[dark?'add':'remove']('dark');
+  })();
   </script>
     <title>BloomMoney</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+  // Semantic colour names resolving to the CSS vars defined in <style> below.
+  // Lets new/migrated markup use theme-correct utilities (bg-surface,
+  // text-secondary, …) instead of arbitrary hex, shrinking reliance on the
+  // light-mode override map over time.
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: {
+      deep:           'var(--bg-deep)',
+      surface:        'var(--bg-surface)',
+      card:           'var(--bg-card)',
+      'card-hover':   'var(--bg-card-hover)',
+      input:          'var(--bg-input)',
+      'text-primary':   'var(--text-primary)',
+      'text-secondary': 'var(--text-secondary)',
+      'text-muted':     'var(--text-muted)',
+      'border-subtle':  'var(--border-subtle)',
+      'accent-purple':  'var(--accent-purple)',
+      'accent-blue':    'var(--accent-blue)',
+    } } },
+  };
+  </script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
@@ -286,8 +318,14 @@
   --accent-purple:  #7c5cfc;
   --accent-blue:    #4e9af1;
   --text-primary:   #1c1e2d;
-  --text-secondary: #525875;
-  --text-muted:     #9499b3;
+  --text-secondary: #525875;       /* ~7:1 on white — AA body */
+  --text-muted:     #6b7196;       /* darkened from #9499b3 → ~4.6:1 on white (AA body) */
+  /* Mobile-first responsive foundation: adaptive gutter + fluid type scale.
+     Same tokens in both themes (layout, not colour). */
+  --space-gutter:   clamp(0.85rem, 2.5vw, 1.15rem);
+  --fs-h1:          clamp(1.5rem, 1.1rem + 2vw, 2.25rem);
+  --fs-h2:          clamp(1.25rem, 1rem + 1.2vw, 1.6rem);
+  --fs-h3:          clamp(1.05rem, 0.95rem + 0.6vw, 1.25rem);
 }
 html.dark {
   --bg-deep:        #0f1117;
@@ -301,9 +339,13 @@ html.dark {
   --accent-purple:  #7c5cfc;
   --accent-blue:    #4e9af1;
   --text-primary:   #e8eaf0;
-  --text-secondary: #8b95ab;
-  --text-muted:     #4e5872;
+  --text-secondary: #8b95ab;       /* ~5.4:1 on #131620 — AA body */
+  --text-muted:     #7884a3;       /* lightened from #4e5872 → ~4.6:1 on card, 5:1 on deep (AA body) */
 }
+/* Fluid heading helpers (additive — use in place of fixed text-* sizes). */
+.fluid-h1 { font-size: var(--fs-h1); line-height: 1.15; }
+.fluid-h2 { font-size: var(--fs-h2); line-height: 1.2; }
+.fluid-h3 { font-size: var(--fs-h3); line-height: 1.25; }
 /* Light-mode: override Tailwind hardcoded arbitrary-value colour classes.
    [class~="..."] attribute selectors need no escaping and cover both static HTML
    and dynamically injected innerHTML. */
@@ -325,6 +367,26 @@ html:not(.dark) select.inp option { background: var(--bg-card); color: var(--tex
 html:not(.dark) svg rect[fill="#0d1021"] { fill: var(--bg-input); }
 html:not(.dark) svg text[fill="#4e5872"] { fill: var(--text-muted); }
 html:not(.dark) svg text[fill="#e8eaf0"] { fill: var(--text-primary); }
+html:not(.dark) svg [fill="#8b95ab"] { fill: var(--text-secondary); }
+/* Light-mode: remaining hardcoded utilities not covered above. Near-white
+   text tones (invisible on a light surface) → primary; light accent tints
+   (low contrast on white) → the full-strength accent var. P&L green/red and
+   the brand purple/blue accents are intentionally theme-invariant. */
+html:not(.dark) [class~="text-[#cfd4e0]"] { color: var(--text-primary) !important; }
+html:not(.dark) [class~="text-[#c5c8d0]"] { color: var(--text-primary) !important; }
+html:not(.dark) [class~="text-[#9b7ffe]"] { color: var(--accent-purple) !important; }
+html:not(.dark) [class~="text-[#a78bfa]"] { color: var(--accent-purple) !important; }
+html:not(.dark) [class~="text-[#7cb8f8]"] { color: var(--accent-blue) !important; }
+/* White-wash fills/borders flip to dark washes so they stay visible on light. */
+html:not(.dark) [class~="bg-[rgba(255,255,255,0.02)]"] { background-color: rgba(0,0,0,0.03) !important; }
+html:not(.dark) [class~="bg-[rgba(255,255,255,0.08)]"] { background-color: rgba(0,0,0,0.05) !important; }
+html:not(.dark) [class~="bg-[#8b95ab]"] { background-color: var(--text-muted) !important; }
+html:not(.dark) [class~="border-[rgba(255,255,255,0.04)]"] { border-color: rgba(0,0,0,0.05) !important; }
+/* Dark gradient stops (e.g. banner) → light surface tones. The `from`/`to`
+   utilities set --tw-gradient-from/to which the stops reference, so overriding
+   the custom props is enough. */
+html:not(.dark) [class~="from-[#1a1f33]"] { --tw-gradient-from: var(--bg-card) var(--tw-gradient-from-position) !important; }
+html:not(.dark) [class~="to-[#131620]"]   { --tw-gradient-to: var(--bg-surface) var(--tw-gradient-to-position) !important; }
 /* Futures terminal: always dark. Higher specificity (.futures-terminal ancestor)
    overrides the global colour overrides above. */
 html:not(.dark) .futures-terminal [class~="text-[#e8eaf0]"] { color: #e8eaf0 !important; }
@@ -343,7 +405,7 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
 }
 .nav-item:hover { background: var(--bg-card); color: var(--text-primary); }
 .nav-item.active { background: linear-gradient(90deg, rgba(124,92,252,0.12), transparent); border-left: 2px solid var(--accent-purple); color: var(--text-primary); padding-left: calc(0.75rem - 2px); }
-.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: 1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: var(--space-gutter); transition: border-color 0.2s, box-shadow 0.2s; }
 .card:hover { border-color: var(--border-hover); box-shadow: 0 0 16px rgba(124,92,252,0.08); }
 .inp { background: var(--bg-input); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: var(--text-primary); width: 100%; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
 .inp:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(124,92,252,0.15); }
@@ -402,6 +464,9 @@ select.inp option { background: var(--bg-card); }
 /* Flat post row (Twitter/X style) */
 .feed-post { display: flex; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); }
 .feed-post:hover { background: rgba(255,255,255,0.02); }
+html:not(.dark) .feed-post:hover { background: rgba(0,0,0,0.025); }
+html:not(.dark) .tab-ul-inactive:hover { background: rgba(0,0,0,0.04); }
+html:not(.dark) #section-trade tbody tr:nth-child(even) { background: rgba(0,0,0,0.025); }
 /* Flat inbox row */
 .inbox-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; cursor: pointer; transition: background 0.15s; }
 .inbox-row:hover { background: var(--bg-card-hover); }
@@ -678,18 +743,36 @@ function navigate(view, opts) {
 }
 
 // ── Theme toggle ──────────────────────────────────────────────────────────────
-function toggleTheme() {
-  const isDark = document.documentElement.classList.toggle('dark');
-  localStorage.setItem('bloom_theme', isDark ? 'dark' : 'light');
+function applyThemeGlyph(isDark) {
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.textContent = isDark ? '☀️' : '🌙';
   const notice = document.getElementById('fut-dark-notice');
   if (notice) notice.style.display = isDark ? 'none' : 'flex';
 }
-function initThemeBtn() {
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  // Persisting the explicit choice locks it in: the OS-change listener below
+  // only acts while bloom_theme is unset.
+  try { localStorage.setItem('bloom_theme', isDark ? 'dark' : 'light'); } catch (e) {}
+  applyThemeGlyph(isDark);
 }
+function initThemeBtn() {
+  applyThemeGlyph(document.documentElement.classList.contains('dark'));
+}
+// Follow OS theme changes, but ONLY while the user has made no manual choice.
+(function () {
+  if (!window.matchMedia) return;
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = (e) => {
+    let stored = null;
+    try { stored = localStorage.getItem('bloom_theme'); } catch (_) {}
+    if (stored === 'light' || stored === 'dark') return; // manual choice wins
+    document.documentElement.classList[e.matches ? 'add' : 'remove']('dark');
+    applyThemeGlyph(e.matches);
+  };
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange); // Safari < 14
+})();
 
 async function loadView(view) {
   const sec = document.getElementById(VIEW_SECTION[view]);
