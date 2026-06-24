@@ -160,6 +160,7 @@
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
+      <button class="nav-item" data-view="portfolio">💼 Portfolio</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
       <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="stake">🔒 Stake</button>
@@ -250,6 +251,9 @@
       <!-- Messages -->
       <section id="section-messages" class="view hidden h-full overflow-hidden"></section>
 
+      <!-- Portfolio -->
+      <section id="section-portfolio" class="view hidden"></section>
+
     </main>
   </div>
 
@@ -260,7 +264,7 @@
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
     <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
-    <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
   </nav>
 </div><!-- /#app -->
 
@@ -636,6 +640,7 @@ const VIEW_SECTION = {
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
   admin: 'section-admin',
+  portfolio: 'section-portfolio',
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
@@ -643,6 +648,7 @@ const VIEW_TAB = {
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
   launchpad: 'earn', vault: 'earn',
   predict: 'predict', markets: 'predict', profile: 'profile',
+  portfolio: 'portfolio',
 };
 
 function navigate(view, opts) {
@@ -701,6 +707,7 @@ async function loadView(view) {
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
       case 'admin': await renderAdmin(sec); break;
+      case 'portfolio': await renderPortfolio(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
 }
@@ -1958,6 +1965,439 @@ window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('market'); };
 // Leave the coin detail and jump to the Trade page focused on this token.
 // Clearing tradeToken prevents the Market tab from re-opening the detail later.
 window.openTradeForToken = (sym) => { S.tradeToken = null; navigate('trade', { tradePrefillSymbol: sym }); };
+
+// ── Portfolio Dashboard ───────────────────────────────────────────────────────
+async function renderPortfolio(sec) {
+  let chartRange = '1d';
+  let walletTab = 'receive';
+  let sendToken = '';
+  let sendRecipient = '';
+  let sendAmount = '';
+  let sendStatus = 'idle';
+  let sendError = '';
+  let searchTerm = '';
+  let activityCursor = null;
+  let allActivities = [];
+  let chartPoints = [];
+  let holdings = [];
+  let prices = {};
+  let topCoins = [];
+  let sparkData = {};
+
+  const PTOK = {
+    BTC:  { color:'#f59e0b', bg:'rgba(245,158,11,0.15)',  symbol:'₿' },
+    ETH:  { color:'#38bdf8', bg:'rgba(56,189,248,0.15)',  symbol:'Ξ' },
+    SOL:  { color:'#a855f7', bg:'rgba(168,85,247,0.15)',  symbol:'◎' },
+    BNB:  { color:'#f3ba2f', bg:'rgba(243,186,47,0.15)',  symbol:'B' },
+    XRP:  { color:'#0095cf', bg:'rgba(0,149,207,0.15)',   symbol:'X' },
+    DOGE: { color:'#eab308', bg:'rgba(234,179,8,0.15)',   symbol:'Ð' },
+    ADA:  { color:'#3b82f6', bg:'rgba(59,130,246,0.15)',  symbol:'₳' },
+    AVAX: { color:'#ef4444', bg:'rgba(239,68,68,0.15)',   symbol:'A' },
+    LINK: { color:'#60a5fa', bg:'rgba(96,165,250,0.15)',  symbol:'⬡' },
+    DOT:  { color:'#ec4899', bg:'rgba(236,72,153,0.15)',  symbol:'●' },
+    TON:  { color:'#0088cc', bg:'rgba(0,136,204,0.15)',   symbol:'◆' },
+    BLOOM:{ color:'#7c5cfc', bg:'rgba(124,92,252,0.15)',  symbol:'✿' },
+    USDC: { color:'#10b981', bg:'rgba(16,185,129,0.15)',  symbol:'$' },
+    USDT: { color:'#26a17b', bg:'rgba(38,161,123,0.15)',  symbol:'₮' },
+  };
+  const STAKING_APY = { BLOOM:12, ETH:6, SOL:8, BTC:4 };
+  const WATCHLIST = ['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX'];
+  const ACCENT = '#22d3ee';
+  const GLASS = 'bg-[#161b2a] border border-[rgba(34,211,238,0.10)] rounded-2xl p-4';
+
+  function tokStyle(sym) { return PTOK[sym] || { color: ACCENT, bg: 'rgba(34,211,238,0.15)', symbol: (sym||'?')[0] }; }
+
+  function fmtPrice(p) {
+    if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    if (p >= 1) return '$' + p.toFixed(2);
+    return '$' + p.toFixed(4);
+  }
+
+  function fmtQty(q) { const n=parseFloat(q); return n<1?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2); }
+
+  function sparkSvg(hist, color) {
+    const ps = (hist||[]).map(h => parseFloat(typeof h === 'object' ? (h.price_usd||h) : h)).filter(isFinite);
+    if (ps.length < 2) return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5" stroke-opacity="0.4"/></svg>`;
+    const mn=Math.min(...ps), mx=Math.max(...ps), rng=Math.max(mx-mn,0.000001), xStep=60/(ps.length-1);
+    const pts=ps.map((p,i)=>`${(i*xStep).toFixed(1)},${(22-((p-mn)/rng)*20).toFixed(1)}`).join(' ');
+    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  function areaSvg(pts, color) {
+    const W=480,H=140,pad={t:10,r:8,b:28,l:8};
+    const IW=W-pad.l-pad.r, IH=H-pad.t-pad.b;
+    if (!pts||pts.length<2) return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl"><rect width="${W}" height="${H}" fill="rgba(0,0,0,0.2)" rx="12"/><text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#4e5872" font-size="11" font-family="sans-serif">Not enough history yet</text></svg>`;
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+    const xMin=Math.min(...xs), xMax=Math.max(...xs);
+    let yMin=Math.min(...ys), yMax=Math.max(...ys);
+    const yRng=yMax-yMin; yMin-=yRng*0.08; yMax+=yRng*0.08;
+    if (yMax-yMin<0.01){yMin-=1;yMax+=1;}
+    const xS=x=>pad.l+(xMax===xMin?IW/2:(x-xMin)/(xMax-xMin)*IW);
+    const yS=y=>pad.t+IH-((y-yMin)/(yMax-yMin))*IH;
+    const lp=pts.map(p=>`${xS(p.x).toFixed(1)},${yS(p.y).toFixed(1)}`).join(' ');
+    const ap=`${lp} ${xS(xs[xs.length-1]).toFixed(1)},${(pad.t+IH).toFixed(1)} ${xS(xs[0]).toFixed(1)},${(pad.t+IH).toFixed(1)}`;
+    const isLong = chartRange!=='1d';
+    const fmtL = ts => { const d=new Date(ts); return isLong ? `${d.getMonth()+1}/${d.getDate()}` : d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); };
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl">
+      <defs><linearGradient id="pfGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+        <stop offset="90%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient></defs>
+      <rect width="${W}" height="${H}" fill="rgba(0,0,0,0.25)" rx="12"/>
+      <polygon points="${ap}" fill="url(#pfGrad)"/>
+      <polyline points="${lp}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${xS(xs[xs.length-1]).toFixed(1)}" cy="${yS(ys[ys.length-1]).toFixed(1)}" r="3.5" fill="${color}"/>
+      <text x="${pad.l+2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif">${fmtL(xs[0])}</text>
+      <text x="${pad.l+IW-2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif" text-anchor="end">${fmtL(xs[xs.length-1])}</text>
+      <text x="${pad.l+2}" y="${pad.t+12}" fill="#4e5872" font-size="9" font-family="sans-serif">$${yMax.toFixed(0)}</text>
+    </svg>`;
+  }
+
+  function computeDelta(pts) {
+    if (!pts||pts.length<2) return null;
+    const first=pts[0].y, last=pts[pts.length-1].y;
+    return {delta:last-first, pct:first>0?((last-first)/first*100):0};
+  }
+
+  function render() {
+    const user = S.user || {};
+    const username = user.username || '';
+    const avatarSrc = user.avatar_url || avatarDataUri(username);
+    const walletAddr = user.usernode_pubkey || '';
+    const shortW = shortAddr(walletAddr);
+    const isDark = document.documentElement.classList.contains('dark');
+    const unread = S.totalUnread || 0;
+
+    let totalValue = 0;
+    for (const h of holdings) {
+      const p = prices[(h.ticker||'').toUpperCase()] ?? null;
+      if (p != null) totalValue += parseFloat(h.quantity) * p;
+    }
+    const delta = computeDelta(chartPoints);
+    const rangeLabel = chartRange==='1m'?'30d':chartRange==='1w'?'7d':'24h';
+
+    const sq = searchTerm.trim().toLowerCase();
+    const filtH = sq ? holdings.filter(h=>(h.ticker||'').toLowerCase().includes(sq)||(h.asset_name||'').toLowerCase().includes(sq)) : holdings;
+    const filtW = sq ? WATCHLIST.filter(s=>s.toLowerCase().includes(sq)||((topCoins.find(c=>c.symbol===s)||{}).name||'').toLowerCase().includes(sq)) : WATCHLIST;
+
+    const heldTickers = holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean);
+    const buyTokens = [...new Set([...heldTickers,'BTC','ETH','SOL','BNB','USDC'])];
+    const sellTokens = heldTickers.length>0 ? heldTickers : ['BTC','ETH','SOL'];
+    const activeSendToken = sendToken || heldTickers[0] || 'BLOOM';
+    const sendBal = (S.balances && S.balances[activeSendToken]) ? (Number(S.balances[activeSendToken])/1e6).toFixed(4) : '—';
+    const bridgeAvail = !!(window.usernode && typeof window.usernode.sendTransaction==='function');
+
+    // Asset cards
+    const assetHtml = filtH.length===0
+      ? `<div class="text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
+      : filtH.map(h=>{
+          const sym=(h.ticker||'').toUpperCase(), tk=tokStyle(sym);
+          const lp=prices[sym]??null;
+          const val=lp!=null?(parseFloat(h.quantity)*lp):null;
+          const apy=STAKING_APY[sym];
+          const spark=sparkData[sym]||[];
+          return `<div class="flex-none w-44 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
+            <div class="flex items-center gap-2">
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
+              <div><div class="font-semibold text-[#e8eaf0] text-sm">${esc(sym)}</div><div class="text-[#8b95ab] text-xs">${esc(h.asset_name||sym)}</div></div>
+            </div>
+            <div><div class="text-[#e8eaf0] font-mono text-sm">${fmtQty(h.quantity)} ${esc(sym)}</div>
+              <div class="text-[#8b95ab] text-xs">${val!=null?'$'+val.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</div></div>
+            <div class="flex items-center justify-between">
+              ${apy?`<span class="text-xs px-2 py-0.5 rounded-full font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee">${apy}% APY</span>`:'<span></span>'}
+              ${sparkSvg(spark,tk.color)}
+            </div>
+          </div>`;
+        }).join('');
+
+    // Watchlist
+    const watchHtml = filtW.length===0
+      ? `<div class="text-[#4e5872] text-sm text-center py-2">No matches</div>`
+      : filtW.map(sym=>{
+          const coin=topCoins.find(c=>c.symbol===sym), tk=tokStyle(sym);
+          const chg=coin?coin.price_change_24h_pct:null;
+          const sparkPts=coin&&coin.sparkline_7d&&coin.sparkline_7d.length>1?coin.sparkline_7d.slice(-20):[];
+          return `<div class="flex items-center gap-2 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold text-[#e8eaf0]">${esc(sym)}</div>
+              <div class="text-xs text-[#8b95ab]">${esc((coin&&coin.name)||sym)}</div>
+            </div>
+            <div class="text-right flex-none mr-1">
+              <div class="text-sm font-mono text-[#e8eaf0]">${fmtPrice(coin?coin.price_usd:null)}</div>
+              <div class="text-xs font-semibold ${chg!=null?(chg>=0?'text-emerald-400':'text-red-400'):'text-[#4e5872]'}">${chg!=null?(chg>=0?'▲':'▼')+' '+Math.abs(chg).toFixed(2)+'%':'—'}</div>
+            </div>
+            <div class="shrink-0">${sparkSvg(sparkPts,tk.color)}</div>
+            <button class="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee" onclick="navigate('trade')">Buy</button>
+          </div>`;
+        }).join('');
+
+    // Activity
+    const actHtml = allActivities.length===0
+      ? `<div class="text-[#4e5872] text-sm text-center py-4">No transactions yet</div>`
+      : allActivities.map(a=>{
+          const amt=Number(a.amount)/1e6, isPos=amt>=0;
+          const icons={swap:'↔',swap_gas:'⛽',stake:'🔒',unstake:'🔓',vault_deposit:'🏦',vault_withdraw:'🏦',ico_invest:'🚀',futures_open:'📈',futures_close:'📉',futures_pnl:'💰',futures_gas:'⛽',nft_buy:'🎨',nft_sale:'💎',nft_gas:'⛽',nft_royalty:'👑',nft_transfer_gas:'🎨',post_unlock:'🔓',tip:'💰',market_trade:'🎲',funding:'💸',send:'📤'};
+          const icon=icons[a.type]||'📋';
+          const fmtAmt2=v=>{const n=Math.abs(v);return n<0.01?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2);};
+          return `<div class="flex items-center gap-3 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0" style="background:rgba(34,211,238,0.08)">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-[#e8eaf0] truncate">${esc(a.description||a.type)}</div>
+              <div class="text-xs text-[#4e5872]">${tsAgo(a.created_at)} ago</div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-sm font-mono font-semibold ${isPos?'text-emerald-400':'text-red-400'}">${isPos?'+':''}${fmtAmt2(amt)} ${esc(a.token_symbol||'')}</div>
+              <div class="w-2 h-2 rounded-full ml-auto mt-0.5" style="background:#22d3ee"></div>
+            </div>
+          </div>`;
+        }).join('');
+
+    // Send form
+    const sendOpts=(heldTickers.length>0?heldTickers:['BLOOM','USDC','ETH']).map(t=>`<option value="${esc(t)}" ${activeSendToken===t?'selected':''}>${esc(t)}</option>`).join('');
+    let sendFormHtml;
+    if (!bridgeAvail) {
+      sendFormHtml=`<div class="text-center py-4 text-[#8b95ab] text-sm"><div class="text-2xl mb-2">🔗</div>On-chain sends require the Usernode wallet.<br>Open in the Usernode app to use this feature.</div>`;
+    } else if (sendStatus==='pending') {
+      sendFormHtml=`<div class="flex flex-col items-center py-4 gap-2"><div class="spinner"></div><div class="text-[#8b95ab] text-sm">Sending…</div></div>`;
+    } else if (sendStatus==='ok') {
+      sendFormHtml=`<div class="text-center py-4"><div class="text-3xl mb-1">✓</div><div class="text-emerald-400 font-semibold">Sent!</div><div class="text-[#8b95ab] text-xs mt-1">${esc(sendAmount)} ${esc(activeSendToken)} → ${shortAddr(sendRecipient)}</div><button class="mt-3 text-xs text-[#22d3ee]" id="pf-send-reset">Send another</button></div>`;
+    } else {
+      sendFormHtml=`<div class="space-y-3">
+        ${sendStatus==='error'?`<div class="text-red-400 text-sm py-1">${esc(sendError)}</div>`:''}
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Token</label><select id="pf-send-token" class="inp w-full text-sm">${sendOpts}</select></div>
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Recipient address</label><input id="pf-send-recipient" class="inp w-full text-sm font-mono" placeholder="0x… recipient address" value="${esc(sendRecipient)}"></div>
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Amount</label><input id="pf-send-amount" class="inp w-full text-sm" type="number" min="0" step="any" placeholder="0.00" value="${esc(sendAmount)}"><div class="text-xs text-[#4e5872] mt-0.5">Balance: ${sendBal} ${esc(activeSendToken)}</div></div>
+        <button id="pf-send-btn" class="w-full py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117">Send</button>
+      </div>`;
+    }
+
+    sec.innerHTML = `
+      <!-- Local top bar -->
+      <div class="sticky top-0 z-20 bg-[#131620] border-b border-[rgba(34,211,238,0.08)] px-4 py-2 flex items-center gap-2">
+        <button class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
+          <img src="${esc(avatarSrc)}" alt="@${esc(username)}" class="w-8 h-8 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(34,211,238,0.3)">
+          <span class="text-sm font-semibold text-[#e8eaf0] truncate hidden sm:block">@${esc(username)}</span>
+        </button>
+        <div class="flex-1"></div>
+        <input id="pf-search" type="text" placeholder="Search…" value="${esc(searchTerm)}"
+          class="hidden sm:block bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] w-36 focus:outline-none focus:border-[#22d3ee] transition-colors"
+          oninput="window._pfSearch(this.value)">
+        <button class="relative w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="navigate('messages')" title="Notifications">
+          🔔${unread>0?`<span class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-violet-600 text-white text-[0.55rem] font-bold flex items-center justify-center leading-none">${unread>99?'99+':unread}</span>`:''}
+        </button>
+        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="toggleTheme()" title="Toggle theme">${isDark?'☀️':'🌙'}</button>
+        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="S.token='';S.user=null;showWalletGate();" title="Log out">🚪</button>
+        <button class="sm:hidden w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] shrink-0" onclick="document.getElementById('pf-mobile-search').classList.toggle('hidden')">🔍</button>
+      </div>
+      <div id="pf-mobile-search" class="hidden sm:hidden px-4 py-2 bg-[#131620] border-b border-[rgba(34,211,238,0.08)]">
+        <input type="text" placeholder="Search tokens…" value="${esc(searchTerm)}" class="w-full bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-2 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#22d3ee] transition-colors" oninput="window._pfSearch(this.value)">
+      </div>
+
+      <div class="max-w-2xl mx-auto px-4 py-4 space-y-4">
+
+        <!-- Balance card -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <div class="text-xs text-[#8b95ab] uppercase tracking-widest mb-1">Total Portfolio Value</div>
+          <div class="text-4xl font-bold text-[#e8eaf0] tracking-tight">$${totalValue.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+          ${delta?`<div class="text-sm font-medium mt-1 ${delta.delta>=0?'text-emerald-400':'text-red-400'}">${delta.delta>=0?'+':''}$${Math.abs(delta.delta).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} (${delta.delta>=0?'+':''}${delta.pct.toFixed(2)}%) <span class="text-[#4e5872] font-normal">${rangeLabel}</span></div>`:''}
+          <div class="flex gap-2 mt-3">
+            ${['1d','1w','1m'].map(r=>`<button onclick="window._pfSetRange('${r}')" class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${chartRange===r?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0] bg-[#0d1021]'}" style="${chartRange===r?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">${r.toUpperCase()}</button>`).join('')}
+          </div>
+          <div class="mt-3">${areaSvg(chartPoints,ACCENT)}</div>
+        </div>
+
+        <!-- Holdings -->
+        <div>
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Holdings</h3>
+          <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:overflow-visible">${assetHtml}</div>
+        </div>
+
+        <!-- Quick Trade -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-3">Quick Trade</h3>
+          <div class="flex gap-1 mb-3 bg-[#0d1021] rounded-xl p-1">
+            <button id="pf-trade-buy" onclick="window._pfTradeTab('buy')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg text-[#0f1117] transition-colors" style="background:linear-gradient(135deg,#22d3ee,#06b6d4)">Buy</button>
+            <button id="pf-trade-sell" onclick="window._pfTradeTab('sell')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg text-[#8b95ab] hover:text-[#e8eaf0] transition-colors">Sell</button>
+          </div>
+          <div class="space-y-3">
+            <select id="pf-trade-token" class="inp w-full text-sm">${buyTokens.map(t=>`<option>${esc(t)}</option>`).join('')}</select>
+            <input id="pf-trade-amount" type="number" class="inp w-full text-sm" placeholder="Amount">
+            <button class="w-full py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117" onclick="navigate('trade')">Trade Now →</button>
+          </div>
+        </div>
+
+        <!-- Wallet -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide">My Wallet</h3>
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-xs text-[#e8eaf0]">${shortW||'Not linked'}</span>
+              ${walletAddr?`<button id="pf-copy-addr" onclick="window._pfCopyAddr()" class="text-xs px-2 py-0.5 rounded-lg transition-colors" style="background:rgba(34,211,238,0.10);color:#22d3ee">Copy</button>`:''}
+            </div>
+          </div>
+          <div class="flex gap-1 bg-[#0d1021] rounded-xl p-1 mb-3">
+            <button id="pf-tab-receive" onclick="window._pfWalletTab('receive')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${walletTab==='receive'?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0]'}" style="${walletTab==='receive'?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">Receive</button>
+            <button id="pf-tab-send" onclick="window._pfWalletTab('send')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${walletTab==='send'?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0]'}" style="${walletTab==='send'?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">Send</button>
+          </div>
+          <div id="pf-wallet-receive" class="${walletTab==='receive'?'':'hidden'}">
+            ${walletAddr?`
+              <div class="flex flex-col items-center gap-3">
+                <div id="pf-qr-container"><p class="text-xs font-mono text-[#22d3ee] break-all">${esc(walletAddr)}</p></div>
+                <p class="font-mono text-xs text-[#8b95ab] break-all text-center">${esc(walletAddr)}</p>
+                <button onclick="window._pfCopyAddr()" class="text-sm px-4 py-2 rounded-xl font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee">Copy address</button>
+                <p class="text-xs text-[#4e5872]">Share this address to receive crypto.</p>
+              </div>`
+            :`<div class="text-center text-[#8b95ab] text-sm py-4">No wallet linked to your account.</div>`}
+          </div>
+          <div id="pf-wallet-send" class="${walletTab==='send'?'':'hidden'}">${sendFormHtml}</div>
+        </div>
+
+        <!-- Watchlist -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Watchlist</h3>
+          <div id="pf-watchlist">${watchHtml}</div>
+        </div>
+
+        <!-- Transaction History -->
+        <div class="${GLASS} mb-20 md:mb-4" style="backdrop-filter:blur(8px)">
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Transaction History</h3>
+          <div id="pf-activity">${actHtml}</div>
+          ${activityCursor?`<button id="pf-load-more" class="w-full mt-3 py-2 text-sm transition-colors" style="color:#22d3ee" onclick="window._pfLoadMore()">Load more</button>`:''}
+        </div>
+
+      </div>`;
+
+    // Event handlers
+    window._pfSearch = v => { searchTerm = v||''; render(); };
+
+    window._pfSetRange = async r => {
+      chartRange = r;
+      try { const d=await api('GET',`/api/portfolio/chart?range=${r}`); chartPoints=d.points||[]; } catch(_){ chartPoints=[]; }
+      render();
+    };
+
+    window._pfTradeTab = tab => {
+      const buyBtn=document.getElementById('pf-trade-buy');
+      const sellBtn=document.getElementById('pf-trade-sell');
+      const tokenSel=document.getElementById('pf-trade-token');
+      if (!buyBtn||!sellBtn||!tokenSel) return;
+      if (tab==='buy') {
+        buyBtn.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)'; buyBtn.classList.add('text-[#0f1117]'); buyBtn.classList.remove('text-[#8b95ab]');
+        sellBtn.style.background=''; sellBtn.classList.remove('text-[#0f1117]'); sellBtn.classList.add('text-[#8b95ab]');
+        tokenSel.innerHTML=buyTokens.map(t=>`<option>${esc(t)}</option>`).join('');
+      } else {
+        sellBtn.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)'; sellBtn.classList.add('text-[#0f1117]'); sellBtn.classList.remove('text-[#8b95ab]');
+        buyBtn.style.background=''; buyBtn.classList.remove('text-[#0f1117]'); buyBtn.classList.add('text-[#8b95ab]');
+        tokenSel.innerHTML=sellTokens.map(t=>`<option>${esc(t)}</option>`).join('');
+      }
+    };
+
+    window._pfWalletTab = tab => {
+      walletTab = tab;
+      const rcv=document.getElementById('pf-wallet-receive');
+      const snd=document.getElementById('pf-wallet-send');
+      const tR=document.getElementById('pf-tab-receive');
+      const tS=document.getElementById('pf-tab-send');
+      if (!rcv||!snd) return;
+      if (tab==='receive') {
+        rcv.classList.remove('hidden'); snd.classList.add('hidden');
+        if(tR){tR.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)';tR.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#0f1117]';}
+        if(tS){tS.style.background='';tS.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#8b95ab] hover:text-[#e8eaf0]';}
+        window._pfLoadQR();
+      } else {
+        snd.classList.remove('hidden'); rcv.classList.add('hidden');
+        if(tS){tS.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)';tS.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#0f1117]';}
+        if(tR){tR.style.background='';tR.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#8b95ab] hover:text-[#e8eaf0]';}
+      }
+    };
+
+    window._pfCopyAddr = () => {
+      if (!walletAddr) return;
+      const doFallback=()=>{try{const t=document.createElement('textarea');t.value=walletAddr;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);}catch(_){}};
+      (navigator.clipboard?navigator.clipboard.writeText(walletAddr).catch(doFallback):Promise.resolve(doFallback()));
+      const btn=document.getElementById('pf-copy-addr');
+      if(btn){btn.textContent='Copied!';setTimeout(()=>{if(btn)btn.textContent='Copy';},1500);}
+    };
+
+    window._pfLoadQR = async () => {
+      const container=document.getElementById('pf-qr-container');
+      if (!container||!walletAddr) return;
+      try {
+        if (!window.QRCode) {
+          await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+        container.innerHTML='<canvas id="pf-qr-canvas"></canvas>';
+        await QRCode.toCanvas(document.getElementById('pf-qr-canvas'),walletAddr,{width:180,color:{dark:'#e8eaf0',light:'#131620'}});
+      } catch(_) { container.innerHTML=`<p class="text-xs font-mono text-[#22d3ee] break-all">${esc(walletAddr)}</p>`; }
+    };
+
+    window._pfSendSubmit = async () => {
+      const tokEl=document.getElementById('pf-send-token');
+      const recEl=document.getElementById('pf-send-recipient');
+      const amtEl=document.getElementById('pf-send-amount');
+      sendToken=tokEl?tokEl.value:activeSendToken;
+      sendRecipient=recEl?recEl.value.trim():'';
+      sendAmount=amtEl?amtEl.value.trim():'';
+      if (!sendRecipient){sendStatus='error';sendError='Enter a recipient address.';render();return;}
+      const pa=parseFloat(sendAmount);
+      if (!pa||pa<=0){sendStatus='error';sendError='Enter a valid amount.';render();return;}
+      if (!window.usernode||typeof window.usernode.sendTransaction!=='function'){
+        sendStatus='error';sendError='Wallet bridge not available — open in the Usernode app to send tokens.';render();return;
+      }
+      sendStatus='pending';render();
+      try {
+        await window.usernode.sendTransaction({to:sendRecipient,token:sendToken,amount:pa});
+        await api('POST','/api/wallet/send',{to_address:sendRecipient,token_symbol:sendToken,amount:sendAmount});
+        await refreshBalances();
+        sendStatus='ok';render();
+      } catch(e){sendStatus='error';sendError=e.message||'Transaction failed.';render();}
+    };
+
+    window._pfLoadMore = async () => {
+      if (!activityCursor) return;
+      try {
+        const d=await api('GET',`/api/activity?limit=10&cursor=${activityCursor}`);
+        allActivities=allActivities.concat(d.activities||[]);
+        activityCursor=d.nextCursor||null;
+        render();
+      } catch(_){}
+    };
+
+    const sendBtn=document.getElementById('pf-send-btn');
+    if (sendBtn) sendBtn.addEventListener('click',window._pfSendSubmit);
+    const sendReset=document.getElementById('pf-send-reset');
+    if (sendReset) sendReset.addEventListener('click',()=>{sendStatus='idle';sendError='';sendRecipient='';sendAmount='';render();});
+
+    if (walletTab==='receive'&&walletAddr) setTimeout(window._pfLoadQR,50);
+  }
+
+  // Initial fetch
+  sec.innerHTML = spin();
+  try {
+    const username = S.user?.username || '';
+    const [portData, chartData, actData, coinsData] = await Promise.all([
+      fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>({holdings:[],prices:{}})),
+      api('GET','/api/portfolio/chart?range=1d').catch(()=>({points:[]})),
+      api('GET','/api/activity?limit=10').catch(()=>({activities:[],nextCursor:null})),
+      api('GET','/api/coins/top?limit=20').catch(()=>({coins:[]})),
+    ]);
+    holdings=portData.holdings||[];
+    prices=portData.prices||{};
+    chartPoints=chartData.points||[];
+    allActivities=actData.activities||[];
+    activityCursor=actData.nextCursor||null;
+    topCoins=coinsData.coins||[];
+    const tickers=[...new Set(holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean))];
+    if (tickers.length) {
+      const sr=await Promise.all(tickers.map(sym=>api('GET',`/api/price-history?symbol=${sym}&hours=24`).catch(()=>({history:[]}))));
+      tickers.forEach((sym,i)=>{sparkData[sym]=sr[i].history||[];});
+    }
+    sendToken=holdings[0]?(holdings[0].ticker||'').toUpperCase():'BLOOM';
+  } catch(e){ sec.innerHTML=err(e.message); return; }
+  render();
+}
 
 // ── Swap Card (reusable helper) ────────────────────────────────────────────────
 function renderSwapCard(containerEl, prefilledFrom) {

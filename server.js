@@ -2315,6 +2315,49 @@ app.get('/api/activity', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Wallet Send (bridge sync) ────────────────────────────────────────────────
+
+app.post('/api/wallet/send', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_address, token_symbol, amount } = req.body;
+    const sym = (token_symbol || '').toUpperCase().trim();
+    const qty = parseAmount(amount);
+    if (!sym) return res.status(400).json({ error: 'token_symbol required' });
+    if (!qty) return res.status(400).json({ error: 'Invalid amount' });
+    if (!to_address || typeof to_address !== 'string' || !to_address.trim())
+      return res.status(400).json({ error: 'to_address required' });
+
+    await client.query('BEGIN');
+    const { rows: balRows } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    const currentBal = balRows.length > 0 ? Number(balRows[0].balance) / 1e6 : 0;
+    if (currentBal < qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    const newBalUnits = Math.round((currentBal - qty) * 1e6);
+    await client.query(
+      `INSERT INTO wallet_balances (user_id, token_symbol, balance)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, token_symbol) DO UPDATE SET balance = EXCLUDED.balance`,
+      [req.user.id, sym, newBalUnits]
+    );
+    await client.query(
+      `INSERT INTO transactions (user_id, type, token_symbol, amount, description)
+       VALUES ($1, 'send', $2, $3, $4)`,
+      [req.user.id, sym, Math.round(qty * 1e6), `Sent ${qty} ${sym} to ${shortAddr(to_address.trim())}`]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, remaining: newBalUnits / 1e6 });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── Trade Journal ─────────────────────────────────────────────────────────────
 
 app.get('/api/journal', async (req, res) => {
