@@ -108,7 +108,7 @@
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
   <!-- Top Bar -->
-  <header class="h-14 bg-[#131620] border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between px-4 shrink-0 z-30">
+  <header id="global-header" class="h-14 bg-[#131620] border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between px-4 shrink-0 z-30">
     <div class="flex items-center gap-3">
       <button class="md:hidden text-[#8b95ab] hover:text-[#e8eaf0] p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -667,6 +667,7 @@ function navigate(view, opts) {
     b.classList.toggle('text-[#8b95ab]', b.dataset.tab !== tab);
   });
   hideMobileSidebar();
+  document.getElementById('global-header').classList.toggle('hidden', view === 'portfolio');
   loadView(view);
   document.getElementById('main-scroll').scrollTo(0, 0);
 }
@@ -2118,7 +2119,7 @@ async function renderPortfolio(sec) {
           const coin=topCoins.find(c=>c.symbol===sym), tk=tokStyle(sym);
           const chg=coin?coin.price_change_24h_pct:null;
           const sparkPts=coin&&coin.sparkline_7d&&coin.sparkline_7d.length>1?coin.sparkline_7d.slice(-20):[];
-          return `<div class="flex items-center gap-2 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
+          return `<div class="flex items-center gap-2 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0 cursor-pointer hover:bg-[#1c2236] rounded-lg px-1 -mx-1 transition-colors" onclick="window._pfOpenTokenModal('${sym}')">
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-semibold text-[#e8eaf0]">${esc(sym)}</div>
@@ -2129,7 +2130,7 @@ async function renderPortfolio(sec) {
               <div class="text-xs font-semibold ${chg!=null?(chg>=0?'text-emerald-400':'text-red-400'):'text-[#4e5872]'}">${chg!=null?(chg>=0?'▲':'▼')+' '+Math.abs(chg).toFixed(2)+'%':'—'}</div>
             </div>
             <div class="shrink-0">${sparkSvg(sparkPts,tk.color)}</div>
-            <button class="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee" onclick="navigate('trade')">Buy</button>
+            <button class="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee" onclick="event.stopPropagation();window._pfOpenTokenModal('${sym}')">Buy</button>
           </div>`;
         }).join('');
 
@@ -2174,25 +2175,21 @@ async function renderPortfolio(sec) {
     }
 
     sec.innerHTML = `
-      <!-- Local top bar -->
+      <!-- Local top bar (replaces global header when Portfolio is active) -->
       <div class="sticky top-0 z-20 bg-[#131620] border-b border-[rgba(34,211,238,0.08)] px-4 py-2 flex items-center gap-2">
-        <button class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
+        <button class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity shrink-0" onclick="navigate('profile')" title="My Profile">
           <img src="${esc(avatarSrc)}" alt="@${esc(username)}" class="w-8 h-8 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(34,211,238,0.3)">
-          <span class="text-sm font-semibold text-[#e8eaf0] truncate hidden sm:block">@${esc(username)}</span>
+          <span class="text-sm font-semibold text-[#e8eaf0] truncate max-w-[6rem]">@${esc(username)}</span>
         </button>
         <div class="flex-1"></div>
         <input id="pf-search" type="text" placeholder="Search…" value="${esc(searchTerm)}"
-          class="hidden sm:block bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] w-36 focus:outline-none focus:border-[#22d3ee] transition-colors"
+          class="flex-1 max-w-[8rem] min-w-0 bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#22d3ee] transition-colors"
           oninput="window._pfSearch(this.value)">
         <button class="relative w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="navigate('messages')" title="Notifications">
           🔔${unread>0?`<span class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-violet-600 text-white text-[0.55rem] font-bold flex items-center justify-center leading-none">${unread>99?'99+':unread}</span>`:''}
         </button>
         <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="toggleTheme()" title="Toggle theme">${isDark?'☀️':'🌙'}</button>
         <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="S.token='';S.user=null;showWalletGate();" title="Log out">🚪</button>
-        <button class="sm:hidden w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] shrink-0" onclick="document.getElementById('pf-mobile-search').classList.toggle('hidden')">🔍</button>
-      </div>
-      <div id="pf-mobile-search" class="hidden sm:hidden px-4 py-2 bg-[#131620] border-b border-[rgba(34,211,238,0.08)]">
-        <input type="text" placeholder="Search tokens…" value="${esc(searchTerm)}" class="w-full bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-2 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#22d3ee] transition-colors" oninput="window._pfSearch(this.value)">
       </div>
 
       <div class="max-w-2xl mx-auto px-4 py-4 space-y-4">
@@ -2365,6 +2362,112 @@ async function renderPortfolio(sec) {
       } catch(_){}
     };
 
+    window._pfOpenTokenModal = async (sym) => {
+      document.getElementById('pf-token-modal')?.remove();
+
+      // Ensure top-coin data is cached
+      if (!S.topCoinsData || !S.topCoinsData.length) {
+        try { const td=await api('GET','/api/coins/top?limit=25'); S.topCoinsData=td.coins||[]; } catch(_){}
+      }
+      const coinData = (S.topCoinsData||[]).find(c=>c.symbol===sym);
+      const meta = TOKEN_META_DETAIL[sym] || (coinData ? {
+        name: coinData.name, color:'rgb(139,149,171)', badgeBg:'bg-[#8b95ab]/10', badgeText:'text-[#8b95ab]',
+        desc:`${coinData.name} (${sym}) — ranked #${coinData.rank||'?'} by market cap.`,
+      } : { name:sym, color:'#22d3ee', badgeBg:'bg-[rgba(34,211,238,0.15)]', badgeText:'text-[#22d3ee]', desc:'' });
+
+      const useTv = sym in TV_SYMBOLS_MAP;
+      const price = coinData ? coinData.price_usd : null;
+      const chg = coinData ? coinData.price_change_24h_pct : null;
+      const chgStr = chg==null?'—':(chg>=0?`+${chg.toFixed(2)}%`:`${chg.toFixed(2)}%`);
+      const chgCls = chg==null?'text-[#8b95ab]':chg>0.05?'text-emerald-400':chg<-0.05?'text-red-400':'text-[#8b95ab]';
+
+      const fmtP = p=>{ if(p==null)return '—'; if(p>=1000)return '$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); if(p>=1)return '$'+p.toFixed(2); if(p>=0.01)return '$'+p.toFixed(4); return '$'+p.toFixed(8); };
+      const fmtLN = n=>{ if(!n)return '—'; if(n>=1e12)return '$'+(n/1e12).toFixed(2)+'T'; if(n>=1e9)return '$'+(n/1e9).toFixed(2)+'B'; if(n>=1e6)return '$'+(n/1e6).toFixed(2)+'M'; return '$'+n.toLocaleString(); };
+      const fmtSup = (n,s)=>{ if(!n)return '—'; if(n>=1e12)return (n/1e12).toFixed(2)+'T '+s; if(n>=1e9)return (n/1e9).toFixed(2)+'B '+s; if(n>=1e6)return (n/1e6).toFixed(2)+'M '+s; return n.toLocaleString()+' '+s; };
+      const fmtHL = p=>{ if(!p)return '—'; if(p>=1000)return '$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); if(p>=1)return '$'+p.toFixed(2); return '$'+p.toFixed(4); };
+
+      const statsHtml = coinData ? `
+        <div class="grid grid-cols-2 gap-2 mt-3">
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">Market Cap</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtLN(coinData.market_cap)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">24h Volume</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtLN(coinData.volume_24h)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">Circulating Supply</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtSup(coinData.circulating_supply,sym)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">24h High / Low</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtHL(coinData.high_24h)} / ${fmtHL(coinData.low_24h)}</div></div>
+        </div>` : '';
+
+      const chartContainerId = 'pf-modal-chart-' + sym;
+      const tvContainerId = 'pf-modal-tv-' + sym;
+      const chartSection = useTv
+        ? `<div id="${tvContainerId}" class="tradingview-widget-container mt-3" style="height:280px;min-height:280px"></div>`
+        : `<div class="mt-3">
+            <div class="flex gap-2 mb-2" id="pf-modal-pills">
+              <button class="text-xs px-3 py-1 rounded-full font-medium pill-active" id="pf-modal-btn-24h" onclick="window._pfModalChartHours('${sym}',24)">24H</button>
+              <button class="text-xs px-3 py-1 rounded-full font-medium pill-inactive" id="pf-modal-btn-7d" onclick="window._pfModalChartHours('${sym}',168)">7D</button>
+            </div>
+            <div id="${chartContainerId}">${spin()}</div>
+          </div>`;
+
+      const modal = document.createElement('div');
+      modal.id = 'pf-token-modal';
+      modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+      modal.onclick = e => { if (e.target === modal) modal.remove(); };
+      modal.innerHTML = `
+        <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto">
+          <div class="p-4">
+            <div class="flex items-start justify-between mb-3">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${meta.badgeBg} ${meta.badgeText}">${sym.length>4?sym.slice(0,4):sym}</div>
+                <div>
+                  <div class="font-bold text-lg leading-tight text-[#e8eaf0]">${esc(meta.name)}</div>
+                  <div class="text-sm text-[#8b95ab]">${esc(sym)}</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="text-right">
+                  <div class="text-xl font-bold text-[#e8eaf0]">${fmtP(price)}</div>
+                  <div class="text-sm font-medium ${chgCls}">${chgStr} <span class="text-[#4e5872] font-normal">24h</span></div>
+                </div>
+                <button onclick="document.getElementById('pf-token-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none shrink-0 ml-1">✕</button>
+              </div>
+            </div>
+            ${statsHtml}
+            ${meta.desc ? `<p class="text-sm text-[#8b95ab] mt-3">${esc(meta.desc)}</p>` : ''}
+            ${chartSection}
+            <button class="w-full mt-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117" onclick="document.getElementById('pf-token-modal')?.remove();window.openTradeForToken?window.openTradeForToken('${esc(sym)}'):navigate('trade',{tradePrefillSymbol:'${esc(sym)}'})">Trade ${esc(sym)} →</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // Render chart after modal is in DOM
+      if (useTv) {
+        const container = document.getElementById(tvContainerId);
+        if (container) {
+          container.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+          const script = document.createElement('script');
+          script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+          script.type = 'text/javascript'; script.async = true;
+          script.textContent = JSON.stringify({ autosize:true, symbol:TV_SYMBOLS_MAP[sym], interval:'D', timezone:'Etc/UTC', theme:'dark', style:'1', locale:'en', hide_top_toolbar:false, hide_legend:true, allow_symbol_change:false });
+          container.appendChild(script);
+        }
+      } else {
+        window._pfModalChartHours = async (s, hours) => {
+          const wrap = document.getElementById('pf-modal-chart-' + s);
+          if (!wrap) return;
+          wrap.innerHTML = spin();
+          const b24 = document.getElementById('pf-modal-btn-24h');
+          const b7d  = document.getElementById('pf-modal-btn-7d');
+          if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium ${hours===24?'pill-active':'pill-inactive'}`;
+          if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium ${hours===168?'pill-active':'pill-inactive'}`;
+          try {
+            const res = await api('GET', `/api/price-history?symbol=${s}&hours=${hours}`);
+            const hist = (res && res.history) || [];
+            const pts = hist.map(h=>({ x:new Date(h.recorded_at).getTime(), y:parseFloat(h.price_usd) }));
+            wrap.innerHTML = svgLineChart(pts, { color: meta.color, width:480, height:140 });
+          } catch(_) { if(wrap) wrap.innerHTML = '<p class="text-[#4e5872] text-sm text-center py-4">Chart unavailable</p>'; }
+        };
+        window._pfModalChartHours(sym, 24);
+      }
+    };
+
     const sendBtn=document.getElementById('pf-send-btn');
     if (sendBtn) sendBtn.addEventListener('click',window._pfSendSubmit);
     const sendReset=document.getElementById('pf-send-reset');
@@ -2389,6 +2492,7 @@ async function renderPortfolio(sec) {
     allActivities=actData.activities||[];
     activityCursor=actData.nextCursor||null;
     topCoins=coinsData.coins||[];
+    S.topCoinsData = topCoins;
     const tickers=[...new Set(holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean))];
     if (tickers.length) {
       const sr=await Promise.all(tickers.map(sym=>api('GET',`/api/price-history?symbol=${sym}&hours=24`).catch(()=>({history:[]}))));
@@ -2882,26 +2986,28 @@ async function renderMarket(sec) {
   rerender();
 }
 
+// ── Token Detail shared constants (hoisted for reuse by portfolio modal) ──────
+const TOKEN_META_DETAIL = {
+  BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+  ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+  BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+  SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+  XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+  USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+  ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+  DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
+  TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
+  BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+  USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
+};
+const TV_SYMBOLS_MAP = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
+
 // ── Token Detail ──────────────────────────────────────────────────────────────
 async function renderTokenDetail(sec) {
   const sym = S.tradeToken;
 
   // Base metadata for all known swappable tokens + fallback for top-25 coins
   const SWAPPABLE_TOKENS = new Set(['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM']);
-
-  const TOKEN_META_DETAIL = {
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
-    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
-    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
-    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
-    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
-    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
-    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
-    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
-  };
 
   // Try to get extended data (market cap, volume, etc.) from cached top-coins list
   let topCoinData = (S.topCoinsData || []).find(c => c.symbol === sym);
@@ -2931,7 +3037,7 @@ async function renderTokenDetail(sec) {
   }
 
   const swappable = SWAPPABLE_TOKENS.has(sym);
-  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
+  const TV_SYMBOLS = TV_SYMBOLS_MAP;
   const useTradingView = sym in TV_SYMBOLS;
   let chartHours = 24;
 

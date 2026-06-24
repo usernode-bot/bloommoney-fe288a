@@ -212,6 +212,8 @@
     { "name": "Portfolio section in DOM", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
     { "name": "Portfolio nav button in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='portfolio']" },
     { "name": "Portfolio bottom nav tab in DOM", "path": "/?demo=1", "expectSelector": "[data-tab='portfolio']" },
-    { "name": "Wallet send API requires auth", "path": "/api/wallet/send", "expectSelector": "body" }
+    { "name": "Wallet send API requires auth", "path": "/api/wallet/send", "expectSelector": "body" },
+    { "name": "Portfolio token modal handler registered", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
+    { "name": "Portfolio global header hidden when portfolio active", "path": "/?demo=1", "expectSelector": "#global-header" }
   ]
 }
