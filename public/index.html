@@ -113,7 +113,7 @@
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
     <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
+      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="S.pendingHomeTab='explore';navigate('home')">🔭</button>
       <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
         <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
       </button>
@@ -163,7 +163,6 @@
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
-      <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
@@ -921,7 +920,7 @@ async function renderFeed(sec) {
     if (feedState.thread) return;
     sec.innerHTML = `
       <div class="card space-y-2">
-        <textarea id="compose-box" class="inp" rows="3" placeholder="What's on your mind?" maxlength="280"></textarea>
+        <textarea id="compose-box" class="inp" rows="3" placeholder="What's happening?" maxlength="280"></textarea>
         <div id="compose-ticker-badge" class="flex flex-wrap gap-2" style="display:none"></div>
         <select id="compose-milestone" class="inp text-xs py-1">
           <option value="">— Just posting —</option>
@@ -948,11 +947,14 @@ async function renderFeed(sec) {
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='global'?'pill-active':'pill-inactive'}" onclick="switchTab('global')">Global</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='following'?'pill-active':'pill-inactive'}" onclick="switchTab('following')">Following</button>
         <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='wins'?'pill-active':'pill-inactive'}" onclick="switchTab('wins')">Wins 🏆</button>
+        <button class="text-sm px-4 py-1 font-medium transition-colors ${feedState.tab==='explore'?'pill-active':'pill-inactive'}" onclick="switchTab('explore')">Explore 🔭</button>
       </div>
       <div id="feed-list" class="space-y-3">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>'}
+        ${feedState.tab==='explore'
+          ? spin()
+          : (feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-4">No posts yet</p>')}
       </div>
-      ${feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
+      ${feedState.tab!=='explore' && feedState.cursor ? `<button class="btn btn-z w-full" onclick="loadMore()">Load more</button>` : ''}
     `;
     const box = document.getElementById('compose-box');
     if (box) {
@@ -963,8 +965,30 @@ async function renderFeed(sec) {
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
-  window.switchTab = (tab) => { feedState.tab = tab; feedState.cursor = null; loadPosts(); };
+  window.switchTab = (tab) => {
+    feedState.tab = tab;
+    feedState.cursor = null;
+    if (tab === 'explore') { loadExplore(); return; }
+    loadPosts();
+  };
   window.loadMore = () => loadPosts();
+
+  // Explore tab: render the shared Explore content into the feed area.
+  // No pagination/cursor — it's a one-shot discovery view behind a spinner.
+  async function loadExplore() {
+    feedState.tab = 'explore';
+    render(); // draws composer + tab strip + spinner in #feed-list
+    let html;
+    try {
+      html = await exploreContentHtml();
+    } catch (e) {
+      html = `<p class="text-red-400 text-sm text-center py-4">Couldn't load Explore: ${esc(e.message || 'error')}</p>`;
+    }
+    // Guard: the user may have switched away (or opened a thread) while loading.
+    if (feedState.tab !== 'explore' || feedState.thread) return;
+    const list = document.getElementById('feed-list');
+    if (list) list.innerHTML = html;
+  }
 
   window.submitPost = async () => {
     const box = document.getElementById('compose-box');
@@ -1039,7 +1063,16 @@ async function renderFeed(sec) {
     } catch (e) { alert(e.message); }
   };
 
-  await loadPosts();
+  // Honor a one-shot requested tab (e.g. the header 🔭 shortcut opens Home
+  // straight on the Explore tab). Defaults to the normal post feed.
+  if (S.pendingHomeTab === 'explore') {
+    S.pendingHomeTab = null;
+    feedState.tab = 'explore';
+    await loadExplore();
+  } else {
+    if (S.pendingHomeTab) S.pendingHomeTab = null;
+    await loadPosts();
+  }
 }
 
 // ── Tip Modal ──────────────────────────────────────────────────────────────────
@@ -2488,7 +2521,10 @@ async function renderEarn(sec) {
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
-async function renderExplore(sec) {
+// Shared Explore content builder — reused by the standalone Explore page
+// (renderExplore, deep-link fallback) and by the Home feed's Explore tab.
+// Returns the inner markup (no outer page heading) and wires window.exploreFollow.
+async function exploreContentHtml() {
   const [people, markets, ico, nfts] = await Promise.all([
     api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
     api('GET', '/api/markets').then(d => d.markets).catch(() => []),
@@ -2505,9 +2541,11 @@ async function renderExplore(sec) {
   const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
   const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
   const topNfts = nfts.slice(0, 6);
-  sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
-
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+  return `
     <h3 class="font-semibold mb-2">People to follow</h3>
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
@@ -2544,10 +2582,14 @@ async function renderExplore(sec) {
         <p class="text-xs text-[#4e5872] truncate">@${esc(n.owner_username)}</p>
       </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>'}
   `;
-  window.exploreFollow = async (username, btn) => {
-    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
-    catch (e) { alert(e.message); }
-  };
+}
+
+// Standalone Explore page (kept as a safe deep-link fallback; the primary
+// surface is now the Home feed's Explore tab).
+async function renderExplore(sec) {
+  sec.innerHTML = spin();
+  const html = await exploreContentHtml();
+  sec.innerHTML = `<h2 class="text-xl font-bold mb-4">🔭 Explore</h2>` + html;
 }
 
 
@@ -2608,7 +2650,7 @@ async function renderMarkets(sec) {
     const yesPct = (Number(m.yes_pool)/(Number(m.yes_pool)+Number(m.no_pool))*100).toFixed(1);
     const noPct = (100 - parseFloat(yesPct)).toFixed(1);
     const statusCls = { open:'text-emerald-400', closed:'text-[#4e5872]', resolved:'text-[#4e9af1]' };
-    return `<div class="card space-y-2 cursor-pointer hover:border-[rgba(124,92,252,0.3)] transition-colors" onclick="openMarket(${m.id})">
+    return `<div class="card space-y-1.5 cursor-pointer hover:border-[rgba(124,92,252,0.3)] transition-colors" style="padding:0.75rem" onclick="openMarket(${m.id})">
       <div class="flex justify-between items-start gap-2">
         <div class="flex flex-wrap items-start gap-2 min-w-0">
           <h3 class="font-semibold text-sm leading-snug">${esc(m.title)}</h3>
@@ -2617,8 +2659,8 @@ async function renderMarkets(sec) {
         <span class="${statusCls[m.status]||'text-[#8b95ab]'} text-xs shrink-0 ml-1">${m.status}</span>
       </div>
       <div class="flex gap-2 text-xs">
-        <div class="flex-1 bg-emerald-900/30 border border-emerald-800/40 rounded px-2 py-1">YES <span class="font-bold text-emerald-400">${yesPct}%</span></div>
-        <div class="flex-1 bg-red-900/30 border border-red-800/40 rounded px-2 py-1">NO <span class="font-bold text-red-400">${noPct}%</span></div>
+        <div class="flex-1 bg-emerald-900/30 border border-emerald-800/40 rounded px-2 py-0.5">YES <span class="font-bold text-emerald-400">${yesPct}%</span></div>
+        <div class="flex-1 bg-red-900/30 border border-red-800/40 rounded px-2 py-0.5">NO <span class="font-bold text-red-400">${noPct}%</span></div>
       </div>
       <div class="flex justify-between text-xs text-[#4e5872]">
         <span>Liquidity: ${fmtUSD(Number(m.yes_pool)+Number(m.no_pool))} USDC</span>
@@ -2636,13 +2678,13 @@ async function renderMarkets(sec) {
 
     sec.innerHTML = `
       <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Opinion Markets</h2>
+        <h2 class="text-lg font-bold">Opinion Markets</h2>
         <button class="btn btn-z text-xs" onclick="toggleCreate()">+ New Market</button>
       </div>
       ${dailyToday.length ? `
       <div class="mb-5">
         <h3 class="font-semibold text-sm text-amber-400 mb-2">&#x1f4c5; Today's Markets</h3>
-        <div class="space-y-3">${dailyToday.map(m => marketCard(m, { daily: true })).join('')}</div>
+        <div class="space-y-2">${dailyToday.map(m => marketCard(m, { daily: true })).join('')}</div>
       </div>` : ''}
       <div id="create-market-form" class="${showCreate ? '' : 'hidden'} card space-y-2 mb-4">
         <h3 class="font-semibold text-sm">Create Market</h3>
@@ -2655,7 +2697,7 @@ async function renderMarkets(sec) {
       </div>
       ${otherMarkets.length ? `
       ${dailyToday.length ? '<h3 class="font-semibold text-sm text-[#8b95ab] mb-2">Community Markets</h3>' : ''}
-      <div class="space-y-3">${otherMarkets.map(m => marketCard(m)).join('')}</div>` :
+      <div class="space-y-2">${otherMarkets.map(m => marketCard(m)).join('')}</div>` :
       dailyToday.length ? '' : '<p class="text-[#4e5872] text-sm">No markets</p>'}
     `;
 
