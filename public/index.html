@@ -729,7 +729,7 @@ const VIEW_SECTION = {
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
-  portfolio: 'section-profile',
+  portfolio: 'section-portfolio',
   messages: 'section-messages',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
@@ -807,7 +807,7 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
-      case 'portfolio': S.portfolioTab = true; S.profileUser = null; await renderProfile(sec); break;
+      case 'portfolio': await renderPortfolio(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
       case 'earn': S.earnHubFilter = 'all'; await renderEarn(sec); break;
       case 'stake': await renderStake(sec); break;
