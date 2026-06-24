@@ -150,35 +150,24 @@
       </button>
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="flex items-center gap-1">
-      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
-      <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="S.pendingHomeTab='explore';navigate('home')">🔭</button>
-      <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
-        <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+    <div class="flex items-center gap-1.5">
+      <!-- Identity: avatar + @username → Profile -->
+      <button id="hdr-identity" class="hidden items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
+        <img id="hdr-avatar" src="" alt="" class="w-7 h-7 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(124,92,252,0.3)">
+        <span id="hdr-username" class="hidden sm:block text-sm font-semibold text-[#e8eaf0] truncate max-w-[8rem]"></span>
       </button>
-      <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
+      <div class="hidden sm:flex items-center gap-2 text-xs">
+        <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="S.pendingHomeTab='explore';navigate('home')">🔭</button>
+        <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
+          <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+        </button>
+      </div>
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block text-xs"></span>
       <!-- Connect wallet CTA shown when no wallet linked -->
       <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
-      <!-- Mobile: single compact chip showing both balances -->
-      <div id="hdr-mobile-bal" class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
-        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
-        <span class="text-[#4e5872]">/</span>
-        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-      </div>
-      <!-- Desktop: separate labelled badges -->
-      <div id="hdr-desktop-bal" class="hidden sm:flex gap-1.5">
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
-          <span class="text-[#4e5872]">BLOOM</span>
-        </div>
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-          <span class="text-[#4e5872]">USDC</span>
-        </div>
-      </div>
-      </div>
+      <!-- Log out -->
+      <button id="hdr-logout" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors" title="Log out" aria-label="Log out" onclick="S.token='';S.user=null;navigate('home');">🚪</button>
     </div>
   </header>
 
@@ -737,7 +726,6 @@ function navigate(view, opts) {
     b.classList.toggle('text-[#8b95ab]', b.dataset.tab !== tab);
   });
   hideMobileSidebar();
-  document.getElementById('global-header').classList.toggle('hidden', view === 'portfolio');
   loadView(view);
   document.getElementById('main-scroll').scrollTo(0, 0);
 }
@@ -951,7 +939,7 @@ const MSG_DEMO = new URLSearchParams(location.search).get('demo') === '1';
 let _unreadInterval = null;
 function setUnreadBadge(total) {
   S.totalUnread = total;
-  for (const id of ['hdr-unread-badge', 'nav-unread-badge']) {
+  for (const id of ['nav-unread-badge']) {
     const el = document.getElementById(id);
     if (!el) continue;
     if (total > 0) { el.textContent = total > 99 ? '99+' : String(total); el.classList.remove('hidden'); }
@@ -975,16 +963,16 @@ function updateHeader() {
   const connectBtn = document.getElementById('hdr-connect-wallet');
   if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
 
-  const mobileBal = document.getElementById('hdr-mobile-bal');
-  const desktopBal = document.getElementById('hdr-desktop-bal');
-  if (mobileBal) mobileBal.style.display = hasWallet ? '' : 'none';
-  if (desktopBal) desktopBal.style.display = hasWallet ? '' : 'none';
-
-  if (hasWallet) {
-    document.getElementById('hdr-bloom').textContent = getBal('BLOOM');
-    document.getElementById('hdr-usdc').textContent = getBal('USDC');
-    document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
-    document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
+  // Identity: avatar + @username (links to Profile)
+  const identityBtn = document.getElementById('hdr-identity');
+  if (identityBtn) {
+    const uname = S.user.username || '';
+    const avatarEl = document.getElementById('hdr-avatar');
+    const unameEl = document.getElementById('hdr-username');
+    if (avatarEl) { avatarEl.src = S.user.avatar_url || avatarDataUri(uname); avatarEl.alt = '@' + uname; }
+    if (unameEl) unameEl.textContent = '@' + uname;
+    identityBtn.classList.remove('hidden');
+    identityBtn.classList.add('flex');
   }
 
   document.getElementById('drawer-username').textContent = '@' + S.user.username;
@@ -2253,14 +2241,14 @@ async function renderPortfolio(sec) {
 
     // Asset cards
     const assetHtml = filtH.length===0
-      ? `<div class="text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
+      ? `<div class="col-span-3 text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
       : filtH.map(h=>{
           const sym=(h.ticker||'').toUpperCase(), tk=tokStyle(sym);
           const lp=prices[sym]??null;
           const val=lp!=null?(parseFloat(h.quantity)*lp):null;
           const apy=STAKING_APY[sym];
           const spark=sparkData[sym]||[];
-          return `<div class="flex-none w-44 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
+          return `<div class="min-w-0 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
             <div class="flex items-center gap-2">
               <div class="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
               <div><div class="font-semibold text-[#e8eaf0] text-sm">${esc(sym)}</div><div class="text-[#8b95ab] text-xs">${esc(h.asset_name||sym)}</div></div>
@@ -2337,23 +2325,6 @@ async function renderPortfolio(sec) {
     }
 
     sec.innerHTML = `
-      <!-- Local top bar (replaces global header when Portfolio is active) -->
-      <div class="sticky top-0 z-20 bg-[#131620] border-b border-[rgba(34,211,238,0.08)] px-4 py-2 flex items-center gap-2">
-        <button class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity shrink-0" onclick="navigate('profile')" title="My Profile">
-          <img src="${esc(avatarSrc)}" alt="@${esc(username)}" class="w-8 h-8 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(34,211,238,0.3)">
-          <span class="text-sm font-semibold text-[#e8eaf0] truncate max-w-[6rem]">@${esc(username)}</span>
-        </button>
-        <div class="flex-1"></div>
-        <input id="pf-search" type="text" placeholder="Search…" value="${esc(searchTerm)}"
-          class="flex-1 max-w-[8rem] min-w-0 bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#22d3ee] transition-colors"
-          oninput="window._pfSearch(this.value)">
-        <button class="relative w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="navigate('messages')" title="Notifications">
-          🔔${unread>0?`<span class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-violet-600 text-white text-[0.55rem] font-bold flex items-center justify-center leading-none">${unread>99?'99+':unread}</span>`:''}
-        </button>
-        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="toggleTheme()" title="Toggle theme">${isDark?'☀️':'🌙'}</button>
-        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="S.token='';S.user=null;showWalletGate();" title="Log out">🚪</button>
-      </div>
-
       <div class="max-w-2xl mx-auto px-4 py-4 space-y-4">
 
         <!-- Balance card -->
@@ -2370,7 +2341,7 @@ async function renderPortfolio(sec) {
         <!-- Holdings -->
         <div>
           <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Holdings</h3>
-          <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:overflow-visible">${assetHtml}</div>
+          <div class="grid grid-cols-3 gap-3">${assetHtml}</div>
         </div>
 
         <!-- Quick Trade -->
