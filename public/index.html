@@ -211,6 +211,7 @@
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
+      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item" data-view="verify">🪪 Subscription</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
@@ -756,6 +757,7 @@ const VIEW_SECTION = {
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
+  portfolio: 'section-profile',
   messages: 'section-messages',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
@@ -834,6 +836,7 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
+      case 'portfolio': S.portfolioTab = true; S.profileUser = null; await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
       case 'earn': S.earnHubFilter = 'all'; await renderEarn(sec); break;
       case 'stake': await renderStake(sec); break;
@@ -1656,7 +1659,8 @@ async function renderProfile(sec) {
   const { user, counts, kyc, isFollowing } = profile;
   const isMe = S.user && user.user_id === S.user.user_id;
 
-  let activeTab = 'posts';
+  let activeTab = S.portfolioTab ? 'portfolio' : 'posts';
+  S.portfolioTab = false;
   let editMode = false;
 
   async function renderNFTTab() {
@@ -3260,7 +3264,14 @@ async function renderMarket(sec) {
     });
     const rows = getRows();
     if (!rows.length) {
-      rowsEl.innerHTML = `<div class="card text-center py-8 text-[#8b95ab] text-sm">No coins match "${esc(searchTerm)}".</div>`;
+      if (searchTerm) {
+        rowsEl.innerHTML = `<div class="card text-center py-8 text-[#8b95ab] text-sm">No coins match "${esc(searchTerm)}".</div>`;
+      } else {
+        rowsEl.innerHTML = `<div class="card text-center py-10 space-y-3">
+          <div class="text-[#8b95ab] text-sm">Market data unavailable — could not load coin prices.</div>
+          <button class="btn btn-v text-sm px-4 py-2" onclick="loadView('market')">Retry</button>
+        </div>`;
+      }
       return;
     }
     rowsEl.innerHTML = rows.map((coin, idx) => {
