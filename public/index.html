@@ -115,33 +115,9 @@
       </button>
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="flex items-center gap-1">
-      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
-      <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
-      <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
-        <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
-      </button>
-      <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
+    <div class="flex items-center gap-2">
       <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
-      <!-- Mobile: single compact chip showing both balances -->
-      <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
-        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
-        <span class="text-[#4e5872]">/</span>
-        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-      </div>
-      <!-- Desktop: separate labelled badges -->
-      <div class="hidden sm:flex gap-1.5">
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
-          <span class="text-[#4e5872]">BLOOM</span>
-        </div>
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-          <span class="text-[#4e5872]">USDC</span>
-        </div>
-      </div>
-      </div>
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
     </div>
   </header>
 
@@ -166,15 +142,14 @@
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
+      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
         <span>💬 Messages</span>
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <button class="nav-item" data-view="explore">🔭 Explore</button>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
-      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
       <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
@@ -258,7 +233,7 @@
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
     <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
+    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
   </nav>
@@ -631,6 +606,7 @@ const VIEW_SECTION = {
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
+  portfolio: 'section-profile',
   messages: 'section-messages',
   explore: 'section-explore',
   verify: 'section-verify', kyc: 'section-verify',
@@ -642,7 +618,7 @@ const VIEW_TAB = {
   home: 'home', feed: 'home', market: 'market', swap: 'market', trade: 'trade', futures: 'trade',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
   launchpad: 'earn', vault: 'earn',
-  predict: 'predict', markets: 'predict', profile: 'profile',
+  predict: 'predict', markets: 'predict', profile: 'profile', portfolio: 'portfolio',
 };
 
 function navigate(view, opts) {
@@ -687,6 +663,7 @@ async function loadView(view) {
     switch (view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
+      case 'portfolio': S.portfolioTab = true; S.profileUser = null; await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
       case 'earn': case 'ico': S.earnTab = null; S.earnHubFilter = 'all'; await renderEarn(sec); break;
       case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
@@ -849,7 +826,7 @@ const MSG_DEMO = new URLSearchParams(location.search).get('demo') === '1';
 let _unreadInterval = null;
 function setUnreadBadge(total) {
   S.totalUnread = total;
-  for (const id of ['hdr-unread-badge', 'nav-unread-badge']) {
+  for (const id of ['nav-unread-badge']) {
     const el = document.getElementById(id);
     if (!el) continue;
     if (total > 0) { el.textContent = total > 99 ? '99+' : String(total); el.classList.remove('hidden'); }
@@ -865,14 +842,8 @@ async function refreshUnreadBadge() {
 
 function updateHeader() {
   const walletEl = document.getElementById('hdr-wallet');
-  const bloomEl = document.getElementById('hdr-bloom');
-  const usdcEl = document.getElementById('hdr-usdc');
   if (S.user) {
-    walletEl.textContent = shortAddr(S.user.usernode_pubkey);
-    bloomEl.textContent = getBal('BLOOM');
-    usdcEl.textContent = getBal('USDC');
-    document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
-    document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
+    if (walletEl) walletEl.textContent = shortAddr(S.user.usernode_pubkey);
     const drawerUser = document.getElementById('drawer-user');
     document.getElementById('drawer-username').textContent = '@' + S.user.username;
     document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
@@ -1345,7 +1316,8 @@ async function renderProfile(sec) {
   const { user, counts, kyc, isFollowing } = profile;
   const isMe = S.user && user.user_id === S.user.user_id;
 
-  let activeTab = 'posts';
+  let activeTab = S.portfolioTab ? 'portfolio' : 'posts';
+  S.portfolioTab = false;
   let editMode = false;
 
   async function renderNFTTab() {
@@ -2344,7 +2316,14 @@ async function renderMarket(sec) {
     });
     const rows = getRows();
     if (!rows.length) {
-      rowsEl.innerHTML = `<div class="card text-center py-8 text-[#8b95ab] text-sm">No coins match "${esc(searchTerm)}".</div>`;
+      if (searchTerm) {
+        rowsEl.innerHTML = `<div class="card text-center py-8 text-[#8b95ab] text-sm">No coins match "${esc(searchTerm)}".</div>`;
+      } else {
+        rowsEl.innerHTML = `<div class="card text-center py-10 space-y-3">
+          <div class="text-[#8b95ab] text-sm">Market data unavailable — could not load coin prices.</div>
+          <button class="btn btn-v text-sm px-4 py-2" onclick="loadView('market')">Retry</button>
+        </div>`;
+      }
       return;
     }
     rowsEl.innerHTML = rows.map((coin, idx) => {
