@@ -74,13 +74,16 @@
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
-<!-- ───── Wallet Gate ───── -->
-<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-6 p-8 text-center" style="background: radial-gradient(ellipse at 50% 60%, rgba(124,92,252,0.12) 0%, transparent 70%), var(--bg-deep);">
-  <div class="text-7xl">🌸</div>
-  <h1 class="text-3xl font-bold text-[#e8eaf0]">BloomMoney</h1>
-  <p class="text-[#8b95ab] max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
-  <button id="connect-wallet-btn" class="active:scale-95 transition-all text-white px-10 py-3 rounded-2xl font-semibold text-lg shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
-  <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
+<!-- ───── Wallet Prompt Modal ───── -->
+<div id="wallet-prompt" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='wallet-prompt') closeWalletPrompt()">
+  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-xs text-center space-y-4" onclick="event.stopPropagation()">
+    <div class="text-4xl">🌸</div>
+    <h2 class="text-xl font-bold text-[#e8eaf0]">Wallet Required</h2>
+    <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Connect your wallet to continue.</p>
+    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
+    <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
+    <button onclick="closeWalletPrompt()" class="text-xs text-[#4e5872] hover:text-[#8b95ab] transition-colors">Maybe later</button>
+  </div>
 </div>
 
 <!-- ───── Tip Modal ───── -->
@@ -124,14 +127,16 @@
       </button>
       <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
       <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
+      <!-- Connect wallet CTA shown when no wallet linked -->
+      <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
       <!-- Mobile: single compact chip showing both balances -->
-      <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
+      <div id="hdr-mobile-bal" class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
         <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
         <span class="text-[#4e5872]">/</span>
         <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
       </div>
       <!-- Desktop: separate labelled badges -->
-      <div class="hidden sm:flex gap-1.5">
+      <div id="hdr-desktop-bal" class="hidden sm:flex gap-1.5">
         <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
           <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
           <span class="text-[#4e5872]">BLOOM</span>
@@ -186,7 +191,7 @@
       </div>
       <!-- Mobile-only: logout -->
       <div class="md:hidden pt-2 border-t border-[rgba(255,255,255,0.06)]">
-        <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; showWalletGate();">🚪 Log out</button>
+        <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; navigate('home');">🚪 Log out</button>
       </div>
     </nav>
 
@@ -798,7 +803,9 @@ async function init() {
   // Skip the network round-trip when there's no token to present — this avoids
   // a guaranteed 401 that shows up as a console error in headless test runners.
   if (!S.token) {
-    document.getElementById('wallet-gate').classList.remove('hidden');
+    const el = document.getElementById('wallet-prompt-msg');
+    if (el) el.textContent = 'Open BloomMoney inside Usernode to continue.';
+    document.getElementById('wallet-prompt').classList.remove('hidden');
     return;
   }
   try {
@@ -812,28 +819,21 @@ async function init() {
       S.balances = {};
       data.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
     }
-    if (!S.user.usernode_pubkey) {
-      showWalletGate();
-      return;
-    }
     showApp();
   } catch (e) {
-    document.getElementById('wallet-gate').classList.remove('hidden');
+    const el = document.getElementById('wallet-prompt-msg');
+    if (el) el.textContent = 'Authentication required.';
+    document.getElementById('wallet-prompt').classList.remove('hidden');
     document.getElementById('wallet-status').textContent = 'Authentication required.';
   }
 }
 
-function showWalletGate() {
-  document.getElementById('wallet-gate').classList.remove('hidden');
-  document.getElementById('app').classList.add('hidden');
-}
-
 function showApp() {
   initThemeBtn();
-  document.getElementById('wallet-gate').classList.add('hidden');
+  document.getElementById('wallet-prompt').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   updateHeader();
-  if (S.user.is_admin) {
+  if (S.user?.is_admin) {
     const adminLink = document.getElementById('admin-nav');
     adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
     adminLink.classList.remove('hidden');
@@ -864,20 +864,30 @@ async function refreshUnreadBadge() {
 }
 
 function updateHeader() {
+  if (!S.user) return;
+  const hasWallet = !!S.user.usernode_pubkey;
   const walletEl = document.getElementById('hdr-wallet');
-  const bloomEl = document.getElementById('hdr-bloom');
-  const usdcEl = document.getElementById('hdr-usdc');
-  if (S.user) {
-    walletEl.textContent = shortAddr(S.user.usernode_pubkey);
-    bloomEl.textContent = getBal('BLOOM');
-    usdcEl.textContent = getBal('USDC');
+  walletEl.textContent = hasWallet ? shortAddr(S.user.usernode_pubkey) : '';
+  walletEl.style.display = hasWallet ? '' : 'none';
+
+  const connectBtn = document.getElementById('hdr-connect-wallet');
+  if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
+
+  const mobileBal = document.getElementById('hdr-mobile-bal');
+  const desktopBal = document.getElementById('hdr-desktop-bal');
+  if (mobileBal) mobileBal.style.display = hasWallet ? '' : 'none';
+  if (desktopBal) desktopBal.style.display = hasWallet ? '' : 'none';
+
+  if (hasWallet) {
+    document.getElementById('hdr-bloom').textContent = getBal('BLOOM');
+    document.getElementById('hdr-usdc').textContent = getBal('USDC');
     document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
     document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
-    const drawerUser = document.getElementById('drawer-user');
-    document.getElementById('drawer-username').textContent = '@' + S.user.username;
-    document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
-    drawerUser.classList.remove('hidden');
   }
+
+  document.getElementById('drawer-username').textContent = '@' + S.user.username;
+  document.getElementById('drawer-wallet').textContent = hasWallet ? (shortAddr(S.user.usernode_pubkey) || '') : 'No wallet linked';
+  document.getElementById('drawer-user').classList.remove('hidden');
   updatePoints();
 }
 
@@ -950,6 +960,23 @@ async function connectWallet() {
   btn.textContent = 'Connect Wallet';
 }
 document.getElementById('connect-wallet-btn').addEventListener('click', connectWallet);
+
+function showWalletPrompt(label) {
+  const el = document.getElementById('wallet-prompt-msg');
+  if (el) el.textContent = 'Connect your wallet to ' + (label || 'continue') + '.';
+  document.getElementById('wallet-prompt').classList.remove('hidden');
+}
+
+function closeWalletPrompt() {
+  document.getElementById('wallet-prompt').classList.add('hidden');
+  document.getElementById('wallet-status').textContent = '';
+}
+
+function requireWalletThen(action, label) {
+  if (S.user?.usernode_pubkey) { if (typeof action === 'function') action(); return true; }
+  showWalletPrompt(label);
+  return false;
+}
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
@@ -1185,6 +1212,7 @@ async function renderFeed(sec) {
   window.loadMore = () => loadPosts();
 
   window.submitPost = async () => {
+    if (!requireWalletThen(null, 'post')) return;
     const box = document.getElementById('compose-box');
     const content = box?.value.trim();
     if (!content) return;
@@ -1208,6 +1236,7 @@ async function renderFeed(sec) {
   };
 
   window.unlockPost = async (id) => {
+    if (!requireWalletThen(null, 'unlock this post')) return;
     try {
       const { content } = await api('POST', `/api/posts/${id}/unlock`);
       const post = feedState.posts.find(p => p.id === id);
@@ -1242,6 +1271,7 @@ async function renderFeed(sec) {
   window.backToFeed = () => { feedState.thread = null; render(); };
 
   window.submitReply = async (parentId) => {
+    if (!requireWalletThen(null, 'reply')) return;
     const content = document.getElementById('reply-box')?.value.trim();
     if (!content) return;
     try {
@@ -1251,6 +1281,7 @@ async function renderFeed(sec) {
   };
 
   window.toggleFollow = async (username) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try {
       await api('POST', '/api/follow', { username });
       await loadPosts();
@@ -1264,6 +1295,7 @@ async function renderFeed(sec) {
 let tipState = { postId: null, creatorUsername: null };
 
 window.openTipModal = (postId, creatorUsername) => {
+  if (!requireWalletThen(null, 'send a tip')) return;
   tipState.postId = postId;
   tipState.creatorUsername = creatorUsername;
   const modal = document.getElementById('tip-modal');
@@ -1868,6 +1900,7 @@ async function renderProfile(sec) {
     reader.readAsDataURL(file);
   };
   window.doFollow = async (uname, following) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try {
       await api('POST', following ? '/api/unfollow' : '/api/follow', { username: uname });
       await renderProfile(sec);
@@ -1879,6 +1912,7 @@ async function renderProfile(sec) {
 
 // ── Copy Trade Modal ───────────────────────────────────────────────────────────
 window.openCopyTradeModal = async (username) => {
+  if (!requireWalletThen(null, 'copy a trade')) return;
   try {
     const { positions } = await api('GET', `/api/users/${encodeURIComponent(username)}/open-positions`);
 
@@ -2802,6 +2836,7 @@ async function renderStake(sec) {
   };
 
   window.stakeConfirm = async function(token) {
+    if (!requireWalletThen(null, 'stake')) return;
     const input = document.getElementById('stake-input-' + token);
     const msg   = document.getElementById('stake-form-msg-' + token);
     if (!input || !msg) return;
@@ -2821,6 +2856,7 @@ async function renderStake(sec) {
   };
 
   window.doUnstake = async function(id) {
+    if (!requireWalletThen(null, 'unstake')) return;
     try {
       const d = await api('DELETE', '/api/defi/stakes/' + id);
       const tok = d.token || 'BLOOM';
@@ -2878,6 +2914,7 @@ async function renderLiquidity(sec) {
   }
 
   window.addLiquidity = async () => {
+    if (!requireWalletThen(null, 'add liquidity')) return;
     const a = document.getElementById('liq-a')?.value;
     const b = document.getElementById('liq-b')?.value;
     const msg = document.getElementById('liq-msg');
@@ -2888,6 +2925,7 @@ async function renderLiquidity(sec) {
     } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
   };
   window.removeLiq = async (id) => {
+    if (!requireWalletThen(null, 'remove liquidity')) return;
     try {
       const d = await api('DELETE', `/api/defi/liquidity/${id}`);
       alert(`Removed! Fees earned: ${d.fees_earned.toFixed(4)} USDC`);
@@ -3032,6 +3070,7 @@ async function renderICO(sec) {
   }
 
   window.investICO = async (id) => {
+    if (!requireWalletThen(null, 'invest')) return;
     const amt = document.getElementById(`ico-amt-${id}`)?.value;
     const msg = document.getElementById(`ico-msg-${id}`);
     try {
@@ -3183,6 +3222,7 @@ async function renderVault(sec) {
   }
 
   window.doVaultDeposit = async () => {
+    if (!requireWalletThen(null, 'deposit')) return;
     const stratId = document.getElementById('vault-strategy')?.value;
     const token   = document.getElementById('vault-token')?.value;
     const amount  = document.getElementById('vault-amount')?.value;
@@ -3195,6 +3235,7 @@ async function renderVault(sec) {
   };
 
   window.doVaultWithdraw = async (id) => {
+    if (!requireWalletThen(null, 'withdraw')) return;
     try {
       const d = await api('DELETE', `/api/vault/positions/${id}`);
       alert(`Withdrawn! Received ${d.returned.toFixed(2)} (yield: ${d.yield.toFixed(6)})`);
@@ -3263,6 +3304,7 @@ async function renderExplore(sec) {
       </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>'}
   `;
   window.exploreFollow = async (username, btn) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
     catch (e) { alert(e.message); }
   };
@@ -3616,6 +3658,7 @@ async function renderMarketDetail(sec) {
       </div>` : ''}`;
 
     window.tradeMarket = async (outcome) => {
+      if (!requireWalletThen(null, 'trade on this market')) return;
       const amt = document.getElementById('trade-amt')?.value;
       const msg = document.getElementById('trade-msg');
       try {
@@ -5101,6 +5144,7 @@ async function renderFutures(sec) {
   };
 
   window.futClosePosBtn = async (id) => {
+    if (!requireWalletThen(null, 'close this position')) return;
     const row = document.querySelector(`[data-pos-id="${id}"]`);
     if (row) row.style.opacity = '0.4';
     const toast = document.getElementById('fut-pos-toast');
@@ -5122,6 +5166,7 @@ async function renderFutures(sec) {
   };
 
   window.futPlaceOrder = async () => {
+    if (!requireWalletThen(null, 'place an order')) return;
     const msg = document.getElementById('fut-msg');
     if (!S.futuresMarket) return;
     if (msg) { msg.textContent = ''; msg.className = 'text-xs text-center min-h-[1rem]'; }
@@ -5237,6 +5282,7 @@ async function renderNFTs(sec) {
   let nftViewArg = null;
 
   async function navNFT(view, arg) {
+    if (view === 'mint' && !requireWalletThen(null, 'mint an NFT')) return;
     nftView = view;
     nftViewArg = arg ?? null;
     await renderView();
@@ -5558,6 +5604,7 @@ async function renderNFTDetail(sec, nftId) {
   `;
 
   window.nftToggleFav = async (id) => {
+    if (!requireWalletThen(null, 'favorite an NFT')) return;
     try {
       const d = await api('POST', `/api/nfts/${id}/favorite`);
       const btn = document.getElementById('nft-fav-btn');
@@ -5565,31 +5612,37 @@ async function renderNFTDetail(sec, nftId) {
     } catch (e) { alert(e.message); }
   };
   window.nftBuy = async (id) => {
+    if (!requireWalletThen(null, 'buy an NFT')) return;
     if (!confirm('Buy this NFT?')) return;
     try { await api('POST', `/api/nfts/${id}/buy`); await refreshBalances(); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftList = async (id) => {
+    if (!requireWalletThen(null, 'list an NFT')) return;
     const price = parseInt(document.getElementById('nft-list-price')?.value);
     if (!price) return alert('Enter a price in USDC micro-units (1 USDC = 1000000)');
     try { await api('POST', `/api/nfts/${id}/list`, { price_usdc: price }); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftDelist = async (id) => {
+    if (!requireWalletThen(null, 'delist an NFT')) return;
     try { await api('DELETE', `/api/nfts/${id}/list`); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftAcceptBid = async (nftId, bidId) => {
+    if (!requireWalletThen(null, 'accept a bid')) return;
     if (!confirm('Accept this bid?')) return;
     try { await api('POST', `/api/nfts/${nftId}/accept-bid/${bidId}`); await refreshBalances(); window._nftNav('detail', nftId); }
     catch (e) { alert(e.message); }
   };
   window.nftWithdrawBid = async (bidId) => {
+    if (!requireWalletThen(null, 'withdraw a bid')) return;
     try { await api('DELETE', `/api/nfts/bids/${bidId}`); window._nftNav('detail', nft.id); }
     catch (e) { alert(e.message); }
   };
-  window.showNFTBidModal = () => document.getElementById('nft-bid-modal')?.classList.remove('hidden');
+  window.showNFTBidModal = () => { if (!requireWalletThen(null, 'place a bid')) return; document.getElementById('nft-bid-modal')?.classList.remove('hidden'); };
   window.nftSubmitBid = async (id) => {
+    if (!requireWalletThen(null, 'place a bid')) return;
     const price = parseInt(document.getElementById('nft-bid-price')?.value);
     const days = parseInt(document.getElementById('nft-bid-days')?.value) || 7;
     const msg = document.getElementById('nft-bid-msg');
@@ -5599,8 +5652,9 @@ async function renderNFTDetail(sec, nftId) {
       window._nftNav('detail', id);
     } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
   };
-  window.showNFTTransferModal = () => document.getElementById('nft-transfer-modal')?.classList.remove('hidden');
+  window.showNFTTransferModal = () => { if (!requireWalletThen(null, 'transfer an NFT')) return; document.getElementById('nft-transfer-modal')?.classList.remove('hidden'); };
   window.nftSubmitTransfer = async (id) => {
+    if (!requireWalletThen(null, 'transfer an NFT')) return;
     const to = document.getElementById('nft-transfer-to')?.value?.trim();
     const msg = document.getElementById('nft-transfer-msg');
     if (!to) return;
@@ -5716,6 +5770,7 @@ async function renderNFTMint(sec) {
   };
   window.mintStepBack = () => { step = Math.max(1, step - 1); renderStep(); };
   window.mintConfirm = async () => {
+    if (!requireWalletThen(null, 'mint an NFT')) return;
     const btn = document.getElementById('mint-confirm-btn');
     const msg = document.getElementById('mint-msg');
     if (btn) { btn.disabled = true; btn.textContent = 'Minting…'; }
@@ -5871,6 +5926,7 @@ async function renderVerify(sec) {
     </div>`;
 
   window.connectSocial = async (provider) => {
+    if (!requireWalletThen(null, 'verify your identity')) return;
     const msg = document.getElementById('social-msg');
     try {
       const start = await api('POST', '/api/verify/social/start', { provider });
@@ -5902,6 +5958,7 @@ async function renderVerify(sec) {
   };
 
   window.startZkSession = async () => {
+    if (!requireWalletThen(null, 'verify with zkPassport')) return;
     const qrSection = document.getElementById('zk-qr-section');
     const qrImg = document.getElementById('zk-qr-img');
     const msg = document.getElementById('zk-session-msg');
