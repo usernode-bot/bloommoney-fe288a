@@ -303,6 +303,8 @@
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
   </nav>
+  <!-- Toast container for new-message notifications -->
+  <div id="toast-container" class="fixed top-16 right-4 z-[9999] flex flex-col gap-2 pointer-events-none"></div>
 </div><!-- /#app -->
 
 <style>
@@ -949,6 +951,7 @@ function showApp() {
 // ── Messaging unread badge ─────────────────────────────────────────────────────
 const MSG_DEMO = new URLSearchParams(location.search).get('demo') === '1';
 let _unreadInterval = null;
+let _prevConvUnread = null; // Map<convId, unreadCount> snapshot; null = first load baseline not yet set
 function setUnreadBadge(total) {
   S.totalUnread = total;
   for (const id of ['hdr-unread-badge', 'nav-unread-badge']) {
@@ -961,8 +964,85 @@ function setUnreadBadge(total) {
 async function refreshUnreadBadge() {
   try {
     const d = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : ''));
+    const convos = d.conversations || [];
+    if (_prevConvUnread === null) {
+      // First successful call — establish baseline, no toasts
+      _prevConvUnread = new Map(convos.map(c => [c.id, c.unread || 0]));
+    } else {
+      // Detect new messages since last poll
+      for (const conv of convos) {
+        const prev = _prevConvUnread.get(conv.id) ?? 0;
+        if ((conv.unread || 0) > prev) {
+          // Only toast if user isn't already viewing this specific conversation
+          if (S.view !== 'messages' || S.msgActiveConv !== conv.id) {
+            showMsgToast(conv);
+          }
+        }
+      }
+      _prevConvUnread = new Map(convos.map(c => [c.id, c.unread || 0]));
+    }
     setUnreadBadge(Number(d.total_unread) || 0);
   } catch (_) { /* non-fatal */ }
+}
+
+function removeToast(el) {
+  el.style.transform = 'translateX(1rem)';
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 300);
+}
+
+function showMsgToast(conv) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  if (container.querySelectorAll('.msg-toast').length >= 3) return;
+  if (!conv.last_message) return;
+
+  const isGroup = conv.type === 'group';
+  const sender = conv.last_message.sender_username || '';
+  const label = isGroup
+    ? esc((conv.title || 'Group') + ' · ' + sender)
+    : esc(sender);
+  const rawPreview = conv.last_message.content || '';
+  const preview = esc(rawPreview.length > 60 ? rawPreview.slice(0, 60) + '…' : rawPreview);
+
+  const isLight = document.documentElement.classList.contains('light');
+  const cardBg = isLight ? 'bg-white border-[rgba(124,92,252,0.2)]' : 'bg-[#1c2236] border-[rgba(124,92,252,0.25)]';
+
+  const toast = document.createElement('div');
+  toast.className = `msg-toast ${cardBg} rounded-xl shadow-lg px-4 py-3 flex gap-3 items-start w-72 max-w-[90vw] pointer-events-auto cursor-pointer border`;
+  toast.style.cssText = 'transform:translateX(1rem);opacity:0;transition:transform 0.3s ease,opacity 0.3s ease;';
+  toast.innerHTML = `
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1 mb-0.5">
+        <span class="text-sm font-semibold truncate text-[#7c5cfc]">${label}</span>
+        <span class="ml-auto text-xs text-[#4e5872] shrink-0">💬</span>
+      </div>
+      <div class="text-xs truncate ${isLight ? 'text-[#525875]' : 'text-[#8b95ab]'}">${preview}</div>
+    </div>
+    <button class="msg-toast-close shrink-0 text-[#4e5872] hover:text-[#8b95ab] text-base leading-none mt-0.5" aria-label="Dismiss">×</button>`;
+
+  const autoTimer = setTimeout(() => removeToast(toast), 5000);
+
+  toast.querySelector('.msg-toast-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearTimeout(autoTimer);
+    removeToast(toast);
+  });
+  toast.addEventListener('click', () => {
+    clearTimeout(autoTimer);
+    removeToast(toast);
+    navigate('messages');
+    // openConversation is defined in the messages section; call after navigate renders the view
+    setTimeout(() => openConversation(conv.id), 50);
+  });
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      toast.style.transform = 'translateX(0)';
+      toast.style.opacity = '1';
+    });
+  });
 }
 
 function updateHeader() {
