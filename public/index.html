@@ -116,31 +116,37 @@
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
     <div class="flex items-center gap-1">
-      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <!-- Desktop-only: action icons, balance badges, identity block -->
       <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
-      <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
-        <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
-      </button>
-      <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
-      <!-- Mobile: single compact chip showing both balances -->
+        <button class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
+        <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
+          <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+        </button>
+        <button id="hdr-verify" class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Subscription" onclick="navigate('verify')">🪪</button>
+        <!-- Balance badges -->
+        <div class="flex gap-1.5">
+          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
+            <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
+            <span class="text-[#4e5872]">BLOOM</span>
+          </div>
+          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
+            <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
+            <span class="text-[#4e5872]">USDC</span>
+          </div>
+        </div>
+        <!-- Identity block: @username stacked above wallet address -->
+        <div id="hdr-user-block" class="flex flex-col items-end leading-tight">
+          <span id="hdr-username" class="text-xs font-semibold text-[#e8eaf0]"></span>
+          <span id="hdr-wallet" class="text-[#4e5872] font-mono text-[0.65rem]"></span>
+        </div>
+      </div>
+      <!-- Theme toggle: always visible, beside identity block on desktop -->
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <!-- Mobile-only: compact balance chip -->
       <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
         <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
         <span class="text-[#4e5872]">/</span>
         <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-      </div>
-      <!-- Desktop: separate labelled badges -->
-      <div class="hidden sm:flex gap-1.5">
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
-          <span class="text-[#4e5872]">BLOOM</span>
-        </div>
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-          <span class="text-[#4e5872]">USDC</span>
-        </div>
-      </div>
       </div>
     </div>
   </header>
@@ -173,7 +179,7 @@
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
       <button class="nav-item" data-view="explore">🔭 Explore</button>
-      <button class="nav-item" data-view="verify">🪪 Verify</button>
+      <button class="nav-item" data-view="verify">🪪 Subscription</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
@@ -261,6 +267,7 @@
     <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+    <a id="admin-bottom-nav" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-amber-400 hidden" target="_blank" rel="noopener">⚙️<span>Admin</span></a>
   </nav>
 </div><!-- /#app -->
 
@@ -560,7 +567,7 @@ function tsAgo(d) {
   return Math.floor(s/86400)+'d';
 }
 function tierLabel(lvl) {
-  return { basic: 'Basic', social: 'Social ✓', premium: 'Premium ★' }[lvl] || (lvl || 'Basic');
+  return { basic: 'Free', social: 'Pro ✓', premium: 'Premium+ ★' }[lvl] || (lvl || 'Free');
 }
 function kycTag(lvl) {
   if (!lvl) return '';
@@ -837,6 +844,9 @@ function showApp() {
     const adminLink = document.getElementById('admin-nav');
     adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
     adminLink.classList.remove('hidden');
+    const adminBottomTab = document.getElementById('admin-bottom-nav');
+    adminBottomTab.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
+    adminBottomTab.classList.remove('hidden');
   }
   refreshUnreadBadge();
   clearInterval(_unreadInterval);
@@ -873,6 +883,8 @@ function updateHeader() {
     usdcEl.textContent = getBal('USDC');
     document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
     document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
+    const usernameEl = document.getElementById('hdr-username');
+    if (usernameEl) usernameEl.textContent = '@' + S.user.username;
     const drawerUser = document.getElementById('drawer-user');
     document.getElementById('drawer-username').textContent = '@' + S.user.username;
     document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
@@ -1132,7 +1144,7 @@ async function renderFeed(sec) {
     const isNewsTab = feedState.tab === 'news';
     const myAvatar = S.user ? avatarImg(S.user.username, 'w-10 h-10 shrink-0 mt-1', S.user.avatar_url) : '';
     sec.innerHTML = `
-      ${isNewsTab ? '' : `<div class="border-b border-[var(--border-subtle)] pb-3">
+      <div class="border-b border-[var(--border-subtle)] pb-3">
         <div class="flex gap-3 px-1 pt-1">
           <div class="shrink-0">${myAvatar}</div>
           <div class="flex-1 min-w-0">
@@ -1160,7 +1172,7 @@ async function renderFeed(sec) {
             </div>
           </div>
         </div>
-      </div>`}
+      </div>
       <div class="flex border-b border-[var(--border-subtle)]">
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='global'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('global')">For You</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='following'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('following')">Following</button>
@@ -4334,11 +4346,11 @@ window.messageUser = async (username) => {
 // Branches are mutually exclusive and cover every state — it never throws.
 function futTierHintHtml(tier, zkVerified) {
   if (tier === 'basic')
-    return `<div class="fut-tier-hint text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+    return `<div class="fut-tier-hint text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Pro</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
   if (tier === 'social')
-    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Pro: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium+ for 20× →</button></div>`;
   if (tier === 'premium' && !zkVerified)
-    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Premium+: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
   if (zkVerified)
     return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
   return '';
@@ -5861,13 +5873,13 @@ async function renderVerify(sec) {
       : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
   sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
+    <h2 class="text-xl font-bold mb-1">🪪 Subscription</h2>
     <p class="text-sm text-[#8b95ab] mb-4">Your tier: <span class="font-semibold text-[#e8eaf0]">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
     <div class="space-y-3">
-      ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
+      ${tierCard('Free', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
         '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
-      ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
-      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 100× leverage (50× & 100× require zkPassport)', 'Higher trade-size limits', 'Premium profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
+      ${tierCard('Pro', '🟢', isSocial, ['Everything in Free', 'Live futures up to 5× leverage', 'Removes per-day Free limits'], socialAction)}
+      ${tierCard('Premium+', '⭐', isPremium, ['Everything in Pro', 'Up to 100× leverage (50× & 100× require zkPassport)', 'Higher trade-size limits', 'Premium+ profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
     </div>`;
 
   window.connectSocial = async (provider) => {
