@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
+const Parser = require('rss-parser');
 const verify = require('./lib/verify');
 
 const app = express();
@@ -16,6 +17,17 @@ const SWAP_GAS = 1 * UNITS;      // 1 BLOOM gas fee per swap
 const FUTURES_GAS = 1 * UNITS;   // 1 BLOOM gas fee per futures open/close
 // Post-to-Earn: points credited for each successful top-level post to the feed.
 const POST_REWARD_POINTS = 5;
+
+// Stakeable token registry — shared by POST /api/defi/stake validation and
+// the frontend card grid. apy_bps: annual yield in basis points.
+const STAKEABLE_TOKENS = {
+  BLOOM: { apy_bps: 1200, name: 'BloomMoney' },
+  ETH:   { apy_bps:  600, name: 'Ethereum'   },
+  SOL:   { apy_bps:  800, name: 'Solana'     },
+  BTC:   { apy_bps:  400, name: 'Bitcoin'    },
+};
+// Fixed play-money BLOOM price (USD) used when CoinGecko has no BLOOM entry.
+const BLOOM_PLAY_PRICE_USD = 0.10;
 
 const DAILY_TEMPLATES = [
   {
@@ -63,7 +75,13 @@ const FUNDING_INTERVAL_MS = IS_STAGING ? 2 * 60 * 1000 : 60 * 60 * 1000;
 // Per-day caps applied to Basic-tier users (security layer, Phase 4).
 const BASIC_DAILY_TRADE_COUNT = 25;
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback']);
+// Prediction-market categories (single source of truth, Polymarket-style hub).
+const MARKET_CATEGORIES = new Set(['Crypto', 'Politics', 'Science', 'Sports', 'Entertainment', 'General']);
+function normalizeCategory(c) {
+  return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
+}
+
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity', '/api/defi/pool-stats']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '2mb' }));
@@ -137,7 +155,7 @@ function rateLimit(key, capacity, refillPerSec) {
   b.tokens -= 1;
   return true;
 }
-const SENSITIVE_RE = /^\/api\/(defi|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
+const SENSITIVE_RE = /^\/api\/(defi|vault|futures\/positions|markets\/[^/]+\/trade|ico\/[^/]+\/invest|nfts\/(?:mint|[^/]+\/(?:buy|transfer|accept-bid))|verify|social\/link|zk)/;
 app.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
@@ -194,7 +212,6 @@ async function ensureBalances(userId, pubkey) {
       [userId, sym, bal]
     );
   }
-  await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [userId]);
   if (pubkey) {
     await pool.query(
       "INSERT INTO kyc_verifications(user_id,level,status) VALUES($1,'basic','approved') ON CONFLICT DO NOTHING",
@@ -239,6 +256,10 @@ async function logAdmin(adminUserId, actionType, opts = {}) {
 
 // Verification tier vocabulary + gating. Single source of truth (Phase 1).
 const TIER_RANK = { basic: 0, social: 1, premium: 2 };
+// Leverage ceilings. Premium (incl. admin-granted) tops out at 20×; the
+// extreme 50×/100× band is unlocked only by an actual zkPassport proof.
+const PREMIUM_MAX_LEVERAGE = 20;
+const ZK_MAX_LEVERAGE = 100;
 function effectiveTier(kyc) {
   if (kyc && kyc.status === 'approved' && TIER_RANK[kyc.level] != null) return kyc.level;
   return 'basic';
@@ -250,9 +271,20 @@ function tierAllows(level, action) {
   return true;
 }
 function maxLeverageFor(level) {
-  if (TIER_RANK[level] >= TIER_RANK.premium) return 20;
+  if (TIER_RANK[level] >= TIER_RANK.premium) return PREMIUM_MAX_LEVERAGE;
   if (TIER_RANK[level] >= TIER_RANK.social) return 5;
   return 1;
+}
+// Per-user ceiling that accounts for zkPassport verification (extreme band).
+function maxLeverageForUser(level, zkVerified) {
+  if (zkVerified) return ZK_MAX_LEVERAGE;
+  return maxLeverageFor(level);
+}
+// True when the user has a real zkPassport proof on file (distinct from merely
+// holding the Premium tier, which an admin can grant without a passport).
+async function isZkVerified(userId) {
+  const { rows } = await pool.query('SELECT 1 FROM zk_verifications WHERE user_id=$1', [userId]);
+  return rows.length > 0;
 }
 
 function featureLimits(_tier) {
@@ -317,6 +349,158 @@ async function getCoinGeckoPrices() {
     return cgCache.prices;
   }
 }
+
+// ── Top coins (/api/coins/top) ────────────────────────────────────────────────
+
+const STAGING_TOP_COINS = [
+  { rank:1,  symbol:'BTC',   name:'Bitcoin',          price_usd:64000,      market_cap:1257600000000, volume_24h:28500000000, price_change_24h_pct:2.34,  circulating_supply:19700000,       high_24h:65200,     low_24h:63100,    swappable:true  },
+  { rank:2,  symbol:'ETH',   name:'Ethereum',         price_usd:3200,       market_cap:384000000000,  volume_24h:14200000000, price_change_24h_pct:1.87,  circulating_supply:120000000,      high_24h:3280,      low_24h:3150,     swappable:true  },
+  { rank:3,  symbol:'USDT',  name:'Tether',           price_usd:1.00,       market_cap:112000000000,  volume_24h:62000000000, price_change_24h_pct:0.01,  circulating_supply:112000000000,   high_24h:1.001,     low_24h:0.999,    swappable:true  },
+  { rank:4,  symbol:'BNB',   name:'BNB',              price_usd:310,        market_cap:45000000000,   volume_24h:1800000000,  price_change_24h_pct:1.12,  circulating_supply:145000000,      high_24h:315,       low_24h:306,      swappable:true  },
+  { rank:5,  symbol:'SOL',   name:'Solana',           price_usd:150,        market_cap:68000000000,   volume_24h:3200000000,  price_change_24h_pct:3.45,  circulating_supply:453000000,      high_24h:154,       low_24h:146,      swappable:true  },
+  { rank:6,  symbol:'USDC',  name:'USD Coin',         price_usd:1.00,       market_cap:43000000000,   volume_24h:6100000000,  price_change_24h_pct:0.00,  circulating_supply:43000000000,    high_24h:1.001,     low_24h:0.999,    swappable:true  },
+  { rank:7,  symbol:'XRP',   name:'XRP',              price_usd:0.55,       market_cap:30000000000,   volume_24h:1400000000,  price_change_24h_pct:-0.82, circulating_supply:54000000000,    high_24h:0.57,      low_24h:0.54,     swappable:true  },
+  { rank:8,  symbol:'DOGE',  name:'Dogecoin',         price_usd:0.12,       market_cap:17000000000,   volume_24h:890000000,   price_change_24h_pct:1.55,  circulating_supply:142000000000,   high_24h:0.123,     low_24h:0.118,    swappable:true  },
+  { rank:9,  symbol:'TON',   name:'Toncoin',          price_usd:5.50,       market_cap:13800000000,   volume_24h:220000000,   price_change_24h_pct:0.73,  circulating_supply:2500000000,     high_24h:5.62,      low_24h:5.40,     swappable:true  },
+  { rank:10, symbol:'ADA',   name:'Cardano',          price_usd:0.45,       market_cap:16000000000,   volume_24h:420000000,   price_change_24h_pct:-1.23, circulating_supply:35000000000,    high_24h:0.46,      low_24h:0.44,     swappable:true  },
+  { rank:11, symbol:'STETH', name:'Lido Staked ETH',  price_usd:3198,       market_cap:36000000000,   volume_24h:80000000,    price_change_24h_pct:1.85,  circulating_supply:11260000,       high_24h:3276,      low_24h:3148,     swappable:false },
+  { rank:12, symbol:'TRX',   name:'TRON',             price_usd:0.11,       market_cap:9700000000,    volume_24h:290000000,   price_change_24h_pct:0.45,  circulating_supply:88000000000,    high_24h:0.112,     low_24h:0.108,    swappable:false },
+  { rank:13, symbol:'AVAX',  name:'Avalanche',        price_usd:28,         market_cap:11400000000,   volume_24h:340000000,   price_change_24h_pct:2.10,  circulating_supply:407000000,      high_24h:28.7,      low_24h:27.4,     swappable:false },
+  { rank:14, symbol:'LINK',  name:'Chainlink',        price_usd:14,         market_cap:8200000000,    volume_24h:310000000,   price_change_24h_pct:1.67,  circulating_supply:587000000,      high_24h:14.4,      low_24h:13.8,     swappable:false },
+  { rank:15, symbol:'SHIB',  name:'Shiba Inu',        price_usd:0.0000085,  market_cap:5000000000,    volume_24h:170000000,   price_change_24h_pct:-0.56, circulating_supply:589000000000000,high_24h:0.0000087, low_24h:0.0000083,swappable:false },
+  { rank:16, symbol:'DOT',   name:'Polkadot',         price_usd:6,          market_cap:8600000000,    volume_24h:190000000,   price_change_24h_pct:-0.34, circulating_supply:1430000000,     high_24h:6.15,      low_24h:5.90,     swappable:false },
+  { rank:17, symbol:'LEO',   name:'UNUS SED LEO',     price_usd:5.80,       market_cap:5400000000,    volume_24h:2200000,     price_change_24h_pct:0.17,  circulating_supply:930000000,      high_24h:5.85,      low_24h:5.76,     swappable:false },
+  { rank:18, symbol:'BCH',   name:'Bitcoin Cash',     price_usd:380,        market_cap:7500000000,    volume_24h:240000000,   price_change_24h_pct:1.23,  circulating_supply:19700000,       high_24h:388,       low_24h:374,      swappable:false },
+  { rank:19, symbol:'LTC',   name:'Litecoin',         price_usd:78,         market_cap:5800000000,    volume_24h:310000000,   price_change_24h_pct:0.89,  circulating_supply:74000000,       high_24h:79.5,      low_24h:77.0,     swappable:false },
+  { rank:20, symbol:'UNI',   name:'Uniswap',          price_usd:7.20,       market_cap:4300000000,    volume_24h:130000000,   price_change_24h_pct:2.34,  circulating_supply:600000000,      high_24h:7.38,      low_24h:7.05,     swappable:false },
+  { rank:21, symbol:'NEAR',  name:'NEAR Protocol',    price_usd:4.80,       market_cap:5300000000,    volume_24h:150000000,   price_change_24h_pct:1.45,  circulating_supply:1100000000,     high_24h:4.92,      low_24h:4.70,     swappable:false },
+  { rank:22, symbol:'ICP',   name:'Internet Computer',price_usd:9.50,       market_cap:4400000000,    volume_24h:80000000,    price_change_24h_pct:-0.67, circulating_supply:463000000,      high_24h:9.72,      low_24h:9.34,     swappable:false },
+  { rank:23, symbol:'APT',   name:'Aptos',            price_usd:7.80,       market_cap:3900000000,    volume_24h:110000000,   price_change_24h_pct:1.12,  circulating_supply:500000000,      high_24h:7.98,      low_24h:7.65,     swappable:false },
+  { rank:24, symbol:'POL',   name:'Polygon',          price_usd:0.48,       market_cap:4800000000,    volume_24h:190000000,   price_change_24h_pct:0.56,  circulating_supply:10000000000,    high_24h:0.492,     low_24h:0.471,    swappable:false },
+  { rank:25, symbol:'BLOOM', name:'BloomMoney',       price_usd:1.25,       market_cap:125000000,     volume_24h:4500000,     price_change_24h_pct:5.23,  circulating_supply:100000000,      high_24h:1.28,      low_24h:1.22,     swappable:true  },
+];
+
+// Augment the staging fixtures with the fields the redesigned Market table
+// needs (1h/7d change, logo fallback, 7-day sparkline). Deterministic and
+// obviously fake — derived from each coin's base price so staging renders the
+// full dashboard without any external data key. Only ever served when
+// IS_STAGING, so production behaviour is untouched.
+for (const c of STAGING_TOP_COINS) {
+  c.price_change_1h_pct = +(((c.price_change_24h_pct || 0) / 3)).toFixed(2);
+  c.price_change_7d_pct = +(((c.price_change_24h_pct || 0) * 2.4)).toFixed(2);
+  c.logo_url = null; // forces the deterministic letter-badge path in staging
+  const base = c.price_usd || 1;
+  const amp = (c.symbol === 'USDC' || c.symbol === 'USDT') ? 0.0008 : 0.045;
+  const spark = [];
+  for (let i = 0; i < 24; i++) {
+    spark.push(+(base * (1 + Math.sin(i * 0.5 + (c.rank || 1)) * amp)).toFixed(8));
+  }
+  c.sparkline_7d = spark;
+}
+
+const topCoinsCache = { data: null, fetchedAt: 0 };
+
+// Demo global market totals for staging (no CoinGecko key there). Obviously
+// fake, deterministic, no-op outside staging.
+const STAGING_GLOBAL_STATS = {
+  total_market_cap_usd: 2.35e12,
+  total_volume_24h_usd: 9.8e10,
+  btc_dominance_pct: 52.4,
+  market_cap_change_24h_pct: 1.8,
+  active_coins: 12000,
+};
+const globalStatsCache = { data: null, fetchedAt: 0 };
+
+app.get('/api/coins/top', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    if (IS_STAGING) {
+      return res.json({ coins: STAGING_TOP_COINS.slice(0, limit) });
+    }
+    const now = Date.now();
+    if (now - topCoinsCache.fetchedAt < 60000 && topCoinsCache.data) {
+      return res.json({ coins: topCoinsCache.data.slice(0, limit) });
+    }
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=true&price_change_percentage=1h%2C24h%2C7d';
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+    const cgRes = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!cgRes.ok) throw new Error(`CoinGecko /coins/markets non-200: ${cgRes.status}`);
+    const cgData = await cgRes.json();
+    const cgIdToSym = Object.fromEntries(Object.entries(COINGECKO_TICKER_MAP).map(([sym, id]) => [id, sym]));
+    const coins = [];
+    for (const coin of cgData) {
+      if (coins.length >= limit) break;
+      const symbol = cgIdToSym[coin.id] || coin.symbol?.toUpperCase();
+      if (!symbol) continue;
+      coins.push({
+        rank: coin.market_cap_rank || coins.length + 1,
+        symbol,
+        name: coin.name,
+        price_usd: coin.current_price || 0,
+        market_cap: coin.market_cap || 0,
+        volume_24h: coin.total_volume || 0,
+        price_change_1h_pct: coin.price_change_percentage_1h_in_currency ?? null,
+        price_change_24h_pct: coin.price_change_percentage_24h ?? null,
+        price_change_7d_pct: coin.price_change_percentage_7d_in_currency ?? null,
+        circulating_supply: coin.circulating_supply || 0,
+        high_24h: coin.high_24h || 0,
+        low_24h: coin.low_24h || 0,
+        logo_url: coin.image || null,
+        sparkline_7d: (coin.sparkline_in_7d && Array.isArray(coin.sparkline_in_7d.price)) ? coin.sparkline_in_7d.price : [],
+        swappable: symbol in COINGECKO_TICKER_MAP,
+      });
+    }
+    if (!coins.find(c => c.symbol === 'BLOOM')) {
+      const livePrices = await getCoinGeckoPrices();
+      coins.push({ rank: coins.length + 1, symbol: 'BLOOM', name: 'BloomMoney', price_usd: livePrices['BLOOM'] || 0, market_cap: 0, volume_24h: 0, price_change_1h_pct: 0, price_change_24h_pct: 0, price_change_7d_pct: 0, circulating_supply: 0, high_24h: livePrices['BLOOM'] || 0, low_24h: livePrices['BLOOM'] || 0, logo_url: null, sparkline_7d: [], swappable: true });
+    }
+    topCoinsCache.data = coins;
+    topCoinsCache.fetchedAt = now;
+    res.json({ coins: coins.slice(0, limit) });
+  } catch (e) {
+    console.warn('coins/top error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Global market stats (/api/coins/global) ───────────────────────────────────
+// Powers the Market dashboard's global stats bar (total market cap, 24h
+// volume, BTC dominance, active coins). Auth-gated like the rest of /api/* —
+// NOT added to PUBLIC_API_PATHS. Never 500s on a provider hiccup: falls back to
+// the last cached value (or zeros) so the page always renders.
+app.get('/api/coins/global', async (req, res) => {
+  try {
+    if (IS_STAGING) {
+      return res.json({ stats: STAGING_GLOBAL_STATS });
+    }
+    const now = Date.now();
+    if (now - globalStatsCache.fetchedAt < 60000 && globalStatsCache.data) {
+      return res.json({ stats: globalStatsCache.data });
+    }
+    const apiKey = process.env.COINGECKO_API_KEY;
+    const headers = { 'Accept': 'application/json' };
+    if (apiKey) headers['x-cg-demo-api-key'] = apiKey;
+    const cgRes = await fetch('https://api.coingecko.com/api/v3/global', { headers, signal: AbortSignal.timeout(8000) });
+    if (!cgRes.ok) throw new Error(`CoinGecko /global non-200: ${cgRes.status}`);
+    const body = await cgRes.json();
+    const d = body && body.data ? body.data : {};
+    const stats = {
+      total_market_cap_usd: (d.total_market_cap && d.total_market_cap.usd) || 0,
+      total_volume_24h_usd: (d.total_volume && d.total_volume.usd) || 0,
+      btc_dominance_pct: (d.market_cap_percentage && d.market_cap_percentage.btc) || 0,
+      market_cap_change_24h_pct: d.market_cap_change_percentage_24h_usd || 0,
+      active_coins: d.active_cryptocurrencies || 0,
+    };
+    globalStatsCache.data = stats;
+    globalStatsCache.fetchedAt = now;
+    res.json({ stats });
+  } catch (e) {
+    console.warn('coins/global error:', e.message);
+    res.json({ stats: globalStatsCache.data || { total_market_cap_usd: 0, total_volume_24h_usd: 0, btc_dominance_pct: 0, market_cap_change_24h_pct: 0, active_coins: 0 } });
+  }
+});
 
 // ── Auto-generate portfolio ────────────────────────────────────────────────────
 
@@ -464,14 +648,10 @@ async function runFunding() {
         const sign = p.side === 'long' ? -1 : 1;
         const amount = Math.round(sign * notional * rate * UNITS);
         if (amount !== 0) {
-          if (p.mode === 'live') {
-            await client.query(
-              "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=GREATEST(0,wallet_balances.balance+$2), updated_at=NOW()",
-              [p.user_id, amount]
-            );
-          } else {
-            await client.query('UPDATE paper_balances SET usdc_balance=GREATEST(0,usdc_balance+$1) WHERE user_id=$2', [amount, p.user_id]);
-          }
+          await client.query(
+            "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=GREATEST(0,wallet_balances.balance+$2), updated_at=NOW()",
+            [p.user_id, amount]
+          );
           await client.query(
             'INSERT INTO funding_payments(position_id,user_id,market_id,amount,rate,mode) VALUES($1,$2,$3,$4,$5,$6)',
             [p.id, p.user_id, m.id, amount, rate, p.mode]
@@ -493,21 +673,67 @@ async function runFunding() {
     );
   }
 }
+
+// ── Crypto news bot ──────────────────────────────────────────────────────────
+const NEWS_SOURCES = [
+  { name: 'CoinDesk',      url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
+  { name: 'CoinTelegraph', url: 'https://cointelegraph.com/rss' },
+];
+const NEWS_BOT_USER_ID = -1;
+const NEWS_BOT_USERNAME = 'CryptoNewsBot';
+const MAX_NEW_PER_SOURCE = 3;
+
+const rssParser = new Parser({ timeout: 8000 });
+
+async function fetchAndPostNews() {
+  for (const source of NEWS_SOURCES) {
+    try {
+      const feed = await rssParser.parseURL(source.url);
+      const items = (feed.items || []).slice(0, 10);
+      let posted = 0;
+      for (const item of items) {
+        if (posted >= MAX_NEW_PER_SOURCE) break;
+        const guid = item.guid || item.link;
+        if (!guid) continue;
+        const { rows } = await pool.query('SELECT 1 FROM news_dedup WHERE guid=$1', [guid]);
+        if (rows.length > 0) continue;
+        const title = (item.title || '').trim().slice(0, 275);
+        if (!title) continue;
+        await pool.query(
+          `INSERT INTO posts (user_id, username, content, is_bot, source_url, bot_source)
+           VALUES ($1, $2, $3, TRUE, $4, $5)`,
+          [NEWS_BOT_USER_ID, NEWS_BOT_USERNAME, title, item.link || null, source.name]
+        );
+        await pool.query('INSERT INTO news_dedup (guid) VALUES ($1) ON CONFLICT DO NOTHING', [guid]);
+        posted++;
+      }
+    } catch (e) {
+      console.error(`news bot fetch error (${source.name}):`, e.message);
+    }
+  }
+  // Prune old dedup entries to prevent unbounded growth.
+  await pool.query("DELETE FROM news_dedup WHERE created_at < NOW() - INTERVAL '7 days'").catch(() => {});
+}
+
+setInterval(fetchAndPostNews, 60 * 60 * 1000).unref?.();
+setTimeout(fetchAndPostNews, 5000).unref?.();
+
 // ── /api/me ───────────────────────────────────────────────────────────────────
 
 app.get('/api/me', async (req, res) => {
   try {
     await upsertUser(req.user);
     await ensureBalances(req.user.id, req.user.usernode_pubkey);
-    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }, { rows: socialAccounts }] = await Promise.all([
+    const [{ rows: [user] }, { rows: bals }, { rows: [kyc] }, { rows: socialAccounts }, { rows: zkRows }] = await Promise.all([
       pool.query('SELECT * FROM users WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT token_symbol, balance FROM wallet_balances WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]),
       pool.query('SELECT provider, handle, linked_at FROM social_accounts WHERE user_id=$1 ORDER BY linked_at ASC', [req.user.id]),
+      pool.query('SELECT 1 FROM zk_verifications WHERE user_id=$1', [req.user.id]),
     ]);
     // Pre-generate portfolio on first login so first portfolio view is instant
     generatePortfolio(req.user.id).catch(() => {});
-    res.json({ user, balances: bals, kyc: kyc || null, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
+    res.json({ user, balances: bals, kyc: kyc || null, zk_verified: zkRows.length > 0, social_accounts: socialAccounts, feature_limits: featureLimits(effectiveTier(kyc)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -533,10 +759,98 @@ app.patch('/api/me', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Avatar upload (raw image bytes → Postgres) ─────────────────────────────────
+// Accepts the raw JPG/PNG file (max ~2 MB) as the request body and stores the
+// bytes in the public `user_avatars` table. We point users.avatar_url at the
+// serve route below (cache-busted) so every existing display path — feed,
+// threads, profile, edit-form preview — shows the uploaded image unchanged.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024; // ~2 MB
+const avatarRawBody = express.raw({ type: ['image/jpeg', 'image/png'], limit: AVATAR_MAX_BYTES });
+function sniffImageType(buf) {
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 &&
+      buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) return 'image/png';
+  return null;
+}
+app.post('/api/avatar', avatarRawBody, async (req, res) => {
+  try {
+    const declared = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (declared !== 'image/jpeg' && declared !== 'image/png') {
+      return res.status(400).json({ error: 'Only JPG or PNG images are allowed' });
+    }
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'No image data received' });
+    }
+    if (buf.length > AVATAR_MAX_BYTES) {
+      return res.status(400).json({ error: 'Image too large (max 2 MB)' });
+    }
+    // Verify the actual file contents match a real JPG/PNG signature and the
+    // declared content type — don't trust the header alone.
+    const sniffed = sniffImageType(buf);
+    if (!sniffed || sniffed !== declared) {
+      return res.status(400).json({ error: 'File contents are not a valid JPG or PNG image' });
+    }
+    await pool.query(
+      `INSERT INTO user_avatars (user_id, username, content_type, image_bytes, byte_size, updated_at)
+       VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         username=EXCLUDED.username, content_type=EXCLUDED.content_type,
+         image_bytes=EXCLUDED.image_bytes, byte_size=EXCLUDED.byte_size, updated_at=NOW()`,
+      [req.user.id, req.user.username, declared, buf, buf.length]
+    );
+    const avatar_url = `/avatars/${encodeURIComponent(req.user.username)}?v=${Date.now()}`;
+    await pool.query('UPDATE users SET avatar_url=$1 WHERE user_id=$2', [avatar_url, req.user.id]);
+    res.json({ ok: true, avatar_url });
+  } catch (e) {
+    // express.raw rejects oversized bodies with a 413-flavored error before the
+    // handler runs in some cases; surface a clean message either way.
+    if (e && (e.type === 'entity.too.large' || e.status === 413)) {
+      return res.status(400).json({ error: 'Image too large (max 2 MB)' });
+    }
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public serve route for stored avatar bytes. A plain GET (not under /api/) so
+// it bypasses the JWT gate — an <img src> can't forward the iframe token, and
+// avatars are public content anyway.
+app.get('/avatars/:username', async (req, res) => {
+  try {
+    const { rows: [row] } = await pool.query(
+      'SELECT content_type, image_bytes FROM user_avatars WHERE username=$1',
+      [req.params.username]
+    );
+    if (!row) return res.status(404).end();
+    res.setHeader('Content-Type', row.content_type);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.send(row.image_bytes);
+  } catch (e) {
+    return res.status(404).end();
+  }
+});
+
+app.put('/api/profile/cover', async (req, res) => {
+  try {
+    const { cover_url } = req.body;
+    if (cover_url !== undefined && cover_url !== null) {
+      if (typeof cover_url !== 'string' || !cover_url.startsWith('data:image/')) {
+        return res.status(400).json({ error: 'Invalid cover image' });
+      }
+      if (Buffer.byteLength(cover_url, 'utf8') > 1024 * 1024) {
+        return res.status(400).json({ error: 'Cover image too large (max 1 MB)' });
+      }
+    }
+    await pool.query('UPDATE users SET cover_url=$1 WHERE user_id=$2', [cover_url || null, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/profile/:username', async (req, res) => {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id,user_id,username,display_name,bio,avatar_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
+      'SELECT id,user_id,username,display_name,bio,avatar_url,cover_url,usernode_pubkey,is_admin,created_at FROM users WHERE username=$1',
       [req.params.username]
     );
     if (!user) return res.status(404).json({ error: 'Not found' });
@@ -577,11 +891,11 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE
           AND (p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id=$1))
           ${cursorClause}
         ORDER BY p.id DESC LIMIT $2
@@ -590,9 +904,20 @@ app.get('/api/feed', async (req, res) => {
       const params = [lim];
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
-        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium FROM posts p
+        SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+        FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+        LEFT JOIN users u ON u.user_id = p.user_id
         WHERE p.parent_id IS NULL AND p.deleted = false AND p.milestone_type IS NOT NULL ${cursorClause}
+        ORDER BY p.id DESC LIMIT $1
+      `, params));
+    } else if (tab === 'news') {
+      const params = [lim];
+      const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+      ({ rows } = await pool.query(`
+        SELECT p.* FROM posts p
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = TRUE ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
     } else {
@@ -600,11 +925,11 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
-        WHERE p.parent_id IS NULL AND p.deleted = false ${cursorClause}
+        WHERE p.parent_id IS NULL AND p.deleted = false AND p.is_bot = FALSE ${cursorClause}
         ORDER BY p.id DESC LIMIT $1
       `, params));
     }
@@ -797,8 +1122,7 @@ app.post('/api/unfollow', async (req, res) => {
 app.get('/api/balances', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM wallet_balances WHERE user_id=$1', [req.user.id]);
-    const { rows: [paper] } = await pool.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1', [req.user.id]);
-    res.json({ balances: rows, paperBalance: paper?.usdc_balance || 0 });
+    res.json({ balances: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1217,7 +1541,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
 
     const tier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, tier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     const { rows: prices } = await client.query('SELECT symbol, price_usd::float FROM market_prices');
     const priceMap = {};
     prices.forEach(p => priceMap[p.symbol] = p.price_usd);
@@ -1302,20 +1626,24 @@ app.get('/api/defi/stakes', async (req, res) => {
 app.post('/api/defi/stake', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
+    const token = (req.body.token || 'BLOOM').toUpperCase();
+    if (!STAKEABLE_TOKENS[token]) return res.status(400).json({ error: 'Unsupported token' });
     const amount = toUnits(req.body.amount);
     if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    const apy_bps = STAKEABLE_TOKENS[token].apy_bps;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
-      [req.user.id]
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, token]
     );
-    if (!bal || Number(bal.balance) < amount) throw new Error('Insufficient BLOOM');
+    if (!bal || Number(bal.balance) < amount) throw new Error(`Insufficient ${token}`);
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
-      [amount, req.user.id]
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amount, req.user.id, token]
     );
     const { rows: [stake] } = await client.query(
-      'INSERT INTO defi_stakes(user_id,amount) VALUES($1,$2) RETURNING *', [req.user.id, amount]
+      'INSERT INTO defi_stakes(user_id,token,amount,apy_bps) VALUES($1,$2,$3,$4) RETURNING *',
+      [req.user.id, token, amount, apy_bps]
     );
     await client.query('COMMIT');
     res.json({ stake });
@@ -1337,35 +1665,125 @@ app.delete('/api/defi/stakes/:id', async (req, res) => {
     const elapsed = (Date.now() - new Date(stake.staked_at).getTime()) / 1000;
     const reward = Math.floor(Number(stake.amount) * (stake.apy_bps / 10000) * elapsed / 31536000);
     const total = Number(stake.amount) + reward;
-    await client.query('UPDATE defi_stakes SET unstaked_at=NOW() WHERE id=$1', [stake.id]);
+    await client.query('UPDATE defi_stakes SET unstaked_at=NOW(), reward_amount=$1 WHERE id=$2', [reward, stake.id]);
     await client.query(
-      "UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
-      [total, req.user.id]
+      'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [total, req.user.id, stake.token]
     );
     await client.query('COMMIT');
-    res.json({ ok: true, returned: fromUnits(total), reward: fromUnits(reward) });
+    res.json({ ok: true, returned: fromUnits(total), reward: fromUnits(reward), token: stake.token });
   } catch (e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
 });
 
+// ── DeFi: Staking stats (public) ─────────────────────────────────────────────
+
+app.get('/api/defi/staking-stats', async (req, res) => {
+  try {
+    const [stakersRow, tokenTotals, rewardTotals] = await Promise.all([
+      pool.query("SELECT COUNT(DISTINCT user_id)::int AS n FROM defi_stakes WHERE unstaked_at IS NULL"),
+      pool.query("SELECT token, SUM(amount)::bigint AS total FROM defi_stakes WHERE unstaked_at IS NULL GROUP BY token"),
+      pool.query("SELECT token, COALESCE(SUM(reward_amount),0)::bigint AS total FROM defi_stakes WHERE unstaked_at IS NOT NULL GROUP BY token"),
+    ]);
+
+    const prices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices().catch(() => STAGING_TICKER_PRICES);
+
+    function tokenPriceUsd(sym) {
+      if (sym === 'BLOOM') return BLOOM_PLAY_PRICE_USD;
+      return prices[sym] || 0;
+    }
+
+    let totalStakedUsd = 0;
+    for (const row of tokenTotals.rows) {
+      totalStakedUsd += (Number(row.total) / UNITS) * tokenPriceUsd(row.token);
+    }
+
+    let totalRewardsPaidUsd = 0;
+    for (const row of rewardTotals.rows) {
+      totalRewardsPaidUsd += (Number(row.total) / UNITS) * tokenPriceUsd(row.token);
+    }
+
+    res.json({
+      total_stakers: stakersRow.rows[0].n,
+      total_staked_usd: Math.round(totalStakedUsd),
+      total_rewards_paid_usd: Math.round(totalRewardsPaidUsd),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DeFi: Staking activity feed (public) ──────────────────────────────────────
+
+app.get('/api/defi/staking-activity', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT ds.id, u.username, ds.token, ds.amount, ds.staked_at, ds.unstaked_at,
+             CASE WHEN ds.unstaked_at IS NULL THEN 'staked' ELSE 'unstaked' END AS action
+      FROM defi_stakes ds
+      JOIN users u ON u.user_id = ds.user_id
+      ORDER BY GREATEST(ds.staked_at, COALESCE(ds.unstaked_at, ds.staked_at)) DESC
+      LIMIT 10
+    `);
+    res.json({ activity: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DeFi: Liquidity ────────────────────────────────────────────────────────────
 
-const VALID_POOLS = { BLOOM_USDC: ['BLOOM', 'USDC'], ETH_USDC: ['ETH', 'USDC'] };
+const VALID_POOLS = {
+  BLOOM_USDC: ['BLOOM', 'USDC'],
+  ETH_USDC:   ['ETH',   'USDC'],
+  ETH_BLOOM:  ['ETH',   'BLOOM'],
+  BTC_USDC:   ['BTC',   'USDC'],
+  SOL_ETH:    ['SOL',   'ETH'],
+  BTC_BLOOM:  ['BTC',   'BLOOM'],
+  SOL_USDC:   ['SOL',   'USDC'],
+  ETH_BTC:    ['ETH',   'BTC'],
+};
 
 app.get('/api/defi/liquidity', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT * FROM defi_liquidity_positions WHERE user_id=$1 AND removed_at IS NULL ORDER BY created_at DESC',
-      [req.user.id]
-    );
+    if (IS_STAGING && req.query.demo === '1') {
+      for (const poolId of Object.keys(VALID_POOLS)) {
+        const { rows: [exists] } = await pool.query(
+          'SELECT 1 FROM defi_liquidity_positions WHERE user_id=$1 AND pool_id=$2 AND removed_at IS NULL LIMIT 1',
+          [req.user.id, poolId]
+        );
+        if (!exists) {
+          const amtA = 500 * UNITS;
+          const amtB = 500 * UNITS;
+          const shares = Math.sqrt(amtA * amtB);
+          await pool.query(
+            `INSERT INTO defi_liquidity_positions(user_id,pool_id,token_a_amount,token_b_amount,shares,created_at)
+             VALUES($1,$2,$3,$4,$5,NOW()-INTERVAL '3 days')`,
+            [req.user.id, poolId, amtA, amtB, shares]
+          );
+        }
+      }
+    }
+    const { rows } = await pool.query(`
+      SELECT dlp.*,
+        CASE WHEN pool_totals.total_shares > 0
+          THEN ROUND((dlp.shares / pool_totals.total_shares * 100)::numeric, 4)
+          ELSE 0
+        END AS pool_share_pct
+      FROM defi_liquidity_positions dlp
+      JOIN (
+        SELECT pool_id, SUM(shares) AS total_shares
+        FROM defi_liquidity_positions
+        WHERE removed_at IS NULL
+        GROUP BY pool_id
+      ) pool_totals ON pool_totals.pool_id = dlp.pool_id
+      WHERE dlp.user_id=$1 AND dlp.removed_at IS NULL
+      ORDER BY dlp.created_at DESC
+    `, [req.user.id]);
     const now = Date.now();
     const positions = rows.map(p => {
       const days = (now - new Date(p.created_at).getTime()) / 86400000;
       const totalValue = Number(p.token_a_amount) + Number(p.token_b_amount);
       const fees = Math.floor(totalValue * 0.0001 * days);
-      return { ...p, accrued_fees: fees };
+      return { ...p, accrued_fees: fees, pool_share_pct: Number(p.pool_share_pct) };
     });
     res.json({ positions });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1435,6 +1853,57 @@ app.delete('/api/defi/liquidity/:id', async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── DeFi: Pool stats (public — aggregated TVL / composition / fees) ───────────
+
+app.get('/api/defi/pool-stats', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        pool_id,
+        COALESCE(SUM(token_a_amount + token_b_amount), 0)::bigint AS tvl_units,
+        COALESCE(SUM(shares), 0) AS total_shares,
+        COALESCE(SUM(token_a_amount), 0)::bigint AS token_a_reserve,
+        COALESCE(SUM(token_b_amount), 0)::bigint AS token_b_reserve,
+        COALESCE(SUM(CASE WHEN created_at <= NOW() - INTERVAL '1 day'
+          THEN FLOOR((token_a_amount + token_b_amount) * 0.0001) ELSE 0 END), 0)::bigint AS fees_24h_units
+      FROM defi_liquidity_positions
+      WHERE removed_at IS NULL
+      GROUP BY pool_id
+    `);
+    const byPoolId = {};
+    rows.forEach(r => { byPoolId[r.pool_id] = r; });
+    let totalTvl = 0;
+    let totalFees24h = 0;
+    const pools = Object.entries(VALID_POOLS).map(([poolId, tokens]) => {
+      const r = byPoolId[poolId] || {};
+      const tvl = fromUnits(Number(r.tvl_units) || 0);
+      const fees24h = fromUnits(Number(r.fees_24h_units) || 0);
+      totalTvl += tvl;
+      totalFees24h += fees24h;
+      return {
+        pool_id: poolId,
+        tokens,
+        tvl,
+        token_a_reserve: fromUnits(Number(r.token_a_reserve) || 0),
+        token_b_reserve: fromUnits(Number(r.token_b_reserve) || 0),
+        total_shares: Number(r.total_shares) || 0,
+        apr_bps: 36,
+        fees_24h: fees24h,
+      };
+    });
+    res.json({ pools, total_tvl: totalTvl, total_fees_24h: totalFees24h });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DeFi: Vaults ──────────────────────────────────────────────────────────────
+
+app.get('/api/defi/vaults', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM defi_vaults ORDER BY apy_bps DESC');
+    res.json({ vaults: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DeFi: ICO ─────────────────────────────────────────────────────────────────
 
 app.get('/api/ico', async (req, res) => {
@@ -1453,7 +1922,7 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
     const icoTier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, icoTier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     await client.query('BEGIN');
     const { rows: [ico] } = await client.query(
       "SELECT * FROM ico_offerings WHERE id=$1 AND status='active' FOR UPDATE", [req.params.id]
@@ -1486,11 +1955,107 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
+// ── Vault ─────────────────────────────────────────────────────────────────────
+
+app.get('/api/vault/strategies', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM vault_strategies WHERE is_active=true ORDER BY id');
+    res.json({ strategies: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/vault/positions', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT vp.*, vs.name AS strategy_name, vs.target_apy,
+        FLOOR(vp.amount * vs.target_apy / 100.0 * EXTRACT(EPOCH FROM (NOW() - vp.deposited_at)) / 31536000)::bigint AS accrued_yield
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.user_id = $1
+      ORDER BY vp.deposited_at DESC
+    `, [req.user.id]);
+    res.json({ positions: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/vault/deposit', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { strategy_id, token, amount } = req.body;
+    const amtUnits = toUnits(amount);
+    if (!strategy_id || !token || amtUnits <= 0) return res.status(400).json({ error: 'Invalid parameters' });
+    const sym = String(token).toUpperCase().slice(0, 20);
+    await client.query('BEGIN');
+    const { rows: [strategy] } = await client.query(
+      'SELECT * FROM vault_strategies WHERE id=$1 AND is_active=true', [strategy_id]
+    );
+    if (!strategy) throw new Error('Strategy not found');
+    if (!strategy.supported_tokens.includes(sym)) throw new Error(`${sym} not supported by this strategy`);
+    const { rows: [bal] } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    if (!bal || Number(bal.balance) < amtUnits) throw new Error(`Insufficient ${sym}`);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [amtUnits, req.user.id, sym]
+    );
+    const { rows: [pos] } = await client.query(
+      'INSERT INTO vault_positions(user_id,username,strategy_id,token,amount) VALUES($1,$2,$3,$4,$5) RETURNING *',
+      [req.user.id, req.user.username, strategy_id, sym, amtUnits]
+    );
+    await client.query('COMMIT');
+    res.json({ position: pos });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+app.delete('/api/vault/positions/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [pos] } = await client.query(`
+      SELECT vp.*, vs.target_apy
+      FROM vault_positions vp
+      JOIN vault_strategies vs ON vs.id = vp.strategy_id
+      WHERE vp.id=$1 AND vp.user_id=$2 FOR UPDATE
+    `, [req.params.id, req.user.id]);
+    if (!pos) throw new Error('Position not found');
+    const elapsed = (Date.now() - new Date(pos.deposited_at).getTime()) / 1000;
+    const accruedYield = Math.floor(Number(pos.amount) * Number(pos.target_apy) / 100 * elapsed / 31536000);
+    const total = Number(pos.amount) + accruedYield;
+    await client.query('DELETE FROM vault_positions WHERE id=$1', [pos.id]);
+    await client.query(
+      'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
+      [total, pos.user_id, pos.token]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, returned: fromUnits(total), yield: fromUnits(accruedYield) });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
 // ── Opinion Markets ────────────────────────────────────────────────────────────
 
 app.get('/api/markets', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM opinion_markets ORDER BY created_at DESC');
+    const params = [];
+    const conds = [];
+    if (req.query.category && MARKET_CATEGORIES.has(req.query.category)) {
+      params.push(req.query.category);
+      conds.push(`category=$${params.length}`);
+    }
+    if (req.query.featured === 'true') conds.push('featured=true');
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const { rows } = await pool.query(
+      `SELECT * FROM opinion_markets ${where}
+       ORDER BY featured DESC, (yes_pool + no_pool) DESC, created_at DESC`,
+      params
+    );
     res.json({ markets: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1508,13 +2073,13 @@ app.get('/api/markets/:id', async (req, res) => {
 
 app.post('/api/markets', requireWallet, async (req, res) => {
   try {
-    const { title, description, resolution_criteria, closes_at } = req.body;
+    const { title, description, resolution_criteria, closes_at, category } = req.body;
     if (!title || typeof title !== 'string' || title.trim().length < 5 || title.length > 200)
       return res.status(400).json({ error: 'Title must be 5–200 characters' });
     const { rows: [market] } = await pool.query(`
-      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5) RETURNING *
-    `, [title.trim(), (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,category,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [title.trim(), (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, normalizeCategory(category), req.user.id]);
     res.status(201).json({ market });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1529,7 +2094,7 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
     const mtTier = await userTier(req.user.id);
     if (!(await withinBasicDailyCap(req.user.id, mtTier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
     await client.query('BEGIN');
     const { rows: [market] } = await client.query(
       "SELECT * FROM opinion_markets WHERE id=$1 AND status='open' FOR UPDATE", [req.params.id]
@@ -1550,6 +2115,8 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
     } else {
       await client.query('UPDATE opinion_markets SET no_pool=no_pool+$1 WHERE id=$2', [usdcUnits, market.id]);
     }
+    // Denormalized running volume total for the prediction-market hub.
+    await client.query('UPDATE opinion_markets SET volume_usdc=volume_usdc+$1 WHERE id=$2', [usdcUnits, market.id]);
     await client.query(
       'INSERT INTO opinion_positions(user_id,market_id,outcome,shares,cost_basis) VALUES($1,$2,$3,$4,$5)',
       [req.user.id, market.id, outcome, shares, usdcUnits]
@@ -1681,22 +2248,15 @@ app.get('/api/futures/positions', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/futures/paper-balance', async (req, res) => {
-  try {
-    const { rows: [pb] } = await pool.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1', [req.user.id]);
-    res.json({ balance: pb?.usdc_balance || 10000000000 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, mode, idempotency_key } = req.body;
-    const lev = Math.max(1, Math.min(20, parseInt(leverage) || 1));
+    const { market_id, side, leverage, quantity, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
+    const lev = Math.max(1, Math.min(ZK_MAX_LEVERAGE, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
     if (!['long', 'short'].includes(side)) return res.status(400).json({ error: 'Invalid side' });
-    if (!['paper', 'live'].includes(mode)) return res.status(400).json({ error: 'Invalid mode' });
+    const mode = 'live';
 
     const tier = await userTier(req.user.id);
     if (mode === 'live') {
@@ -1705,8 +2265,12 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       if (lev > 5 && !tierAllows(tier, 'high_leverage'))
         return res.status(403).json({ error: 'verify_required', tier_needed: 'premium' });
     }
+    // Extreme leverage (>20×) is unlocked only by a real zkPassport proof,
+    // in BOTH paper and live modes — distinct from merely holding Premium.
+    if (lev > PREMIUM_MAX_LEVERAGE && !(await isZkVerified(req.user.id)))
+      return res.status(403).json({ error: 'verify_required', tier_needed: 'zkpassport' });
     if (!(await withinBasicDailyCap(req.user.id, tier)))
-      return res.status(429).json({ error: 'daily_limit', detail: 'Basic tier daily trade limit reached — verify to remove limits.' });
+      return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
 
     // Idempotency guard against double-submit (Phase 4).
     if (idempotency_key) {
@@ -1729,35 +2293,34 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const marginUnits = Math.ceil(qty * markPrice * UNITS / lev);
     const liqPrice = side === 'long' ? markPrice * (1 - 0.9 / lev) : markPrice * (1 + 0.9 / lev);
 
-    // BLOOM gas fee check — applies to both live and paper modes.
+    // BLOOM gas fee check.
     const { rows: [bloomOpenBal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
     if (!bloomOpenBal || Number(bloomOpenBal.balance) < FUTURES_GAS)
       throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
 
-    if (mode === 'live') {
-      const { rows: [bal] } = await client.query(
-        "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
-      );
-      if (!bal || Number(bal.balance) < marginUnits) throw new Error('Insufficient USDC');
-      await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [marginUnits, req.user.id]);
-    } else {
-      const { rows: [pb] } = await client.query('SELECT usdc_balance FROM paper_balances WHERE user_id=$1 FOR UPDATE', [req.user.id]);
-      if (!pb || Number(pb.usdc_balance) < marginUnits) throw new Error('Insufficient paper balance');
-      await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance-$1 WHERE user_id=$2', [marginUnits, req.user.id]);
-    }
+    const { rows: [bal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
+    );
+    if (!bal || Number(bal.balance) < marginUnits) throw new Error('Insufficient USDC');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [marginUnits, req.user.id]);
+
+    const validOrderType = ['market', 'limit', 'twap'].includes(order_type) ? order_type : 'market';
+    const validLimitPrice = limit_price ? parseFloat(limit_price) : null;
+    const validSlippageBps = Math.max(0, Math.min(5000, parseInt(slippage_bps) || 50));
+    const validTwapMinutes = twap_duration_minutes ? Math.max(1, parseInt(twap_duration_minutes)) : null;
+    const validTwapParts = twap_parts ? Math.max(2, Math.min(100, parseInt(twap_parts))) : null;
 
     // Deduct BLOOM gas fee
     await client.query(
       "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
       [FUTURES_GAS, req.user.id]
     );
-
     const { rows: [pos] } = await client.query(`
-      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *
-    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice]);
+      INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,order_type,limit_price,slippage_bps,twap_duration_minutes,twap_parts)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *
+    `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice, validOrderType, validLimitPrice, validSlippageBps, validTwapMinutes, validTwapParts]);
     await client.query('UPDATE futures_markets SET open_interest=open_interest+$1 WHERE id=$2', [marginUnits, market_id]);
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
@@ -1787,7 +2350,7 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     const pnl = Math.round((pos.mark_price - parseFloat(pos.entry_price)) * parseFloat(pos.quantity) * (pos.side === 'long' ? 1 : -1) * UNITS);
     const returnAmt = Math.max(0, Number(pos.margin) + pnl);
 
-    // BLOOM gas fee for closing (applies to both live and paper modes).
+    // BLOOM gas fee for closing.
     const { rows: [bloomCloseBal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
     );
@@ -1799,11 +2362,7 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
     );
 
     await client.query("UPDATE futures_positions SET status='closed', realized_pnl=$1, closed_at=NOW() WHERE id=$2", [pnl, pos.id]);
-    if (pos.mode === 'live') {
-      await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
-    } else {
-      await client.query('UPDATE paper_balances SET usdc_balance=usdc_balance+$1 WHERE user_id=$2', [returnAmt, req.user.id]);
-    }
+    await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
     await client.query('UPDATE futures_markets SET open_interest=GREATEST(0, open_interest-$1) WHERE id=$2', [pos.margin, pos.market_id]);
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
@@ -1835,6 +2394,49 @@ app.get('/api/activity', async (req, res) => {
     const nextCursor = hasMore ? activities[activities.length - 1].id : null;
     res.json({ activities, nextCursor });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Wallet Send (bridge sync) ────────────────────────────────────────────────
+
+app.post('/api/wallet/send', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_address, token_symbol, amount } = req.body;
+    const sym = (token_symbol || '').toUpperCase().trim();
+    const qty = parseAmount(amount);
+    if (!sym) return res.status(400).json({ error: 'token_symbol required' });
+    if (!qty) return res.status(400).json({ error: 'Invalid amount' });
+    if (!to_address || typeof to_address !== 'string' || !to_address.trim())
+      return res.status(400).json({ error: 'to_address required' });
+
+    await client.query('BEGIN');
+    const { rows: balRows } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    const currentBal = balRows.length > 0 ? Number(balRows[0].balance) / 1e6 : 0;
+    if (currentBal < qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    const newBalUnits = Math.round((currentBal - qty) * 1e6);
+    await client.query(
+      `INSERT INTO wallet_balances (user_id, token_symbol, balance)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, token_symbol) DO UPDATE SET balance = EXCLUDED.balance`,
+      [req.user.id, sym, newBalUnits]
+    );
+    await client.query(
+      `INSERT INTO transactions (user_id, type, token_symbol, amount, description)
+       VALUES ($1, 'send', $2, $3, $4)`,
+      [req.user.id, sym, Math.round(qty * 1e6), `Sent ${qty} ${sym} to ${shortAddr(to_address.trim())}`]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, remaining: newBalUnits / 1e6 });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 // ── Trade Journal ─────────────────────────────────────────────────────────────
@@ -2288,7 +2890,8 @@ app.get('/api/kyc', async (req, res) => {
       );
     }
     const { rows: [kyc] } = await pool.query('SELECT * FROM kyc_verifications WHERE user_id=$1', [req.user.id]);
-    res.json({ kyc: kyc || null });
+    const zkVerified = await isZkVerified(req.user.id);
+    res.json({ kyc: kyc || null, zk_verified: zkVerified });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2519,14 +3122,32 @@ app.delete('/api/admin/ico/:id', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/markets', requireAdmin, async (req, res) => {
   try {
-    const { title, description, resolution_criteria, closes_at } = req.body;
+    const { title, description, resolution_criteria, closes_at, category, featured } = req.body;
     if (!validStr(title, 200)) return res.status(400).json({ error: 'Invalid title' });
     const { rows: [market] } = await pool.query(`
-      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,created_by_user_id)
-      VALUES($1,$2,$3,$4,$5) RETURNING *
-    `, [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null, req.user.id]);
+      INSERT INTO opinion_markets(title,description,resolution_criteria,closes_at,category,featured,created_by_user_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *
+    `, [title, (description || '').slice(0, 500), (resolution_criteria || '').slice(0, 500), closes_at || null,
+        normalizeCategory(category), !!featured, req.user.id]);
     await logAdmin(req.user.id, 'create_market', { target_market_id: market.id });
     res.json({ market });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update a market's hub placement: category and/or featured flag.
+app.patch('/api/admin/markets/:id', requireAdmin, async (req, res) => {
+  try {
+    const { category, featured } = req.body;
+    const sets = [], params = [parseInt(req.params.id, 10)];
+    if (category !== undefined) { params.push(normalizeCategory(category)); sets.push(`category=$${params.length}`); }
+    if (featured !== undefined) { params.push(!!featured); sets.push(`featured=$${params.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+    const { rows } = await pool.query(
+      `UPDATE opinion_markets SET ${sets.join(',')} WHERE id=$1 RETURNING *`, params
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    await logAdmin(req.user.id, 'update_market', { target_market_id: parseInt(req.params.id, 10) });
+    res.json({ market: rows[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2841,11 +3462,11 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
       return res.json({ ok: true, copied_count: 0, positions: [] });
     }
 
-    // Check paper balance
-    const { rows: [paperBal] } = await client.query(
-      'SELECT usdc_balance FROM paper_balances WHERE user_id=$1 FOR UPDATE', [req.user.id]
+    // Check live USDC balance
+    const { rows: [usdcBal] } = await client.query(
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
     );
-    let availableBalance = Number(paperBal?.usdc_balance || 10000000000);
+    let availableBalance = Number(usdcBal?.balance || 0);
 
     const copiedPositions = [];
     const totalMarginNeeded = sourcePositions.reduce((sum, p) => {
@@ -2857,10 +3478,10 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
 
     if (availableBalance < totalMarginNeeded) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Insufficient paper balance' });
+      return res.status(400).json({ error: 'Insufficient USDC balance' });
     }
 
-    // Create copied positions
+    // Create copied positions in live mode
     for (const src of sourcePositions) {
       const qty = parseFloat(src.quantity);
       const markPrice = src.mark_price;
@@ -2872,7 +3493,7 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
 
       const { rows: [newPos] } = await client.query(`
         INSERT INTO futures_positions(user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price)
-        VALUES($1,$2,'paper',$3,$4,$5,$6,$7,$8) RETURNING *
+        VALUES($1,$2,'live',$3,$4,$5,$6,$7,$8) RETURNING *
       `, [req.user.id, src.market_id, src.side, lev, markPrice, qty, margin, liqPrice]);
 
       await client.query(
@@ -2889,14 +3510,16 @@ app.post('/api/futures/positions/copy-from/:username', requireWallet, async (req
         quantity: newPos.quantity.toString(),
         entry_price: newPos.entry_price.toString(),
         margin: newPos.margin,
-        mode: 'paper'
+        mode: 'live'
       });
 
       availableBalance -= margin;
     }
 
-    await client.query('UPDATE paper_balances SET usdc_balance=$1 WHERE user_id=$2',
-      [availableBalance, req.user.id]);
+    await client.query(
+      "UPDATE wallet_balances SET balance=$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'",
+      [availableBalance, req.user.id]
+    );
 
     await client.query('COMMIT');
     res.json({ ok: true, copied_count: copiedPositions.length, positions: copiedPositions });
@@ -3695,7 +4318,7 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
-  if (!req.user) {
+  if (!req.user && !(IS_STAGING && req.query.demo === '1')) {
     return res.status(401).send(`<!doctype html><meta charset=utf-8><title>BloomMoney</title>
 <body style="font-family:system-ui;background:#0a0a0b;color:#e4e4e7;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
   <div style="max-width:24rem;padding:2rem;text-align:center">
@@ -3725,6 +4348,18 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT;
+    -- Uploaded avatar image bytes, stored directly in Postgres. Public table:
+    -- avatars are public profile content shown in the feed, threads and profiles,
+    -- so a stranger seeing every row is fine (no staging:private marker).
+    CREATE TABLE IF NOT EXISTS user_avatars (
+      user_id INTEGER PRIMARY KEY,
+      username VARCHAR(255),
+      content_type VARCHAR(30) NOT NULL,
+      image_bytes BYTEA NOT NULL,
+      byte_size INTEGER NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS wallet_balances (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -3794,8 +4429,10 @@ async function start() {
       amount BIGINT NOT NULL,
       apy_bps INTEGER NOT NULL DEFAULT 1200,
       staked_at TIMESTAMPTZ DEFAULT NOW(),
-      unstaked_at TIMESTAMPTZ
+      unstaked_at TIMESTAMPTZ,
+      reward_amount BIGINT DEFAULT 0
     );
+    ALTER TABLE defi_stakes ADD COLUMN IF NOT EXISTS reward_amount BIGINT DEFAULT 0;
     CREATE TABLE IF NOT EXISTS defi_liquidity_positions (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -3805,6 +4442,15 @@ async function start() {
       shares NUMERIC(20,8) NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       removed_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS defi_vaults (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      token_pair VARCHAR(40) NOT NULL,
+      apy_bps INTEGER NOT NULL DEFAULT 0,
+      tvl_usd BIGINT NOT NULL DEFAULT 0,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS ico_offerings (
       id SERIAL PRIMARY KEY,
@@ -3865,7 +4511,7 @@ async function start() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
       market_id INTEGER NOT NULL REFERENCES futures_markets(id),
-      mode VARCHAR(10) NOT NULL DEFAULT 'paper',
+      mode VARCHAR(10) NOT NULL DEFAULT 'live',
       side VARCHAR(5) NOT NULL,
       leverage INTEGER NOT NULL DEFAULT 1,
       entry_price NUMERIC(20,6) NOT NULL,
@@ -4019,6 +4665,25 @@ async function start() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS futures_price_snapshots_market_idx ON futures_price_snapshots (market_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS vault_strategies (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      risk_level TEXT,
+      target_apy NUMERIC(6,2),
+      supported_tokens TEXT[],
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS vault_positions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      username TEXT NOT NULL,
+      strategy_id INTEGER REFERENCES vault_strategies(id),
+      token TEXT NOT NULL,
+      amount BIGINT NOT NULL,
+      deposited_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS trade_journal_entries (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -4075,10 +4740,21 @@ async function start() {
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS next_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_markets ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
     ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS last_funding_at TIMESTAMPTZ;
+    ALTER TABLE futures_positions ALTER COLUMN mode SET DEFAULT 'live';
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) DEFAULT 'market';
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS limit_price NUMERIC(20,6);
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS slippage_bps INTEGER DEFAULT 50;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_duration_minutes INTEGER;
+    ALTER TABLE futures_positions ADD COLUMN IF NOT EXISTS twap_parts INTEGER;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS is_daily BOOLEAN DEFAULT FALSE;
     ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS template_slug VARCHAR(40);
     ALTER TABLE opinion_markets ALTER COLUMN created_by_user_id DROP NOT NULL;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS category VARCHAR(30) NOT NULL DEFAULT 'General';
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE opinion_markets ADD COLUMN IF NOT EXISTS volume_usdc BIGINT NOT NULL DEFAULT 0;
   `);
+  // Backfill: daily auto-generated markets are crypto price questions.
+  await pool.query("UPDATE opinion_markets SET category='Crypto' WHERE is_daily=true AND category='General'");
   // UNIQUE on anti_sybil_token enforces one social account per wallet.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS kyc_anti_sybil_uniq
@@ -4141,6 +4817,7 @@ async function start() {
   await pool.query(`
     COMMENT ON TABLE funding_payments IS 'staging:private';
     COMMENT ON TABLE idempotency_keys IS 'staging:private';
+    COMMENT ON TABLE vault_positions IS 'staging:private';
     COMMENT ON TABLE wallet_balances IS 'staging:private';
     COMMENT ON TABLE paper_balances IS 'staging:private';
     COMMENT ON TABLE defi_swaps IS 'staging:private';
@@ -4163,6 +4840,20 @@ async function start() {
     COMMENT ON TABLE nft_listings IS 'staging:private';
     COMMENT ON TABLE nft_bids IS 'staging:private';
     COMMENT ON TABLE nft_transfers IS 'staging:private';
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS source_url TEXT;
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS bot_source VARCHAR(50);
+    CREATE TABLE IF NOT EXISTS news_dedup (
+      guid TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Ensure bot user exists (all environments)
+  await pool.query(`
+    INSERT INTO users (user_id, username, display_name)
+    VALUES (-1, 'CryptoNewsBot', 'Crypto News Bot 🤖')
+    ON CONFLICT (user_id) DO NOTHING
   `);
 
   // Seed initial market prices
@@ -4233,6 +4924,23 @@ async function start() {
       UPDATE users SET avatar_url=$1 WHERE user_id=9001 AND avatar_url IS NULL
     `, ['data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjMDBhYTU1Ii8+PHRleHQgeD0iMzIiIHk9IjQwIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIzMiIgZm9udC13ZWlnaHQ9ImJvbGQiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5BPC90ZXh0Pjwvc3ZnPg==']);
 
+    // Seed staging-bob with a real uploaded avatar stored as bytes in Postgres,
+    // exercising the new user_avatars table + /avatars/:username serve route.
+    const demoAvatarPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    await pool.query(
+      `INSERT INTO user_avatars (user_id, username, content_type, image_bytes, byte_size, updated_at)
+       VALUES (9002,'staging-bob','image/png',$1,$2,NOW())
+       ON CONFLICT (user_id) DO NOTHING`,
+      [demoAvatarPng, demoAvatarPng.length]
+    );
+    await pool.query(
+      `UPDATE users SET avatar_url='/avatars/staging-bob'
+       WHERE user_id=9002 AND (avatar_url IS NULL OR avatar_url='')`
+    );
+
     // Give demo users an obviously-fake non-zero Points available balance so the
     // Post-to-Earn badge renders a realistic number in staging previews. Scoped
     // strictly to the 90xx demo ids — never touches real users.
@@ -4272,7 +4980,6 @@ async function start() {
           ($1,'ADA',100000000),($1,'DOGE',200000000),($1,'TON',10000000),($1,'USDT',20000000)
         ON CONFLICT DO NOTHING
       `, [uid]);
-      await pool.query('INSERT INTO paper_balances(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);
     }
 
     // Seed posts
@@ -4344,6 +5051,28 @@ async function start() {
     `);
     await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW() WHERE id=9003");
 
+    // Backfill category/featured/volume on the original demo markets (idempotent:
+    // only touches rows still on the 'General' default so re-runs are no-ops).
+    await pool.query(`
+      UPDATE opinion_markets SET category='Crypto', featured=true,  volume_usdc=85000000 WHERE id=9001 AND category='General';
+      UPDATE opinion_markets SET category='Crypto', featured=false, volume_usdc=22000000 WHERE id=9002 AND category='General';
+      UPDATE opinion_markets SET category='Crypto', featured=false, volume_usdc=40000000 WHERE id=9003 AND category='General';
+    `);
+
+    // Seed cross-category demo markets (Polymarket-style hub). Public table, so
+    // these rows are safe to seed directly. Amounts are BIGINT micro-units.
+    await pool.query(`
+      INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,category,featured,volume_usdc,created_by_user_id,closes_at) VALUES
+        (9020,'Will a G7 country ban crypto before 2027?','Regulatory prediction market','Resolved YES if any G7 government enacts a full ban on crypto trading before Jan 1, 2027.',300000000,700000000,'open','Politics',true,128000000,9006,'2026-12-31 00:00:00+00'),
+        (9021,'Will GPT-5 pass the Turing test by Dec 2026?','AI milestone market','Resolved YES if a published, peer-reviewed study reports GPT-5 passing a standard Turing test before Dec 31, 2026.',450000000,550000000,'open','Science',false,67000000,9006,'2026-12-31 00:00:00+00'),
+        (9022,'Will BTC hit $100k before 2027?','Bitcoin price prediction','Resolved YES if BTC/USD closes above $100,000 on any major exchange before Jan 1, 2027.',600000000,400000000,'open','Crypto',false,210000000,9006,'2026-12-31 00:00:00+00'),
+        (9023,'Will FC Barcelona win La Liga 2025/26?','Football title race','Resolved YES if FC Barcelona is crowned La Liga champion for the 2025/26 season.',350000000,650000000,'open','Sports',false,44000000,9006,'2026-08-01 00:00:00+00'),
+        (9024,'Will a Marvel film gross $1B in 2026?','Box office milestone','Resolved YES if any Marvel theatrical release grosses $1B+ worldwide during 2026.',700000000,300000000,'open','Entertainment',false,31000000,9006,'2026-12-31 00:00:00+00'),
+        (9025,'Will the Fed cut rates 3+ times in 2026?','Macro policy market','Resolved YES if the US Federal Reserve cuts its target rate on three or more occasions during 2026.',420000000,580000000,'open','Politics',false,59000000,9006,'2026-12-31 00:00:00+00'),
+        (9026,'Will a CRISPR aging trial reach Phase 3 by 2027?','Biotech milestone','Resolved YES if a CRISPR-based anti-aging therapy enters a registered Phase 3 trial before Jan 1, 2027.',250000000,750000000,'open','Science',false,18000000,9006,'2027-01-01 00:00:00+00')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
     // Seed ICO offerings — one live (SDC existing), two more live, two upcoming, two completed.
     // Amounts are stored as BIGINT micro-units (value × 1_000_000). Dates use interval arithmetic
     // so countdowns render correctly on every staging preview.
@@ -4356,6 +5085,38 @@ async function start() {
         (9005,'Staging ChainSpark','CSP','Staging demo ICO — Play-to-earn gaming platform with onchain asset ownership.',30000,50000000000000,1500000000000,0,0,'upcoming',NOW()+INTERVAL '14 days',NOW()+INTERVAL '28 days',9006),
         (9006,'Staging PixelDAO','PXD','Staging demo ICO — NFT governance DAO with fractionalized art vaults.',250000,4000000000000,1000000000000,1000000000000,4000000000000,'sold_out',NOW()-INTERVAL '60 days',NOW()-INTERVAL '30 days',9006),
         (9007,'Staging ZephyrNet','ZPN','Staging demo ICO — Layer 2 scaling solution for microtransactions.',100000,40000000000000,4000000000000,2700000000000,27000000000000,'ended',NOW()-INTERVAL '90 days',NOW()-INTERVAL '45 days',9006)
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed Vault listings
+    await pool.query(`
+      INSERT INTO defi_vaults(id,name,token_pair,apy_bps,tvl_usd,description) VALUES
+        (9001,'Staging BLOOM-USDC Auto Vault','BLOOM/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
+        (9002,'Staging ETH Yield Vault','ETH/USDC',820,1200000,'Staging demo vault — Automated ETH yield strategy'),
+        (9003,'Staging Stable Vault','USDC/DAI',510,500000,'Staging demo vault — Low-risk stablecoin vault')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed liquidity positions so pool-stats dashboard shows real TVL/composition data
+    await pool.query(`
+      INSERT INTO defi_liquidity_positions(id,user_id,pool_id,token_a_amount,token_b_amount,shares,created_at) VALUES
+        (900151,9001,'BLOOM_USDC',500000000,500000000,500000000,NOW()-INTERVAL '5 days'),
+        (900152,9002,'BLOOM_USDC',1200000000,1200000000,1200000000,NOW()-INTERVAL '3 days'),
+        (900153,9003,'BLOOM_USDC',300000000,300000000,300000000,NOW()-INTERVAL '1 day'),
+        (900154,9004,'ETH_USDC',100000000,100000000,100000000,NOW()-INTERVAL '6 days'),
+        (900155,9005,'ETH_USDC',800000000,800000000,800000000,NOW()-INTERVAL '2 days'),
+        (900156,9001,'ETH_BLOOM',750000000,750000000,750000000,NOW()-INTERVAL '4 days'),
+        (900157,9002,'ETH_BLOOM',250000000,250000000,250000000,NOW()-INTERVAL '2 days'),
+        (900158,9003,'BTC_USDC',2000000000,2000000000,2000000000,NOW()-INTERVAL '7 days'),
+        (900159,9004,'BTC_USDC',500000000,500000000,500000000,NOW()-INTERVAL '3 days'),
+        (900160,9005,'SOL_ETH',400000000,400000000,400000000,NOW()-INTERVAL '5 days'),
+        (900161,9001,'SOL_ETH',900000000,900000000,900000000,NOW()-INTERVAL '1 day'),
+        (900162,9002,'BTC_BLOOM',1500000000,1500000000,1500000000,NOW()-INTERVAL '6 days'),
+        (900163,9003,'BTC_BLOOM',300000000,300000000,300000000,NOW()-INTERVAL '2 days'),
+        (900164,9004,'SOL_USDC',600000000,600000000,600000000,NOW()-INTERVAL '4 days'),
+        (900165,9005,'SOL_USDC',1100000000,1100000000,1100000000,NOW()-INTERVAL '3 days'),
+        (900166,9001,'ETH_BTC',350000000,350000000,350000000,NOW()-INTERVAL '7 days'),
+        (900167,9002,'ETH_BTC',850000000,850000000,850000000,NOW()-INTERVAL '2 days')
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -4530,21 +5291,21 @@ async function start() {
         provider='zkpassport', attestation_ref='staging-zk-session-9004', verified_at=NOW()
     `);
 
-    // Seed open futures positions (one paper, one live) so PnL + funding
-    // columns render, plus a little funding history.
+    // Seed open futures positions (live mode) so PnL + funding columns render.
     const ethFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='ETH-PERP'")).rows[0];
     const btcFut = (await pool.query("SELECT id, mark_price FROM futures_markets WHERE symbol='BTC-PERP'")).rows[0];
     if (ethFut && btcFut) {
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,last_funding_at) VALUES
           (900001,9001,$1,'live','long',5,2400,1.0,480000000,1968,'open',NOW()),
-          (900002,9004,$2,'paper','short',10,68000,0.05,340000000,74800,'open',NOW())
+          (900002,9004,$2,'paper','short',10,68000,0.05,340000000,74800,'open',NOW()),
+          (900003,9002,$2,'live','long',100,68000,0.05,34000000,67388,'open',NOW())
         ON CONFLICT(id) DO NOTHING
       `, [ethFut.id, btcFut.id]);
       await pool.query(`
         INSERT INTO funding_payments(id,position_id,user_id,market_id,amount,rate,mode) VALUES
           (900001,900001,9001,$1,-240,0.0001,'live'),
-          (900002,900002,9004,$2,170,0.0001,'paper')
+          (900002,900002,9004,$2,170,0.0001,'live')
         ON CONFLICT(id) DO NOTHING
       `, [ethFut.id, btcFut.id]);
       await pool.query(`
@@ -4593,28 +5354,28 @@ async function start() {
       // staging-alice: 5 closed positions with mix of profit/loss (total ROI ~+30%)
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
-          (900101,9001,$1,'paper','long',3,2000,0.5,333333333,1600,'closed',50000000,NOW()-INTERVAL '30 days',NOW()-INTERVAL '20 days'),
-          (900102,9001,$2,'paper','long',5,65000,0.02,260000000,52000,'closed',26000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '15 days'),
-          (900103,9001,$1,'paper','short',2,2300,1.0,383333333,2645,'closed',-57500000,NOW()-INTERVAL '20 days',NOW()-INTERVAL '10 days'),
-          (900104,9001,$2,'paper','short',4,66000,0.01,165000000,79200,'closed',66000000,NOW()-INTERVAL '15 days',NOW()-INTERVAL '5 days'),
-          (900105,9001,$1,'paper','long',2,2100,0.8,336000000,2310,'closed',32000000,NOW()-INTERVAL '10 days',NOW()-INTERVAL '2 days')
+          (900101,9001,$1,'live','long',3,2000,0.5,333333333,1600,'closed',50000000,NOW()-INTERVAL '30 days',NOW()-INTERVAL '20 days'),
+          (900102,9001,$2,'live','long',5,65000,0.02,260000000,52000,'closed',26000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '15 days'),
+          (900103,9001,$1,'live','short',2,2300,1.0,383333333,2645,'closed',-57500000,NOW()-INTERVAL '20 days',NOW()-INTERVAL '10 days'),
+          (900104,9001,$2,'live','short',4,66000,0.01,165000000,79200,'closed',66000000,NOW()-INTERVAL '15 days',NOW()-INTERVAL '5 days'),
+          (900105,9001,$1,'live','long',2,2100,0.8,336000000,2310,'closed',32000000,NOW()-INTERVAL '10 days',NOW()-INTERVAL '2 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
       // staging-bob: 3 closed positions with net loss (total ROI ~-10%)
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,realized_pnl,opened_at,closed_at) VALUES
-          (900201,9002,$1,'paper','long',5,2200,2.0,880000000,1760,'closed',-88000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '18 days'),
-          (900202,9002,$2,'paper','short',3,68000,0.05,340000000,85000,'closed',-17000000,NOW()-INTERVAL '18 days',NOW()-INTERVAL '12 days'),
-          (900203,9002,$1,'paper','long',1,2300,3.0,690000000,2300,'closed',23000000,NOW()-INTERVAL '12 days',NOW()-INTERVAL '3 days')
+          (900201,9002,$1,'live','long',5,2200,2.0,880000000,1760,'closed',-88000000,NOW()-INTERVAL '25 days',NOW()-INTERVAL '18 days'),
+          (900202,9002,$2,'live','short',3,68000,0.05,340000000,85000,'closed',-17000000,NOW()-INTERVAL '18 days',NOW()-INTERVAL '12 days'),
+          (900203,9002,$1,'live','long',1,2300,3.0,690000000,2300,'closed',23000000,NOW()-INTERVAL '12 days',NOW()-INTERVAL '3 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
       // staging-charlie: 2 open positions for copy-trade demo
       await pool.query(`
         INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
-          (900301,9003,$1,'paper','long',5,2400,0.5,480000000,1920,'open',NOW()-INTERVAL '7 days'),
-          (900302,9003,$2,'paper','short',3,67000,0.03,201000000,79900,'open',NOW()-INTERVAL '5 days')
+          (900301,9003,$1,'live','long',5,2400,0.5,480000000,1920,'open',NOW()-INTERVAL '7 days'),
+          (900302,9003,$2,'live','short',3,67000,0.03,201000000,79900,'open',NOW()-INTERVAL '5 days')
         ON CONFLICT(id) DO NOTHING
       `, [ethFutMarket.id, btcFutMarket.id]);
 
@@ -4623,7 +5384,7 @@ async function start() {
       if (bloomFut) {
         await pool.query(`
           INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
-            (900401,9005,$1,'paper','long',2,0.5,1000,500000,0.35,'open',NOW()-INTERVAL '3 days')
+            (900401,9005,$1,'live','long',2,0.5,1000,500000,0.35,'open',NOW()-INTERVAL '3 days')
           ON CONFLICT(id) DO NOTHING
         `, [bloomFut.id]);
       }
@@ -4719,7 +5480,26 @@ async function start() {
       );
       await pool.query("UPDATE opinion_markets SET resolved_outcome='YES', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9012 AND resolved_outcome IS NULL");
       await pool.query("UPDATE opinion_markets SET resolved_outcome='NO', resolved_at=NOW()-INTERVAL '20 hours' WHERE id=9013 AND resolved_outcome IS NULL");
+      // Daily markets are crypto price questions (these are seeded after the migration backfill).
+      await pool.query("UPDATE opinion_markets SET category='Crypto' WHERE id IN (9010,9011,9012,9013) AND category='General'");
     }
+
+    // Seed vault strategies (all environments get these)
+    await pool.query(`
+      INSERT INTO vault_strategies(id,name,description,risk_level,target_apy,supported_tokens,is_active) VALUES
+        (1,'Conservative','Low-volatility strategy using stablecoin lending pools.','low',6.5,ARRAY['USDC','BLOOM'],true),
+        (2,'Balanced','Mixed allocation: stablecoins + blue-chip crypto lending.','medium',11.0,ARRAY['USDC','BLOOM','ETH'],true),
+        (3,'Growth','Higher-yield DeFi strategies with active rebalancing.','high',18.5,ARRAY['BLOOM','ETH'],true)
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed vault positions for staging-alice
+    await pool.query(`
+      INSERT INTO vault_positions(id,user_id,username,strategy_id,token,amount,deposited_at) VALUES
+        (9001,9001,'staging-alice',1,'USDC',500000000000,NOW()-INTERVAL '30 days'),
+        (9002,9001,'staging-alice',2,'BLOOM',250000000000,NOW()-INTERVAL '7 days')
+      ON CONFLICT(id) DO NOTHING
+    `);
 
     // Seed trade journal entries (staging:private table — always empty in prod copy).
     await pool.query(`
@@ -4748,6 +5528,23 @@ async function start() {
 
     // Seed demo conversations + messages (private tables → empty in staging).
     await ensureMessagingSeed();
+
+    // Seed crypto news bot posts for the News tab
+    await pool.query(`
+      INSERT INTO posts(id,user_id,username,content,is_bot,bot_source,source_url) VALUES
+        (900030,-1,'CryptoNewsBot','Staging demo: BTC reaches simulated test milestone in staging environment',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900031,-1,'CryptoNewsBot','Staging demo: ETH upgrade simulation completes successfully on test chain',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900032,-1,'CryptoNewsBot','Staging demo: Crypto market conditions are normal in this staging run',TRUE,'CoinDesk','https://example.com/staging-test-article'),
+        (900033,-1,'CryptoNewsBot','Staging demo: Institutional adoption test story for QA of news tab UI',TRUE,'CoinTelegraph','https://example.com/staging-test-article'),
+        (900034,-1,'CryptoNewsBot','Staging demo: Stablecoin regulatory clarity headline for feed rendering test',TRUE,'CoinDesk','https://example.com/staging-test-article')
+      ON CONFLICT(id) DO NOTHING
+    `);
+    await pool.query(`
+      INSERT INTO news_dedup(guid) VALUES
+        ('staging-demo-guid-1'),
+        ('staging-demo-guid-2')
+      ON CONFLICT DO NOTHING
+    `);
 
     // Seed defi_swaps so the "Most Active" tab on the Trade page shows a clear ordering.
     // Guarded by a WHERE NOT EXISTS so it only runs once per fresh DB.
@@ -4795,8 +5592,8 @@ async function start() {
         title = tmpl.titleFn(dateLabel);
       }
       await pool.query(
-        `INSERT INTO opinion_markets(title,description,resolution_criteria,is_daily,template_slug,closes_at,created_by_user_id)
-         VALUES($1,$2,$3,true,$4,$5,NULL)`,
+        `INSERT INTO opinion_markets(title,description,resolution_criteria,is_daily,template_slug,category,closes_at,created_by_user_id)
+         VALUES($1,$2,$3,true,$4,'Crypto',$5,NULL)`,
         [title, tmpl.description, tmpl.resolution_criteria, tmpl.slug, closesAt]
       );
     }
@@ -4825,6 +5622,22 @@ async function start() {
         (9006,'adjust_balance',9001,'Staging demo — compensation USDC +50')
       ) v(admin_user_id,action_type,target_user_id,reason)
       WHERE NOT EXISTS (SELECT 1 FROM admin_actions WHERE reason='Staging demo — spam activity detected')
+    `).catch(() => {});
+
+    // Staking demo seeds — defi_stakes is staging:private so needs explicit rows.
+    // Creates a mix of active and completed stakes across tokens so the hero
+    // counters and activity feed are non-empty.
+    await pool.query(`
+      INSERT INTO defi_stakes(id,user_id,token,amount,apy_bps,staked_at,unstaked_at,reward_amount) VALUES
+        (990101,9001,'BLOOM',300000000,1200,NOW()-INTERVAL '14 days',NULL,0),
+        (990102,9002,'ETH',500000,600,NOW()-INTERVAL '7 days',NULL,0),
+        (990103,9003,'SOL',5000000,800,NOW()-INTERVAL '21 days',NOW()-INTERVAL '3 days',32000),
+        (990104,9004,'BTC',50000,400,NOW()-INTERVAL '30 days',NULL,0),
+        (990105,9005,'BLOOM',800000000,1200,NOW()-INTERVAL '5 days',NULL,0),
+        (990106,9001,'BLOOM',150000000,1200,NOW()-INTERVAL '60 days',NOW()-INTERVAL '10 days',2953424),
+        (990107,9002,'BLOOM',200000000,1200,NOW()-INTERVAL '2 days',NULL,0),
+        (990108,9003,'ETH',300000,600,NOW()-INTERVAL '3 days',NOW()-INTERVAL '1 day',1480)
+      ON CONFLICT (id) DO NOTHING
     `).catch(() => {});
   }
 

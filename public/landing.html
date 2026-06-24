@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BloomMoney — Your Crypto, Actively Working</title>
+
+  <script>
+  // usernode-dev-console@1
+  (function () {
+    if (window.__usernodeDevConsole) return;
+    window.__usernodeDevConsole = true;
+    var S = '__usernodeDevConsole';
+    function serialize(v, depth) {
+      depth = depth || 0;
+      try {
+        if (v === undefined) return 'undefined';
+        if (v === null) return 'null';
+        if (typeof v === 'string') return v;
+        if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+        if (typeof v === 'function') return '[Function ' + (v.name || 'anonymous') + ']';
+        if (v instanceof Error) return (v.stack || (v.name + ': ' + v.message));
+        if (depth > 3) return '[…]';
+        var seen = new WeakSet();
+        return JSON.stringify(v, function (k, val) {
+          if (typeof val === 'object' && val !== null) {
+            if (seen.has(val)) return '[Circular]';
+            seen.add(val);
+          }
+          if (typeof val === 'function') return '[Function ' + (val.name || 'anonymous') + ']';
+          if (val instanceof Error) return val.stack || (val.name + ': ' + val.message);
+          return val;
+        });
+      } catch (e) { try { return String(v); } catch (_) { return '[unserializable]'; } }
+    }
+    function post(level, args, meta) {
+      try {
+        var payload = {
+          sentinel: S,
+          level: level,
+          args: Array.prototype.slice.call(args).map(function (a) { return serialize(a); }),
+          ts: Date.now(),
+          url: location.href,
+        };
+        if (meta) for (var k in meta) payload[k] = meta[k];
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(payload, '*');
+        }
+      } catch (_) {}
+    }
+    ['log','info','warn','error','debug'].forEach(function (level) {
+      var orig = console[level] ? console[level].bind(console) : function () {};
+      console[level] = function () { post(level, arguments); orig.apply(null, arguments); };
+    });
+    window.addEventListener('error', function (e) {
+      var msg = (e.error && (e.error.stack || e.error.message)) || e.message || 'Error';
+      post('error', [msg], { source: e.filename || '', line: e.lineno || 0, col: e.colno || 0, kind: 'error' });
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e.reason;
+      var msg = (r && (r.stack || r.message)) || String(r);
+      post('error', [msg], { kind: 'unhandledrejection' });
+    });
+    try { post('info', ['[dev-console ready]'], { kind: 'ready' }); } catch (_) {}
+  })();
+  </script>
+
+  <script>
+  // Parity with the app shell: theme is decided pre-paint. The landing is a
+  // dark-first marketing splash (no toggle, no light styling), so it stays on
+  // .dark; the shared palette below just keeps its accent/surfaces from
+  // drifting away from the app. localStorage may throw in a sandboxed iframe.
+  (function(){ document.documentElement.classList.add('dark'); })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+  // Remap the violet ramp the markup already uses onto the app's brand purple
+  // (#7c5cfc) so the landing accent matches the app shell, plus the shared
+  // semantic colour names resolving to the CSS vars below.
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: {
+      violet: { 300: '#a9a0ff', 400: '#9b7ffe', 500: '#7c5cfc', 600: '#6d4ef0', 700: '#5a3fd6' },
+      surface: 'var(--bg-surface)', card: 'var(--bg-card)', deep: 'var(--bg-deep)',
+      'accent-purple': 'var(--accent-purple)', 'accent-blue': 'var(--accent-blue)',
+    } } },
+  };
+  </script>
+
+  <style>
+    /* Shared palette — same tokens as the app shell (public/index.html) so the
+       landing never drifts. Dark values apply (landing is always .dark). */
+    :root {
+      --bg-deep: #f4f5f8; --bg-surface: #ffffff; --bg-card: #f0f1f6;
+      --accent-purple: #7c5cfc; --accent-blue: #4e9af1;
+      --text-primary: #1c1e2d; --text-secondary: #525875; --text-muted: #6b7196;
+    }
+    html.dark {
+      --bg-deep: #0f1117; --bg-surface: #131620; --bg-card: #161b2a;
+      --accent-purple: #7c5cfc; --accent-blue: #4e9af1;
+      --text-primary: #e8eaf0; --text-secondary: #8b95ab; --text-muted: #7884a3;
+    }
+    html { scroll-behavior: smooth; }
+    .ptab { color: #a1a1aa; transition: color 0.15s, background 0.15s; }
+    .ptab:hover { color: #fff; background: #27272a; }
+    .ptab.active { background: var(--accent-purple); color: #fff; }
+    .benefit-item { display: flex; gap: 0.625rem; align-items: flex-start; }
+    .benefit-item::before { content: '✓'; color: var(--accent-purple); font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 overflow-x-hidden">
+
+<!-- ── Top Nav ──────────────────────────────────────────────────────────────── -->
+<nav class="fixed top-0 left-0 right-0 z-50 bg-zinc-950/95 backdrop-blur border-b border-zinc-800/60 flex items-center justify-between px-5 h-14">
+  <a href="/" class="flex items-center gap-2 font-bold text-white text-lg hover:text-violet-300 transition-colors">
+    <span>🌸</span><span>BloomMoney</span>
+  </a>
+  <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-5 py-2 rounded-lg font-semibold text-sm">Open App</a>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────────────────── -->
+<section id="landing-hero" class="min-h-screen flex flex-col items-center justify-center text-center px-4 pt-14 relative overflow-hidden">
+  <div class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse 70% 55% at 50% 42%,rgba(124,58,237,0.20) 0%,transparent 70%)"></div>
+  <div class="relative z-10 max-w-2xl mx-auto">
+    <div class="inline-flex items-center gap-2 bg-violet-600/15 border border-violet-500/30 text-violet-300 text-xs font-semibold px-4 py-1.5 rounded-full mb-8 tracking-wide">
+      <span class="w-2 h-2 bg-emerald-400 rounded-full" style="animation:pulse 2s infinite"></span>
+      All products live now
+    </div>
+    <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold text-white leading-tight mb-6">
+      Your Crypto,<br>Actively Working
+    </h1>
+    <p class="text-zinc-400 text-lg sm:text-xl max-w-xl mx-auto mb-10 leading-relaxed">
+      Earn rewards, stake assets, deploy vault strategies, and join token launches — all within one integrated platform, live right now.
+    </p>
+    <div class="flex flex-col sm:flex-row gap-3 justify-center">
+      <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-8 py-3.5 rounded-xl font-bold text-base">Open App</a>
+      <button onclick="document.getElementById('product-tabs').scrollIntoView({behavior:'smooth'})"
+        class="bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all text-zinc-100 px-8 py-3.5 rounded-xl font-semibold text-base">
+        Explore Products ↓
+      </button>
+    </div>
+  </div>
+  <div class="absolute bottom-0 left-0 right-0 h-28 pointer-events-none" style="background:linear-gradient(transparent,#09090b)"></div>
+</section>
+
+<!-- ── Sticky Product Tabs ───────────────────────────────────────────────────── -->
+<div id="product-tabs" class="sticky top-14 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800/60 py-3 px-4">
+  <div class="flex gap-1.5 justify-center">
+    <button class="ptab px-4 py-1.5 rounded-full text-sm font-medium" data-target="product-earn" onclick="scrollTo('product-earn')">Earn</button>
+    <button class="ptab px-4 py-1.5 rounded-full text-sm font-medium" data-target="product-stake" onclick="scrollTo('product-stake')">Stake</button>
+    <button class="ptab px-4 py-1.5 rounded-full text-sm font-medium" data-target="product-vault" onclick="scrollTo('product-vault')">Vault</button>
+    <button class="ptab px-4 py-1.5 rounded-full text-sm font-medium" data-target="product-launchpad" onclick="scrollTo('product-launchpad')">Launchpad</button>
+  </div>
+</div>
+
+<!-- ── Product Sections ──────────────────────────────────────────────────────── -->
+<div class="max-w-3xl mx-auto px-4 py-16 space-y-28">
+
+  <!-- Earn -->
+  <section id="product-earn" class="scroll-mt-28">
+    <div class="text-center mb-8">
+      <span class="inline-flex items-center gap-1.5 bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+        <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>Live
+      </span>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Put Your Liquidity to Work</h2>
+      <p class="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto leading-relaxed">
+        BloomMoney's live liquidity pools let you deposit assets and earn a share of real trading fees generated by active swaps. Deposits go to work immediately.
+      </p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 mb-7 space-y-4">
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">Contribute to live BLOOM/USDC and ETH/USDC pools and earn fee income proportional to your share</div>
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">Your accrued fees and position value are visible in real time from your portfolio dashboard</div>
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">No lock-up — withdraw your position at any time and receive your share of pooled fees</div>
+    </div>
+    <div class="flex justify-center">
+      <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-9 py-3 rounded-xl font-semibold">Start Earning</a>
+    </div>
+  </section>
+
+  <!-- Stake -->
+  <section id="product-stake" class="scroll-mt-28">
+    <div class="text-center mb-8">
+      <span class="inline-flex items-center gap-1.5 bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+        <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>Live
+      </span>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Stake BLOOM. Earn Every Day.</h2>
+      <p class="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto leading-relaxed">
+        Staking is live and running on BloomMoney. Lock your BLOOM tokens and watch rewards accrue continuously — visible rates, no hidden conditions.
+      </p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 mb-7">
+      <div class="flex items-center gap-3 mb-5 p-4 bg-violet-600/10 border border-violet-500/20 rounded-xl">
+        <div class="text-2xl font-bold text-violet-300">12% APY</div>
+        <div class="text-xs text-zinc-400">Target rate on staked BLOOM — displayed on-platform before you commit a single token</div>
+      </div>
+      <div class="space-y-4">
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Earn 12% APY on staked BLOOM — the rate is displayed on-platform before you commit a single token</div>
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Rewards accumulate continuously and are shown in real time on your active stakes dashboard</div>
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Unstake at any time with no mandatory holding period</div>
+      </div>
+    </div>
+    <div class="flex justify-center">
+      <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-9 py-3 rounded-xl font-semibold">Stake Now</a>
+    </div>
+  </section>
+
+  <!-- Vault -->
+  <section id="product-vault" class="scroll-mt-28">
+    <div class="text-center mb-8">
+      <span class="inline-flex items-center gap-1.5 bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+        <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>Live
+      </span>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Hands-Off Growth, Built In</h2>
+      <p class="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto leading-relaxed">
+        Vault strategies automate asset allocation across BloomMoney's earning products. Deposit once into a pre-built strategy, let it work, and withdraw whenever you choose — no manual management required.
+      </p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 mb-7">
+      <div class="grid grid-cols-3 gap-3 mb-6">
+        <div class="bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-center">
+          <div class="text-emerald-400 text-xs font-semibold mb-1">Conservative</div>
+          <div class="text-white text-xl font-bold">6.5%</div>
+          <div class="text-zinc-500 text-xs mt-0.5">Target APY</div>
+        </div>
+        <div class="bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-center">
+          <div class="text-amber-400 text-xs font-semibold mb-1">Balanced</div>
+          <div class="text-white text-xl font-bold">11%</div>
+          <div class="text-zinc-500 text-xs mt-0.5">Target APY</div>
+        </div>
+        <div class="bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-center">
+          <div class="text-violet-400 text-xs font-semibold mb-1">Growth</div>
+          <div class="text-white text-xl font-bold">18.5%</div>
+          <div class="text-zinc-500 text-xs mt-0.5">Target APY</div>
+        </div>
+      </div>
+      <div class="space-y-4">
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Three ready-to-use strategies — Conservative, Balanced, and Growth — each with a clearly stated target rate and risk profile</div>
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Assets are spread across staking and liquidity products; the vault handles allocation so you don't have to</div>
+        <div class="benefit-item text-zinc-200 text-sm sm:text-base">Full transparency: your vault balance, strategy breakdown, and accrued yield are visible at all times</div>
+      </div>
+    </div>
+    <div class="flex justify-center">
+      <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-9 py-3 rounded-xl font-semibold">Explore Vaults</a>
+    </div>
+  </section>
+
+  <!-- Launchpad -->
+  <section id="product-launchpad" class="scroll-mt-28">
+    <div class="text-center mb-8">
+      <span class="inline-flex items-center gap-1.5 bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+        <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>Live
+      </span>
+      <h2 class="text-3xl sm:text-4xl font-bold text-white mb-4">Get In Early on Vetted Token Launches</h2>
+      <p class="text-zinc-400 text-base sm:text-lg max-w-xl mx-auto leading-relaxed">
+        BloomMoney Launchpad hosts curated token sales directly on-platform. Browse live and upcoming raises, review project details, and invest using USDC — no third-party platforms required.
+      </p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 mb-7 space-y-4">
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">Participate in live token offerings and track raise progress against the hard cap in real time</div>
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">Upcoming launches are listed in advance so you can research and plan before any commitment</div>
+      <div class="benefit-item text-zinc-200 text-sm sm:text-base">Every investment is tracked inside your BloomMoney portfolio, alongside your other positions</div>
+    </div>
+    <div class="flex justify-center">
+      <a href="/" class="bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-9 py-3 rounded-xl font-semibold">View Live Launches</a>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Footer ────────────────────────────────────────────────────────────────── -->
+<footer id="landing-footer" class="border-t border-zinc-800 px-4 py-14 mt-4">
+  <div class="max-w-3xl mx-auto">
+    <div class="text-center mb-10">
+      <a href="/" class="inline-block bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all text-white px-10 py-3.5 rounded-xl font-bold">Open App</a>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-10 text-center text-sm">
+      <div>
+        <div class="text-white font-semibold mb-2">Earn</div>
+        <a href="/" class="text-zinc-500 hover:text-zinc-300 transition-colors block">Add Liquidity</a>
+      </div>
+      <div>
+        <div class="text-white font-semibold mb-2">Stake</div>
+        <a href="/" class="text-zinc-500 hover:text-zinc-300 transition-colors block">Stake BLOOM</a>
+      </div>
+      <div>
+        <div class="text-white font-semibold mb-2">Vault</div>
+        <a href="/" class="text-zinc-500 hover:text-zinc-300 transition-colors block">View Strategies</a>
+      </div>
+      <div>
+        <div class="text-white font-semibold mb-2">Launchpad</div>
+        <a href="/" class="text-zinc-500 hover:text-zinc-300 transition-colors block">Live Launches</a>
+      </div>
+    </div>
+    <div class="text-center">
+      <p class="text-zinc-600 text-xs max-w-2xl mx-auto mb-3 leading-relaxed">
+        Crypto assets carry risk, including potential loss of principal. Nothing on this page constitutes financial advice or a guarantee of return. Past performance is not indicative of future results.
+      </p>
+      <p class="text-zinc-700 text-xs">🌸 BloomMoney &copy; 2026</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+// ── Active tab via IntersectionObserver ───────────────────────────────────────
+const PRODUCT_SECTIONS = ['product-earn', 'product-stake', 'product-vault', 'product-launchpad'];
+
+function scrollTo(id) {
+  var el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth' });
+}
+
+function setActiveTab(id) {
+  document.querySelectorAll('[data-target]').forEach(function(btn) {
+    var isActive = btn.dataset.target === id;
+    btn.classList.toggle('active', isActive);
+  });
+}
+
+var observer = new IntersectionObserver(function(entries) {
+  var visible = entries.filter(function(e) { return e.isIntersecting; });
+  if (visible.length > 0) {
+    setActiveTab(visible[0].target.id);
+  }
+}, { rootMargin: '-25% 0px -65% 0px', threshold: 0 });
+
+PRODUCT_SECTIONS.forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) observer.observe(el);
+});
+</script>
+</body>
+</html>

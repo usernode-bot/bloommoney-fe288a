@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.0",
-    "jsonwebtoken": "^9.0.2"
+    "rss-parser": "^3.13.0"
   }
 }
