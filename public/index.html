@@ -233,13 +233,13 @@
       <section id="section-market" class="view hidden max-w-5xl mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
-      <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-stake" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Liquidity -->
-      <section id="section-liquidity" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-liquidity" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- ICO -->
-      <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-ico" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / launchpad) -->
       <section id="section-earn" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
@@ -689,8 +689,9 @@ const VIEW_SECTION = {
   market: 'section-market', swap: 'section-market',
   trade: 'section-trade', futures: 'section-trade',
   journal: 'section-journal',
-  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
-  launchpad: 'section-earn',
+  earn: 'section-earn',
+  stake: 'section-stake', liquidity: 'section-liquidity',
+  ico: 'section-ico', launchpad: 'section-ico',
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -771,10 +772,10 @@ async function loadView(view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
-      case 'earn': case 'ico': S.earnTab = null; S.earnHubFilter = 'all'; await renderEarn(sec); break;
-      case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
-      case 'liquidity': S.earnTab = 'liquidity'; await renderEarn(sec); break;
-      case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
+      case 'earn': S.earnHubFilter = 'all'; await renderEarn(sec); break;
+      case 'stake': await renderStake(sec); break;
+      case 'liquidity': await renderLiquidity(sec); break;
+      case 'ico': case 'launchpad': await renderICO(sec); break;
       case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
@@ -3468,7 +3469,7 @@ async function renderStake(sec) {
     }
     const yourStakesHtml = '<h3 class="font-semibold mb-3">Your Active Stakes</h3>' + activeHtml;
 
-    sec.innerHTML = heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
+    sec.innerHTML = defiTabBar('stake') + heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
   }
 
   window.stakeToggle = function(token) {
@@ -3692,7 +3693,7 @@ async function renderLiquidity(sec) {
       + (poolStats.length ? tableRows : '<div class="px-4 py-8 text-center text-[#4e5872] text-sm">No pools available.</div>')
       + '</div>';
 
-    sec.innerHTML = heroHtml + tableHtml;
+    sec.innerHTML = defiTabBar('liquidity') + heroHtml + tableHtml;
   }
 
   window.poolSelectRow = function(poolId) {
@@ -3925,7 +3926,7 @@ async function renderICO(sec) {
         <div class="text-lg font-bold" style="${GRAD}">${value}</div>
       </div>`;
 
-    sec.innerHTML = `
+    sec.innerHTML = defiTabBar('launchpad') + `
       <div class="mb-6">
         <h2 class="text-3xl font-bold mb-1">🚀 <span style="${GRAD}">Launchpad</span></h2>
         <p class="text-[#8b95ab] text-sm mb-3">Early token access — curated IDO launches</p>
@@ -4018,19 +4019,9 @@ function renderEarnHub(sec) {
   render();
 }
 
-// ── Earn (composite: Stake / Liquidity / Launchpad) ───────────────────────────
+// ── Earn (yield marketplace hub) ──────────────────────────────────────────────
 async function renderEarn(sec) {
-  const tab = S.earnTab;
-  if (!tab) { renderEarnHub(sec); return; }
-  const backLink = `<button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>`;
-  sec.innerHTML = `${backLink}${defiTabBar(S.view || tab)}<div id="earn-sub"></div>`;
-  const sub = document.getElementById('earn-sub');
-  sub.innerHTML = spin();
-  try {
-    if (tab === 'stake') await renderStake(sub);
-    else if (tab === 'liquidity') await renderLiquidity(sub);
-    else await renderICO(sub);
-  } catch (e) { sub.innerHTML = err(e.message); }
+  renderEarnHub(sec);
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -4047,7 +4038,6 @@ async function renderVault(sec) {
       return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
     };
     sec.innerHTML = `
-      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>
       ${defiTabBar('vault')}
       <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
       <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
@@ -4176,7 +4166,7 @@ async function exploreContentHtml() {
 
     <h3 class="font-semibold mb-2">Live token sales</h3>
     ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
-      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('earn');S.earnTab='ico'">
+      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('launchpad')">
         <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-[#8b95ab]">${esc(o.token_symbol)}</span></div>
         <div class="text-xs text-[#8b95ab]">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
       </button>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No live sales</p>'}
