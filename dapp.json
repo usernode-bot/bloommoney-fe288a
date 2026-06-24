@@ -209,6 +209,7 @@
     { "name": "Staking activity API returns JSON", "path": "/api/defi/staking-activity", "expectSelector": "body" },
     { "name": "Stake section in DOM", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Earn hub hero renders with max APY", "path": "/?demo=1", "expectText": "Up to 18.5% APY" },
-    { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" }
+    { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" },
+    { "name": "Pool dashboard renders", "path": "/liquidity?demo=1", "expectSelector": ".pool-stats-bar" }
   ]
 }
