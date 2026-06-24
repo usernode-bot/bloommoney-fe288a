@@ -3080,6 +3080,7 @@ function renderEarnHub(sec) {
     else if (f === 'top') list = PRODUCTS.filter(p => p.cats.includes('top')).sort((a,b) => (b.apy||0)-(a.apy||0));
     else list = PRODUCTS.filter(p => p.cats.includes(f));
     sec.innerHTML = `
+      ${defiTabBar('earn')}
       <div class="mb-6 pt-2">
         <h1 class="text-2xl font-bold leading-tight">Earn crypto yield.<br><span class="text-emerald-400">Up to 18.5% APY.</span></h1>
         <p class="text-[#8b95ab] text-sm mt-1">Stake, pool, and vault — all in one place.</p>
