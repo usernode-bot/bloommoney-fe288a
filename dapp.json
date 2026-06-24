@@ -177,6 +177,7 @@
     { "name": "Landing page hero renders", "path": "/landing.html", "expectSelector": "#landing-hero" },
     { "name": "Vault section in DOM", "path": "/?demo=1", "expectSelector": "#section-vault" },
     { "name": "Launchpad nav item in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='launchpad']" },
+    { "name": "Launchpad stats bar renders", "path": "/?demo=1", "expectSelector": "[data-launchpad-stats]" },
     { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
     { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" },
     { "name": "Trade Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
@@ -209,6 +210,13 @@
     { "name": "Stake section in DOM", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Earn hub hero renders with max APY", "path": "/?demo=1", "expectText": "Up to 18.5% APY" },
     { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" },
-    { "name": "Theme toggle button in top bar", "path": "/?demo=1", "expectSelector": "#theme-toggle" }
+    { "name": "Theme toggle button in top bar", "path": "/?demo=1", "expectSelector": "#theme-toggle" },
+    { "name": "Portfolio section in DOM", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
+    { "name": "Portfolio nav button in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='portfolio']" },
+    { "name": "Portfolio bottom nav tab in DOM", "path": "/?demo=1", "expectSelector": "[data-tab='portfolio']" },
+    { "name": "Wallet send API requires auth", "path": "/api/wallet/send", "expectSelector": "body" },
+    { "name": "Portfolio token modal handler registered", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
+    { "name": "Portfolio global header hidden when portfolio active", "path": "/?demo=1", "expectSelector": "#global-header" },
+    { "name": "Pool dashboard renders", "path": "/liquidity?demo=1", "expectSelector": ".pool-stats-bar" }
   ]
 }
