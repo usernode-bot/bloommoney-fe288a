@@ -151,25 +151,6 @@
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
     <div class="flex items-center gap-1.5">
-      <!-- Desktop-only: action icons and balance badges -->
-      <div class="hidden sm:flex items-center gap-2 text-xs">
-        <button class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
-        <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
-          <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
-        </button>
-        <button id="hdr-verify" class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Subscription" onclick="navigate('verify')">🪪</button>
-        <!-- Balance badges -->
-        <div class="flex gap-1.5">
-          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-            <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
-            <span class="text-[#4e5872]">BLOOM</span>
-          </div>
-          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-            <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-            <span class="text-[#4e5872]">USDC</span>
-          </div>
-        </div>
-      </div>
       <!-- Identity: avatar + @username → Profile -->
       <button id="hdr-identity" class="hidden items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
         <img id="hdr-avatar" src="" alt="" class="w-7 h-7 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(124,92,252,0.3)">
@@ -182,12 +163,6 @@
       <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
       <!-- Log out -->
       <button id="hdr-logout" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors" title="Log out" aria-label="Log out" onclick="S.token='';S.user=null;navigate('home');">🚪</button>
-      <!-- Mobile-only: compact balance chip -->
-      <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
-        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
-        <span class="text-[#4e5872]">/</span>
-        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-      </div>
     </div>
   </header>
 
@@ -219,9 +194,6 @@
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <button class="nav-item" data-view="explore">🔭 Explore</button>
-      <button class="nav-item" data-view="verify">🪪 Subscription</button>
-      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
       <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
@@ -763,7 +735,6 @@ const VIEW_SECTION = {
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
   admin: 'section-admin',
-  portfolio: 'section-portfolio',
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
@@ -851,7 +822,6 @@ async function loadView(view) {
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
       case 'admin': await renderAdmin(sec); break;
-      case 'portfolio': await renderPortfolio(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
 }
@@ -1110,16 +1080,6 @@ function updateHeader() {
 
   const connectBtn = document.getElementById('hdr-connect-wallet');
   if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
-
-  // Balance badges
-  const bloomEl = document.getElementById('hdr-bloom');
-  const usdcEl = document.getElementById('hdr-usdc');
-  if (bloomEl) bloomEl.textContent = getBal('BLOOM');
-  if (usdcEl) usdcEl.textContent = getBal('USDC');
-  const bloomLgEl = document.getElementById('hdr-bloom-lg');
-  const usdcLgEl = document.getElementById('hdr-usdc-lg');
-  if (bloomLgEl) bloomLgEl.textContent = getBal('BLOOM');
-  if (usdcLgEl) usdcLgEl.textContent = getBal('USDC');
 
   // Identity: avatar + @username (links to Profile)
   const identityBtn = document.getElementById('hdr-identity');
