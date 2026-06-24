@@ -184,11 +184,9 @@
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
-      <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="portfolio">💼 Portfolio</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
-      <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="stake">🔒 Stake</button>
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
@@ -201,7 +199,6 @@
       <button class="nav-item" data-view="profile">👤 Profile</button>
       <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
-      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
       <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
@@ -286,9 +283,7 @@
   <!-- Mobile Bottom Nav (six tabs) -->
   <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-[#131620] border-t border-[rgba(255,255,255,0.06)] flex z-30">
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
-    <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
   </nav>
@@ -3469,7 +3464,7 @@ async function renderStake(sec) {
     }
     const yourStakesHtml = '<h3 class="font-semibold mb-3">Your Active Stakes</h3>' + activeHtml;
 
-    sec.innerHTML = defiTabBar('stake') + heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
+    sec.innerHTML = defiTabBar('stake') + heroHtml + gridHtml + yourStakesHtml + actHtml + whyHtml;
   }
 
   window.stakeToggle = function(token) {
@@ -4424,16 +4419,6 @@ async function renderMarkets(sec, demoMarkets) {
             <h4 class="font-semibold text-sm">3. Claim Winnings</h4>
             <p class="text-xs text-[#8b95ab]">When the market resolves, winners split the entire pool proportional to their position.</p>
           </div>
-        </div>
-      </div>
-
-      <div class="pm-footer px-4 py-6 border-t border-[rgba(255,255,255,0.06)] text-center space-y-2">
-        <div class="font-bold text-[#7c5cfc]">&#x1f338; BloomMoney</div>
-        <p class="text-xs text-[#4e5872]">BloomMoney is a demo prediction platform — no real funds.</p>
-        <div class="flex gap-4 justify-center text-xs text-[#8b95ab]">
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('earn')">Earn</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('market')">Market</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('nfts')">NFTs</button>
         </div>
       </div>
     `;
