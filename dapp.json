@@ -177,6 +177,7 @@
     { "name": "Landing page hero renders", "path": "/landing.html", "expectSelector": "#landing-hero" },
     { "name": "Vault section in DOM", "path": "/?demo=1", "expectSelector": "#section-vault" },
     { "name": "Launchpad nav item in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='launchpad']" },
+    { "name": "Launchpad stats bar renders", "path": "/?demo=1", "expectSelector": "[data-launchpad-stats]" },
     { "name": "Wins tab button in feed DOM", "path": "/?demo=1", "expectText": "Wins 🏆" },
     { "name": "Milestone banner renders on milestone post card", "path": "/?demo=1", "expectSelector": ".milestone-banner" },
     { "name": "Trade Journal section in DOM", "path": "/?demo=1", "expectSelector": "#section-journal" },
@@ -208,6 +209,7 @@
     { "name": "Staking activity API returns JSON", "path": "/api/defi/staking-activity", "expectSelector": "body" },
     { "name": "Stake section in DOM", "path": "/?demo=1", "expectSelector": "#section-earn" },
     { "name": "Earn hub hero renders with max APY", "path": "/?demo=1", "expectText": "Up to 18.5% APY" },
-    { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" }
+    { "name": "Earn hub product cards render", "path": "/?demo=1", "expectText": "Earn Now" },
+    { "name": "Pool dashboard renders", "path": "/liquidity?demo=1", "expectSelector": ".pool-stats-bar" }
   ]
 }
