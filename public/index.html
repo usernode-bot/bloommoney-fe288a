@@ -150,35 +150,18 @@
       </button>
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="flex items-center gap-1">
-      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
-      <div class="hidden sm:flex items-center gap-2 text-xs">
-      <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
-      <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
-        <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+    <div class="flex items-center gap-1.5">
+      <!-- Identity: avatar + @username → Profile -->
+      <button id="hdr-identity" class="hidden items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
+        <img id="hdr-avatar" src="" alt="" class="w-7 h-7 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(124,92,252,0.3)">
+        <span id="hdr-username" class="hidden sm:block text-sm font-semibold text-[#e8eaf0] truncate max-w-[8rem]"></span>
       </button>
-      <button id="hdr-verify" class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Verify" onclick="navigate('verify')">🪪</button>
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block text-xs"></span>
       <!-- Connect wallet CTA shown when no wallet linked -->
       <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
-      <!-- Mobile: single compact chip showing both balances -->
-      <div id="hdr-mobile-bal" class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
-        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
-        <span class="text-[#4e5872]">/</span>
-        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
-      </div>
-      <!-- Desktop: separate labelled badges -->
-      <div id="hdr-desktop-bal" class="hidden sm:flex gap-1.5">
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
-          <span class="text-[#4e5872]">BLOOM</span>
-        </div>
-        <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
-          <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
-          <span class="text-[#4e5872]">USDC</span>
-        </div>
-      </div>
-      </div>
+      <!-- Log out -->
+      <button id="hdr-logout" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors" title="Log out" aria-label="Log out" onclick="S.token='';S.user=null;navigate('home');">🚪</button>
     </div>
   </header>
 
@@ -195,24 +178,20 @@
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
-      <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
       <button class="nav-item" data-view="portfolio">💼 Portfolio</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
-      <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="stake">🔒 Stake</button>
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
+      <button class="nav-item" data-view="verify">🪪 Subscription</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
         <span>💬 Messages</span>
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <button class="nav-item" data-view="explore">🔭 Explore</button>
-      <button class="nav-item" data-view="verify">🪪 Verify</button>
-      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
       <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
@@ -244,13 +223,13 @@
       <section id="section-market" class="view hidden max-w-5xl mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
-      <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-stake" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Liquidity -->
-      <section id="section-liquidity" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-liquidity" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- ICO -->
-      <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-ico" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / launchpad) -->
       <section id="section-earn" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
@@ -297,9 +276,7 @@
   <!-- Mobile Bottom Nav (six tabs) -->
   <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-[#131620] border-t border-[rgba(255,255,255,0.06)] flex z-30">
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
-    <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="earn" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('earn')">🌱<span>Earn</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
   </nav>
@@ -702,8 +679,9 @@ const VIEW_SECTION = {
   market: 'section-market', swap: 'section-market',
   trade: 'section-trade', futures: 'section-trade',
   journal: 'section-journal',
-  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
-  launchpad: 'section-earn',
+  earn: 'section-earn',
+  stake: 'section-stake', liquidity: 'section-liquidity',
+  ico: 'section-ico', launchpad: 'section-ico',
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -725,6 +703,8 @@ const VIEW_TAB = {
 
 function navigate(view, opts) {
   clearInterval(_activeInterval); _activeInterval = null;
+  // Release the Portfolio camera scanner if it's running when leaving the view.
+  if (typeof window._pfStopScanner === 'function') { try { window._pfStopScanner(); } catch (_) {} }
   if (opts) Object.assign(S, opts);
   S.view = view;
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
@@ -739,7 +719,6 @@ function navigate(view, opts) {
     b.classList.toggle('text-[#8b95ab]', b.dataset.tab !== tab);
   });
   hideMobileSidebar();
-  document.getElementById('global-header').classList.toggle('hidden', view === 'portfolio');
   loadView(view);
   document.getElementById('main-scroll').scrollTo(0, 0);
 }
@@ -785,10 +764,10 @@ async function loadView(view) {
       case 'home': case 'feed': await renderFeed(sec); break;
       case 'profile': await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
-      case 'earn': case 'ico': S.earnTab = null; S.earnHubFilter = 'all'; await renderEarn(sec); break;
-      case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
-      case 'liquidity': S.earnTab = 'liquidity'; await renderEarn(sec); break;
-      case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
+      case 'earn': S.earnHubFilter = 'all'; await renderEarn(sec); break;
+      case 'stake': await renderStake(sec); break;
+      case 'liquidity': await renderLiquidity(sec); break;
+      case 'ico': case 'launchpad': await renderICO(sec); break;
       case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
@@ -954,7 +933,7 @@ let _unreadInterval = null;
 let _prevConvUnread = null; // Map<convId, unreadCount> snapshot; null = first load baseline not yet set
 function setUnreadBadge(total) {
   S.totalUnread = total;
-  for (const id of ['hdr-unread-badge', 'nav-unread-badge']) {
+  for (const id of ['nav-unread-badge']) {
     const el = document.getElementById(id);
     if (!el) continue;
     if (total > 0) { el.textContent = total > 99 ? '99+' : String(total); el.classList.remove('hidden'); }
@@ -1055,16 +1034,16 @@ function updateHeader() {
   const connectBtn = document.getElementById('hdr-connect-wallet');
   if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
 
-  const mobileBal = document.getElementById('hdr-mobile-bal');
-  const desktopBal = document.getElementById('hdr-desktop-bal');
-  if (mobileBal) mobileBal.style.display = hasWallet ? '' : 'none';
-  if (desktopBal) desktopBal.style.display = hasWallet ? '' : 'none';
-
-  if (hasWallet) {
-    document.getElementById('hdr-bloom').textContent = getBal('BLOOM');
-    document.getElementById('hdr-usdc').textContent = getBal('USDC');
-    document.getElementById('hdr-bloom-lg').textContent = getBal('BLOOM');
-    document.getElementById('hdr-usdc-lg').textContent = getBal('USDC');
+  // Identity: avatar + @username (links to Profile)
+  const identityBtn = document.getElementById('hdr-identity');
+  if (identityBtn) {
+    const uname = S.user.username || '';
+    const avatarEl = document.getElementById('hdr-avatar');
+    const unameEl = document.getElementById('hdr-username');
+    if (avatarEl) { avatarEl.src = S.user.avatar_url || avatarDataUri(uname); avatarEl.alt = '@' + uname; }
+    if (unameEl) unameEl.textContent = '@' + uname;
+    identityBtn.classList.remove('hidden');
+    identityBtn.classList.add('flex');
   }
 
   document.getElementById('drawer-username').textContent = '@' + S.user.username;
@@ -1375,11 +1354,14 @@ async function renderFeed(sec) {
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='following'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('following')">Following</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='wins'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('wins')">Highlights</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='news'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('news')">News 📰</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='explore'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('explore')">Explore 🔭</button>
       </div>
-      <div id="feed-list">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>'}
+      <div id="feed-list" class="space-y-3">
+        ${feedState.tab==='explore'
+          ? spin()
+          : (feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>')}
       </div>
-      ${feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
+      ${feedState.tab!=='explore' && feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
     `;
     const box = document.getElementById('compose-box');
     if (box) {
@@ -1390,8 +1372,30 @@ async function renderFeed(sec) {
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
-  window.switchTab = (tab) => { feedState.tab = tab; feedState.cursor = null; loadPosts(); };
+  window.switchTab = (tab) => {
+    feedState.tab = tab;
+    feedState.cursor = null;
+    if (tab === 'explore') { loadExplore(); return; }
+    loadPosts();
+  };
   window.loadMore = () => loadPosts();
+
+  // Explore tab: render the shared Explore content into the feed area.
+  // No pagination/cursor — it's a one-shot discovery view behind a spinner.
+  async function loadExplore() {
+    feedState.tab = 'explore';
+    render(); // draws composer + tab strip + spinner in #feed-list
+    let html;
+    try {
+      html = await exploreContentHtml();
+    } catch (e) {
+      html = `<p class="text-red-400 text-sm text-center py-4">Couldn't load Explore: ${esc(e.message || 'error')}</p>`;
+    }
+    // Guard: the user may have switched away (or opened a thread) while loading.
+    if (feedState.tab !== 'explore' || feedState.thread) return;
+    const list = document.getElementById('feed-list');
+    if (list) list.innerHTML = html;
+  }
 
   window.submitPost = async () => {
     if (!requireWalletThen(null, 'post')) return;
@@ -1470,7 +1474,16 @@ async function renderFeed(sec) {
     } catch (e) { alert(e.message); }
   };
 
-  await loadPosts();
+  // Honor a one-shot requested tab (e.g. the header 🔭 shortcut opens Home
+  // straight on the Explore tab). Defaults to the normal post feed.
+  if (S.pendingHomeTab === 'explore') {
+    S.pendingHomeTab = null;
+    feedState.tab = 'explore';
+    await loadExplore();
+  } else {
+    if (S.pendingHomeTab) S.pendingHomeTab = null;
+    await loadPosts();
+  }
 }
 
 // ── Tip Modal ──────────────────────────────────────────────────────────────────
@@ -2184,6 +2197,10 @@ async function renderPortfolio(sec) {
   let sendAmount = '';
   let sendStatus = 'idle';
   let sendError = '';
+  let sendView = 'scan';      // 'scan' | 'form'
+  let scanError = '';         // transient hint shown in the scanner viewfinder
+  let scanStream = null;      // active MediaStream while the camera is open
+  let scanRaf = null;         // requestAnimationFrame handle for the decode loop
   let searchTerm = '';
   let activityCursor = null;
   let allActivities = [];
@@ -2291,22 +2308,20 @@ async function renderPortfolio(sec) {
     const filtW = sq ? WATCHLIST.filter(s=>s.toLowerCase().includes(sq)||((topCoins.find(c=>c.symbol===s)||{}).name||'').toLowerCase().includes(sq)) : WATCHLIST;
 
     const heldTickers = holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean);
-    const buyTokens = [...new Set([...heldTickers,'BTC','ETH','SOL','BNB','USDC'])];
-    const sellTokens = heldTickers.length>0 ? heldTickers : ['BTC','ETH','SOL'];
     const activeSendToken = sendToken || heldTickers[0] || 'BLOOM';
     const sendBal = (S.balances && S.balances[activeSendToken]) ? (Number(S.balances[activeSendToken])/1e6).toFixed(4) : '—';
     const bridgeAvail = !!(window.usernode && typeof window.usernode.sendTransaction==='function');
 
     // Asset cards
     const assetHtml = filtH.length===0
-      ? `<div class="text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
+      ? `<div class="col-span-3 text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
       : filtH.map(h=>{
           const sym=(h.ticker||'').toUpperCase(), tk=tokStyle(sym);
           const lp=prices[sym]??null;
           const val=lp!=null?(parseFloat(h.quantity)*lp):null;
           const apy=STAKING_APY[sym];
           const spark=sparkData[sym]||[];
-          return `<div class="flex-none w-44 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
+          return `<div class="min-w-0 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
             <div class="flex items-center gap-2">
               <div class="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
               <div><div class="font-semibold text-[#e8eaf0] text-sm">${esc(sym)}</div><div class="text-[#8b95ab] text-xs">${esc(h.asset_name||sym)}</div></div>
@@ -2363,8 +2378,19 @@ async function renderPortfolio(sec) {
           </div>`;
         }).join('');
 
-    // Send form
+    // Send pane — scan-first: a camera QR scanner that prefills the recipient,
+    // falling back to (and reachable as) the manual entry form.
     const sendOpts=(heldTickers.length>0?heldTickers:['BLOOM','USDC','ETH']).map(t=>`<option value="${esc(t)}" ${activeSendToken===t?'selected':''}>${esc(t)}</option>`).join('');
+    const scannerHtml=`<div class="flex flex-col items-center gap-3">
+        <div class="relative w-full max-w-[240px] aspect-square rounded-2xl overflow-hidden bg-[#0d1021] border border-[rgba(34,211,238,0.25)] flex items-center justify-center">
+          <video id="pf-scan-video" class="w-full h-full object-cover" playsinline muted autoplay></video>
+          <div class="absolute inset-0 pointer-events-none rounded-2xl" style="box-shadow:inset 0 0 0 3px rgba(34,211,238,0.45)"></div>
+          <div id="pf-scan-msg" class="absolute inset-0 flex items-center justify-center text-center text-[#8b95ab] text-xs px-4 bg-[#0d1021]">Starting camera…</div>
+        </div>
+        <p class="text-xs text-[#8b95ab] text-center">Point the camera at a recipient's wallet-address QR code.</p>
+        ${scanError?`<p class="text-xs text-amber-400 text-center">${esc(scanError)}</p>`:''}
+        <button id="pf-scan-manual" class="text-sm text-[#22d3ee] underline underline-offset-2">Enter address manually</button>
+      </div>`;
     let sendFormHtml;
     if (!bridgeAvail) {
       sendFormHtml=`<div class="text-center py-4 text-[#8b95ab] text-sm"><div class="text-2xl mb-2">🔗</div>On-chain sends require the Usernode wallet.<br>Open in the Usernode app to use this feature.</div>`;
@@ -2372,6 +2398,8 @@ async function renderPortfolio(sec) {
       sendFormHtml=`<div class="flex flex-col items-center py-4 gap-2"><div class="spinner"></div><div class="text-[#8b95ab] text-sm">Sending…</div></div>`;
     } else if (sendStatus==='ok') {
       sendFormHtml=`<div class="text-center py-4"><div class="text-3xl mb-1">✓</div><div class="text-emerald-400 font-semibold">Sent!</div><div class="text-[#8b95ab] text-xs mt-1">${esc(sendAmount)} ${esc(activeSendToken)} → ${shortAddr(sendRecipient)}</div><button class="mt-3 text-xs text-[#22d3ee]" id="pf-send-reset">Send another</button></div>`;
+    } else if (sendView==='scan') {
+      sendFormHtml=scannerHtml;
     } else {
       sendFormHtml=`<div class="space-y-3">
         ${sendStatus==='error'?`<div class="text-red-400 text-sm py-1">${esc(sendError)}</div>`:''}
@@ -2379,27 +2407,11 @@ async function renderPortfolio(sec) {
         <div><label class="text-xs text-[#8b95ab] block mb-1">Recipient address</label><input id="pf-send-recipient" class="inp w-full text-sm font-mono" placeholder="0x… recipient address" value="${esc(sendRecipient)}"></div>
         <div><label class="text-xs text-[#8b95ab] block mb-1">Amount</label><input id="pf-send-amount" class="inp w-full text-sm" type="number" min="0" step="any" placeholder="0.00" value="${esc(sendAmount)}"><div class="text-xs text-[#4e5872] mt-0.5">Balance: ${sendBal} ${esc(activeSendToken)}</div></div>
         <button id="pf-send-btn" class="w-full py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117">Send</button>
+        <button id="pf-send-scan" class="w-full text-xs text-[#22d3ee] underline underline-offset-2 pt-1">Scan a QR code instead</button>
       </div>`;
     }
 
     sec.innerHTML = `
-      <!-- Local top bar (replaces global header when Portfolio is active) -->
-      <div class="sticky top-0 z-20 bg-[#131620] border-b border-[rgba(34,211,238,0.08)] px-4 py-2 flex items-center gap-2">
-        <button class="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity shrink-0" onclick="navigate('profile')" title="My Profile">
-          <img src="${esc(avatarSrc)}" alt="@${esc(username)}" class="w-8 h-8 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(34,211,238,0.3)">
-          <span class="text-sm font-semibold text-[#e8eaf0] truncate max-w-[6rem]">@${esc(username)}</span>
-        </button>
-        <div class="flex-1"></div>
-        <input id="pf-search" type="text" placeholder="Search…" value="${esc(searchTerm)}"
-          class="flex-1 max-w-[8rem] min-w-0 bg-[#0d1021] border border-[rgba(34,211,238,0.12)] rounded-lg px-3 py-1.5 text-sm text-[#e8eaf0] placeholder-[#4e5872] focus:outline-none focus:border-[#22d3ee] transition-colors"
-          oninput="window._pfSearch(this.value)">
-        <button class="relative w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="navigate('messages')" title="Notifications">
-          🔔${unread>0?`<span class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-violet-600 text-white text-[0.55rem] font-bold flex items-center justify-center leading-none">${unread>99?'99+':unread}</span>`:''}
-        </button>
-        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="toggleTheme()" title="Toggle theme">${isDark?'☀️':'🌙'}</button>
-        <button class="w-8 h-8 flex items-center justify-center text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors shrink-0" onclick="S.token='';S.user=null;showWalletGate();" title="Log out">🚪</button>
-      </div>
-
       <div class="max-w-2xl mx-auto px-4 py-4 space-y-4">
 
         <!-- Balance card -->
@@ -2411,26 +2423,6 @@ async function renderPortfolio(sec) {
             ${['1d','1w','1m'].map(r=>`<button onclick="window._pfSetRange('${r}')" class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${chartRange===r?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0] bg-[#0d1021]'}" style="${chartRange===r?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">${r.toUpperCase()}</button>`).join('')}
           </div>
           <div class="mt-3">${areaSvg(chartPoints,ACCENT)}</div>
-        </div>
-
-        <!-- Holdings -->
-        <div>
-          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Holdings</h3>
-          <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:overflow-visible">${assetHtml}</div>
-        </div>
-
-        <!-- Quick Trade -->
-        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
-          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-3">Quick Trade</h3>
-          <div class="flex gap-1 mb-3 bg-[#0d1021] rounded-xl p-1">
-            <button id="pf-trade-buy" onclick="window._pfTradeTab('buy')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg text-[#0f1117] transition-colors" style="background:linear-gradient(135deg,#22d3ee,#06b6d4)">Buy</button>
-            <button id="pf-trade-sell" onclick="window._pfTradeTab('sell')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg text-[#8b95ab] hover:text-[#e8eaf0] transition-colors">Sell</button>
-          </div>
-          <div class="space-y-3">
-            <select id="pf-trade-token" class="inp w-full text-sm">${buyTokens.map(t=>`<option>${esc(t)}</option>`).join('')}</select>
-            <input id="pf-trade-amount" type="number" class="inp w-full text-sm" placeholder="Amount">
-            <button class="w-full py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117" onclick="navigate('trade')">Trade Now →</button>
-          </div>
         </div>
 
         <!-- Wallet -->
@@ -2459,6 +2451,12 @@ async function renderPortfolio(sec) {
           <div id="pf-wallet-send" class="${walletTab==='send'?'':'hidden'}">${sendFormHtml}</div>
         </div>
 
+        <!-- Holdings -->
+        <div>
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Holdings</h3>
+          <div class="grid grid-cols-3 gap-3">${assetHtml}</div>
+        </div>
+
         <!-- Watchlist -->
         <div class="${GLASS}" style="backdrop-filter:blur(8px)">
           <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Watchlist</h3>
@@ -2483,39 +2481,110 @@ async function renderPortfolio(sec) {
       render();
     };
 
-    window._pfTradeTab = tab => {
-      const buyBtn=document.getElementById('pf-trade-buy');
-      const sellBtn=document.getElementById('pf-trade-sell');
-      const tokenSel=document.getElementById('pf-trade-token');
-      if (!buyBtn||!sellBtn||!tokenSel) return;
-      if (tab==='buy') {
-        buyBtn.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)'; buyBtn.classList.add('text-[#0f1117]'); buyBtn.classList.remove('text-[#8b95ab]');
-        sellBtn.style.background=''; sellBtn.classList.remove('text-[#0f1117]'); sellBtn.classList.add('text-[#8b95ab]');
-        tokenSel.innerHTML=buyTokens.map(t=>`<option>${esc(t)}</option>`).join('');
-      } else {
-        sellBtn.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)'; sellBtn.classList.add('text-[#0f1117]'); sellBtn.classList.remove('text-[#8b95ab]');
-        buyBtn.style.background=''; buyBtn.classList.remove('text-[#0f1117]'); buyBtn.classList.add('text-[#8b95ab]');
-        tokenSel.innerHTML=sellTokens.map(t=>`<option>${esc(t)}</option>`).join('');
-      }
-    };
-
     window._pfWalletTab = tab => {
       walletTab = tab;
-      const rcv=document.getElementById('pf-wallet-receive');
-      const snd=document.getElementById('pf-wallet-send');
-      const tR=document.getElementById('pf-tab-receive');
-      const tS=document.getElementById('pf-tab-send');
-      if (!rcv||!snd) return;
-      if (tab==='receive') {
-        rcv.classList.remove('hidden'); snd.classList.add('hidden');
-        if(tR){tR.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)';tR.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#0f1117]';}
-        if(tS){tS.style.background='';tS.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#8b95ab] hover:text-[#e8eaf0]';}
-        window._pfLoadQR();
-      } else {
-        snd.classList.remove('hidden'); rcv.classList.add('hidden');
-        if(tS){tS.style.background='linear-gradient(135deg,#22d3ee,#06b6d4)';tS.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#0f1117]';}
-        if(tR){tR.style.background='';tR.className='flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors text-[#8b95ab] hover:text-[#e8eaf0]';}
+      if (tab==='receive') window._pfStopScanner();
+      // Re-render so the active pane (scanner vs form) is rebuilt cleanly.
+      render();
+    };
+
+    // ── Camera QR scanner ──────────────────────────────────────────────────
+    // Extract a wallet address from a scanned QR payload. Handles bare
+    // addresses and common payment-request URIs (scheme:addr?params).
+    window._pfParseScannedAddr = (raw) => {
+      let s = (raw||'').trim();
+      if (!s) return '';
+      // Strip a "scheme:" prefix (ethereum:, bitcoin:, usernode:, etc.)
+      const colon = s.indexOf(':');
+      if (colon > 0 && colon < 24 && /^[a-zA-Z][a-zA-Z0-9.+-]*$/.test(s.slice(0,colon))) {
+        s = s.slice(colon+1);
       }
+      // Drop any query string / fragment (?value=…, @chainId, #…)
+      s = s.split('?')[0].split('#')[0].split('@')[0].trim();
+      return s;
+    };
+
+    window._pfStopScanner = () => {
+      if (scanRaf) { cancelAnimationFrame(scanRaf); scanRaf = null; }
+      if (scanStream) { try { scanStream.getTracks().forEach(t=>t.stop()); } catch(_){} scanStream = null; }
+    };
+
+    window._pfOnScanned = (raw) => {
+      const addr = window._pfParseScannedAddr(raw);
+      if (!addr) {
+        scanError = 'No address found — try again.';
+        const msg=document.getElementById('pf-scan-msg');
+        if (msg){ msg.textContent='No address found — keep the QR in frame.'; msg.classList.remove('hidden'); }
+        return; // stay in scan mode, keep the loop running
+      }
+      window._pfStopScanner();
+      sendRecipient = addr;
+      scanError = '';
+      sendView = 'form';
+      sendStatus = 'idle'; sendError = '';
+      render();
+    };
+
+    window._pfStartScanner = async () => {
+      const video = document.getElementById('pf-scan-video');
+      const msg = document.getElementById('pf-scan-msg');
+      if (!video) return;
+      const fail = (note) => {
+        // Camera unavailable for any reason — fall back to the manual form.
+        window._pfStopScanner();
+        scanError = note || 'Camera unavailable — enter the address manually.';
+        sendView = 'form';
+        render();
+      };
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return fail('Camera unavailable — enter the address manually.');
+      }
+      let detector = null;
+      try {
+        if ('BarcodeDetector' in window) {
+          const fmts = await window.BarcodeDetector.getSupportedFormats?.();
+          if (!fmts || fmts.includes('qr_code')) detector = new window.BarcodeDetector({ formats:['qr_code'] });
+        }
+      } catch(_){ detector = null; }
+      if (!detector) {
+        // Lazy-load jsQR as a fallback decoder.
+        try {
+          if (!window.jsQR) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+          }
+        } catch(_){ return fail('Scanner unavailable — enter the address manually.'); }
+      }
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      } catch(e) {
+        return fail('Camera unavailable — enter the address manually.');
+      }
+      // The user may have navigated away while permission was pending.
+      if (walletTab!=='send' || sendView!=='scan') { window._pfStopScanner(); return; }
+      video.srcObject = scanStream;
+      try { await video.play(); } catch(_){}
+      if (msg) msg.classList.add('hidden');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently:true });
+      const tick = async () => {
+        if (!scanStream) return; // stopped
+        if (video.readyState >= 2 && video.videoWidth) {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          try {
+            if (detector) {
+              const codes = await detector.detect(canvas);
+              if (codes && codes.length && codes[0].rawValue) { window._pfOnScanned(codes[0].rawValue); return; }
+            } else if (window.jsQR) {
+              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
+              if (code && code.data) { window._pfOnScanned(code.data); return; }
+            }
+          } catch(_){}
+        }
+        if (scanStream) scanRaf = requestAnimationFrame(tick);
+      };
+      scanRaf = requestAnimationFrame(tick);
     };
 
     window._pfCopyAddr = () => {
@@ -2679,9 +2748,20 @@ async function renderPortfolio(sec) {
     const sendBtn=document.getElementById('pf-send-btn');
     if (sendBtn) sendBtn.addEventListener('click',window._pfSendSubmit);
     const sendReset=document.getElementById('pf-send-reset');
-    if (sendReset) sendReset.addEventListener('click',()=>{sendStatus='idle';sendError='';sendRecipient='';sendAmount='';render();});
+    if (sendReset) sendReset.addEventListener('click',()=>{sendStatus='idle';sendError='';sendRecipient='';sendAmount='';sendView='scan';scanError='';render();});
+    // Switch between scanner and manual entry within the Send tab.
+    const scanManual=document.getElementById('pf-scan-manual');
+    if (scanManual) scanManual.addEventListener('click',()=>{window._pfStopScanner();sendView='form';scanError='';render();});
+    const sendScan=document.getElementById('pf-send-scan');
+    if (sendScan) sendScan.addEventListener('click',()=>{sendView='scan';scanError='';sendStatus='idle';sendError='';render();});
 
     if (walletTab==='receive'&&walletAddr) setTimeout(window._pfLoadQR,50);
+    // Boot the camera when the Send tab is showing its scanner view.
+    if (walletTab==='send' && sendView==='scan' && bridgeAvail && sendStatus!=='pending' && sendStatus!=='ok') {
+      setTimeout(window._pfStartScanner,50);
+    } else {
+      window._pfStopScanner();
+    }
   }
 
   // Initial fetch
@@ -3543,7 +3623,7 @@ async function renderStake(sec) {
     }
     const yourStakesHtml = '<h3 class="font-semibold mb-3">Your Active Stakes</h3>' + activeHtml;
 
-    sec.innerHTML = heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
+    sec.innerHTML = defiTabBar('stake') + heroHtml + gridHtml + yourStakesHtml + actHtml + whyHtml;
   }
 
   window.stakeToggle = function(token) {
@@ -3767,7 +3847,7 @@ async function renderLiquidity(sec) {
       + (poolStats.length ? tableRows : '<div class="px-4 py-8 text-center text-[#4e5872] text-sm">No pools available.</div>')
       + '</div>';
 
-    sec.innerHTML = heroHtml + tableHtml;
+    sec.innerHTML = defiTabBar('liquidity') + heroHtml + tableHtml;
   }
 
   window.poolSelectRow = function(poolId) {
@@ -4000,7 +4080,7 @@ async function renderICO(sec) {
         <div class="text-lg font-bold" style="${GRAD}">${value}</div>
       </div>`;
 
-    sec.innerHTML = `
+    sec.innerHTML = defiTabBar('launchpad') + `
       <div class="mb-6">
         <h2 class="text-3xl font-bold mb-1">🚀 <span style="${GRAD}">Launchpad</span></h2>
         <p class="text-[#8b95ab] text-sm mb-3">Early token access — curated IDO launches</p>
@@ -4093,19 +4173,9 @@ function renderEarnHub(sec) {
   render();
 }
 
-// ── Earn (composite: Stake / Liquidity / Launchpad) ───────────────────────────
+// ── Earn (yield marketplace hub) ──────────────────────────────────────────────
 async function renderEarn(sec) {
-  const tab = S.earnTab;
-  if (!tab) { renderEarnHub(sec); return; }
-  const backLink = `<button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>`;
-  sec.innerHTML = `${backLink}${defiTabBar(S.view || tab)}<div id="earn-sub"></div>`;
-  const sub = document.getElementById('earn-sub');
-  sub.innerHTML = spin();
-  try {
-    if (tab === 'stake') await renderStake(sub);
-    else if (tab === 'liquidity') await renderLiquidity(sub);
-    else await renderICO(sub);
-  } catch (e) { sub.innerHTML = err(e.message); }
+  renderEarnHub(sec);
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -4122,7 +4192,6 @@ async function renderVault(sec) {
       return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
     };
     sec.innerHTML = `
-      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>
       ${defiTabBar('vault')}
       <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
       <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
@@ -4203,7 +4272,10 @@ async function renderVault(sec) {
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
-async function renderExplore(sec) {
+// Shared Explore content builder — reused by the standalone Explore page
+// (renderExplore, deep-link fallback) and by the Home feed's Explore tab.
+// Returns the inner markup (no outer page heading) and wires window.exploreFollow.
+async function exploreContentHtml() {
   const [people, markets, ico, nfts] = await Promise.all([
     api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
     api('GET', '/api/markets').then(d => d.markets).catch(() => []),
@@ -4220,9 +4292,11 @@ async function renderExplore(sec) {
   const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
   const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
   const topNfts = nfts.slice(0, 6);
-  sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
-
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+  return `
     <h3 class="font-semibold mb-2">People to follow</h3>
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
@@ -4246,7 +4320,7 @@ async function renderExplore(sec) {
 
     <h3 class="font-semibold mb-2">Live token sales</h3>
     ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
-      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('earn');S.earnTab='ico'">
+      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('launchpad')">
         <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-[#8b95ab]">${esc(o.token_symbol)}</span></div>
         <div class="text-xs text-[#8b95ab]">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
       </button>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No live sales</p>'}
@@ -4264,6 +4338,14 @@ async function renderExplore(sec) {
     try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
     catch (e) { alert(e.message); }
   };
+}
+
+// Standalone Explore page (kept as a safe deep-link fallback; the primary
+// surface is now the Home feed's Explore tab).
+async function renderExplore(sec) {
+  sec.innerHTML = spin();
+  const html = await exploreContentHtml();
+  sec.innerHTML = `<h2 class="text-xl font-bold mb-4">🔭 Explore</h2>` + html;
 }
 
 
@@ -4496,16 +4578,6 @@ async function renderMarkets(sec, demoMarkets) {
             <h4 class="font-semibold text-sm">3. Claim Winnings</h4>
             <p class="text-xs text-[#8b95ab]">When the market resolves, winners split the entire pool proportional to their position.</p>
           </div>
-        </div>
-      </div>
-
-      <div class="pm-footer px-4 py-6 border-t border-[rgba(255,255,255,0.06)] text-center space-y-2">
-        <div class="font-bold text-[#7c5cfc]">&#x1f338; BloomMoney</div>
-        <p class="text-xs text-[#4e5872]">BloomMoney is a demo prediction platform — no real funds.</p>
-        <div class="flex gap-4 justify-center text-xs text-[#8b95ab]">
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('earn')">Earn</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('market')">Market</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('nfts')">NFTs</button>
         </div>
       </div>
     `;
