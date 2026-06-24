@@ -215,7 +215,7 @@
       <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / launchpad) -->
-      <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-earn" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Vault -->
       <section id="section-vault" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -2918,34 +2918,48 @@ async function renderICO(sec) {
     return 'in ' + Math.floor(s / 86400) + 'd';
   }
 
+  function fmtStat(usdc) {
+    if (usdc >= 1_000_000) return '$' + (usdc / 1_000_000).toFixed(2) + 'M';
+    if (usdc >= 1_000) return '$' + (usdc / 1_000).toFixed(1) + 'K';
+    return '$' + usdc.toFixed(0);
+  }
+
+  const GRAD = 'background:linear-gradient(90deg,#7c5cfc,#4e9af1);-webkit-background-clip:text;-webkit-text-fill-color:transparent';
+
   function liveCard(o) {
     const pct = Number(o.hard_cap) > 0 ? Math.min(100, Number(o.raised) / Number(o.hard_cap) * 100) : 0;
-    return `<div class="card space-y-3">
-      <div class="flex items-start gap-3">
-        ${tokenBadge(o)}
-        <div class="flex-1 min-w-0">
-          <div class="flex justify-between items-start gap-2">
-            <div class="min-w-0">
-              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
+    return `<div class="card space-y-3" style="padding-top:0;overflow:hidden;border-color:rgba(124,92,252,0.3);">
+      <div style="height:2px;background:linear-gradient(90deg,#7c5cfc,#4e9af1);margin:0 -1px;"></div>
+      <div class="space-y-3 pt-3">
+        <div class="flex items-start gap-3">
+          ${tokenBadge(o)}
+          <div class="flex-1 min-w-0">
+            <div class="flex justify-between items-start gap-2">
+              <div class="min-w-0">
+                <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
+                ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
+              </div>
+              <span style="background:linear-gradient(90deg,#7c5cfc,#4e9af1);color:#fff;font-weight:600;font-size:0.7rem;border-radius:9999px;padding:2px 8px;flex-shrink:0;">LIVE</span>
             </div>
-            <span class="text-emerald-400 text-xs font-semibold shrink-0">LIVE</span>
           </div>
         </div>
+        <div class="text-sm space-y-0.5">
+          <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+          <div class="flex justify-between"><span class="text-[#8b95ab]">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+        </div>
+        <div>
+          <div class="bg-[#0d1021] rounded-full overflow-hidden" style="height:8px;">
+            <div class="h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#7c5cfc,#4e9af1)"></div>
+          </div>
+          <div class="text-xs font-semibold mt-1" style="${GRAD}">${pct.toFixed(0)}% funded</div>
+        </div>
+        <div class="flex gap-2">
+          <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
+          <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
+        </div>
+        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
+        <p id="ico-msg-${o.id}" class="text-sm"></p>
       </div>
-      <div class="text-sm space-y-0.5">
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
-      </div>
-      <div class="bg-[#0d1021] rounded-full h-2 overflow-hidden">
-        <div class="h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#7c5cfc,#4e9af1)"></div>
-      </div>
-      <div class="flex gap-2">
-        <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
-        <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
-      </div>
-      <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
-      <p id="ico-msg-${o.id}" class="text-sm"></p>
     </div>`;
   }
 
@@ -2970,9 +2984,10 @@ async function renderICO(sec) {
       <div class="text-sm space-y-0.5">
         <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
         <div class="flex justify-between"><span class="text-[#8b95ab]">Raise goal</span><span>${fmtUSD(o.hard_cap)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Opens</span><span class="text-amber-300">${esc(startStr)}${countdown ? ` (${countdown})` : ''}</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Opens</span><span class="text-amber-300">${esc(startStr)}</span></div>
       </div>
-      <div class="flex justify-end">
+      <div class="flex justify-between items-center">
+        ${countdown ? `<span style="background:linear-gradient(90deg,#f59e0b,#f97316);color:#fff;font-weight:600;font-size:0.7rem;border-radius:9999px;padding:2px 8px;">${esc(countdown)}</span>` : '<span></span>'}
         <span class="text-xs text-[#4e5872] bg-[#1c2236] px-3 py-1.5 rounded-lg">Coming soon</span>
       </div>
     </div>`;
@@ -3006,11 +3021,15 @@ async function renderICO(sec) {
     </div>`;
   }
 
-  function renderSection(title, cards) {
+  function renderSection(title, cards, grid) {
     if (!cards.length) return '';
+    const layout = grid ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3';
     return `<div class="mb-6">
-      <h3 class="text-sm font-semibold text-[#8b95ab] mb-3">${title}</h3>
-      <div class="space-y-3">${cards.join('')}</div>
+      <div class="flex items-center gap-2 mb-3">
+        <div style="width:3px;height:1rem;background:linear-gradient(180deg,#7c5cfc,#4e9af1);border-radius:2px;flex-shrink:0;"></div>
+        <h3 class="text-sm font-semibold text-[#8b95ab]">${title}</h3>
+      </div>
+      <div class="${layout}">${cards.join('')}</div>
     </div>`;
   }
 
@@ -3021,13 +3040,39 @@ async function renderICO(sec) {
     const upcoming = offerings.filter(o => o.status === 'upcoming');
     const completed = offerings.filter(o => o.status === 'sold_out' || o.status === 'ended');
     const empty = !live.length && !upcoming.length && !completed.length;
+
+    const totalRaisedUsdc = offerings.reduce((s, o) => s + Number(o.raised), 0) / U;
+    const totalCapUsdc = offerings.reduce((s, o) => s + Number(o.hard_cap), 0) / U;
+    const liveCount = live.length;
+    const totalCount = offerings.length;
+
+    const statTile = (label, value) => `
+      <div class="card text-center space-y-1" style="transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 0 16px rgba(124,92,252,0.2)'" onmouseleave="this.style.boxShadow=''">
+        <div class="text-xs text-[#8b95ab]">${label}</div>
+        <div class="text-lg font-bold" style="${GRAD}">${value}</div>
+      </div>`;
+
     sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Token Offerings</h2>
+      <div class="mb-6">
+        <h2 class="text-3xl font-bold mb-1">🚀 <span style="${GRAD}">Launchpad</span></h2>
+        <p class="text-[#8b95ab] text-sm mb-3">Early token access — curated IDO launches</p>
+        <div style="height:2px;width:50%;background:linear-gradient(90deg,#7c5cfc,#4e9af1);border-radius:1px;"></div>
+      </div>
+      <div data-launchpad-stats class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        ${statTile('Total Raised', fmtStat(totalRaisedUsdc))}
+        ${statTile('Hard Cap', fmtStat(totalCapUsdc))}
+        ${statTile('Live Projects', String(liveCount))}
+        ${statTile('Total Projects', String(totalCount))}
+      </div>
       ${empty
-        ? '<p class="text-[#4e5872] text-sm">No ICO offerings</p>'
-        : renderSection('🟢 Live ICOs', live.map(liveCard)) +
-          renderSection('🕐 Upcoming ICOs', upcoming.map(upcomingCard)) +
-          renderSection('✅ Completed ICOs', completed.map(completedCard))
+        ? `<div class="text-center py-16 space-y-3">
+            <div class="text-5xl">🚀</div>
+            <h3 class="font-semibold text-lg">No active launches</h3>
+            <p class="text-[#8b95ab] text-sm">Check back soon for upcoming token offerings</p>
+          </div>`
+        : renderSection('Live ICOs', live.map(liveCard), true) +
+          renderSection('Upcoming ICOs', upcoming.map(upcomingCard), true) +
+          renderSection('Completed ICOs', completed.map(completedCard), false)
       }`;
   }
 
