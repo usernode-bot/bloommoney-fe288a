@@ -156,6 +156,12 @@
         <img id="hdr-avatar" src="" alt="" class="w-7 h-7 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(124,92,252,0.3)">
         <span id="hdr-username" class="hidden sm:block text-sm font-semibold text-[#e8eaf0] truncate max-w-[8rem]"></span>
       </button>
+      <div class="hidden sm:flex items-center gap-2 text-xs">
+        <button class="hidden sm:inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="S.pendingHomeTab='explore';navigate('home')">🔭</button>
+        <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
+          <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+        </button>
+      </div>
       <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
       <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block text-xs"></span>
       <!-- Connect wallet CTA shown when no wallet linked -->
@@ -193,7 +199,7 @@
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <button class="nav-item" data-view="explore">🔭 Explore</button>
+      <div class="py-1 px-2 text-xs text-[#4e9af1]/60 font-medium mt-2 uppercase tracking-wider">Discover</div>
       <button class="nav-item" data-view="verify">🪪 Verify</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
@@ -1277,11 +1283,14 @@ async function renderFeed(sec) {
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='following'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('following')">Following</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='wins'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('wins')">Highlights</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='news'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('news')">News 📰</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='explore'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('explore')">Explore 🔭</button>
       </div>
-      <div id="feed-list">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>'}
+      <div id="feed-list" class="space-y-3">
+        ${feedState.tab==='explore'
+          ? spin()
+          : (feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>')}
       </div>
-      ${feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
+      ${feedState.tab!=='explore' && feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
     `;
     const box = document.getElementById('compose-box');
     if (box) {
@@ -1292,8 +1301,30 @@ async function renderFeed(sec) {
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
-  window.switchTab = (tab) => { feedState.tab = tab; feedState.cursor = null; loadPosts(); };
+  window.switchTab = (tab) => {
+    feedState.tab = tab;
+    feedState.cursor = null;
+    if (tab === 'explore') { loadExplore(); return; }
+    loadPosts();
+  };
   window.loadMore = () => loadPosts();
+
+  // Explore tab: render the shared Explore content into the feed area.
+  // No pagination/cursor — it's a one-shot discovery view behind a spinner.
+  async function loadExplore() {
+    feedState.tab = 'explore';
+    render(); // draws composer + tab strip + spinner in #feed-list
+    let html;
+    try {
+      html = await exploreContentHtml();
+    } catch (e) {
+      html = `<p class="text-red-400 text-sm text-center py-4">Couldn't load Explore: ${esc(e.message || 'error')}</p>`;
+    }
+    // Guard: the user may have switched away (or opened a thread) while loading.
+    if (feedState.tab !== 'explore' || feedState.thread) return;
+    const list = document.getElementById('feed-list');
+    if (list) list.innerHTML = html;
+  }
 
   window.submitPost = async () => {
     if (!requireWalletThen(null, 'post')) return;
@@ -1372,7 +1403,16 @@ async function renderFeed(sec) {
     } catch (e) { alert(e.message); }
   };
 
-  await loadPosts();
+  // Honor a one-shot requested tab (e.g. the header 🔭 shortcut opens Home
+  // straight on the Explore tab). Defaults to the normal post feed.
+  if (S.pendingHomeTab === 'explore') {
+    S.pendingHomeTab = null;
+    feedState.tab = 'explore';
+    await loadExplore();
+  } else {
+    if (S.pendingHomeTab) S.pendingHomeTab = null;
+    await loadPosts();
+  }
 }
 
 // ── Tip Modal ──────────────────────────────────────────────────────────────────
@@ -4088,7 +4128,10 @@ async function renderVault(sec) {
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
-async function renderExplore(sec) {
+// Shared Explore content builder — reused by the standalone Explore page
+// (renderExplore, deep-link fallback) and by the Home feed's Explore tab.
+// Returns the inner markup (no outer page heading) and wires window.exploreFollow.
+async function exploreContentHtml() {
   const [people, markets, ico, nfts] = await Promise.all([
     api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
     api('GET', '/api/markets').then(d => d.markets).catch(() => []),
@@ -4105,9 +4148,11 @@ async function renderExplore(sec) {
   const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
   const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
   const topNfts = nfts.slice(0, 6);
-  sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
-
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+  return `
     <h3 class="font-semibold mb-2">People to follow</h3>
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
@@ -4149,6 +4194,14 @@ async function renderExplore(sec) {
     try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
     catch (e) { alert(e.message); }
   };
+}
+
+// Standalone Explore page (kept as a safe deep-link fallback; the primary
+// surface is now the Home feed's Explore tab).
+async function renderExplore(sec) {
+  sec.innerHTML = spin();
+  const html = await exploreContentHtml();
+  sec.innerHTML = `<h2 class="text-xl font-bold mb-4">🔭 Explore</h2>` + html;
 }
 
 
