@@ -174,7 +174,7 @@
     <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-[#131620] border-r border-[rgba(255,255,255,0.06)] flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
       <!-- Mobile-only: user identity -->
       <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-[rgba(255,255,255,0.06)] hidden">
-        <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0]"></div>
+        <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0] flex items-center gap-2"></div>
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
@@ -640,15 +640,34 @@ function _avatarHash(str) {
   for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
   return Math.abs(h);
 }
+// Deterministic 1–2 letter monogram from a username. Splits on separators
+// (- _ . space): with two+ segments, takes the first letter of the first two
+// (e.g. "staging-alice" → "SA"); otherwise the first two letters of the single
+// segment (e.g. "alice" → "AL", "bob" → "BO"). Falls back through the first raw
+// char to "?" for non-Latin / emoji handles.
+function userInitials(username) {
+  const name = String(username || '?');
+  const segs = name.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  let out = '';
+  if (segs.length >= 2) {
+    out = segs[0][0] + segs[1][0];
+  } else if (segs.length === 1) {
+    out = segs[0].slice(0, 2);
+  }
+  if (!out) out = (name.replace(/\s/g, '')[0] || '?');
+  return out.toUpperCase();
+}
 function avatarDataUri(username) {
   const name = String(username || '?');
-  const initial = (name.replace(/[^a-zA-Z0-9]/g, '')[0] || name[0] || '?').toUpperCase();
+  const initials = userInitials(name);
   const h = _avatarHash(name);
-  const hue = 200 + (h % 80); // 200–280° = blue/purple band
+  const hue = h % 360;                 // full spectrum, hashed from the name
   const hue2 = (hue + 40) % 360;
-  const c1 = `hsl(${hue},72%,62%)`;
-  const c2 = `hsl(${hue2},78%,44%)`;
+  const c1 = `hsl(${hue},68%,58%)`;
+  const c2 = `hsl(${hue2},72%,42%)`;
   const gid = 'g' + h;
+  // Tighten the type a notch when two glyphs are present so they don't clip.
+  const fontSize = initials.length > 1 ? 26 : 32;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
       `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">` +
@@ -656,8 +675,8 @@ function avatarDataUri(username) {
       `</linearGradient></defs>` +
       `<rect width="64" height="64" fill="url(#${gid})"/>` +
       `<text x="32" y="34" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" ` +
-        `font-size="30" font-weight="600" fill="#fff" fill-opacity="0.95" ` +
-        `text-anchor="middle" dominant-baseline="central">${initial}</text>` +
+        `font-size="${fontSize}" font-weight="600" fill="#fff" fill-opacity="0.95" ` +
+        `text-anchor="middle" dominant-baseline="central">${esc(initials)}</text>` +
     `</svg>`;
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }
@@ -668,6 +687,27 @@ function avatarImg(username, cls, avatarUrl) {
   return `<img src="${esc(src)}" alt="@${esc(username)}" ` +
     `class="rounded-full object-cover shrink-0 ring-1 ring-white/10 ${cls || 'w-8 h-8'}" ` +
     `loading="lazy" draggable="false">`;
+}
+// Inline "[badge] @handle" fragment — the single reusable renderer for the many
+// text-only username sites (tables, captions, chips, modal titles). opts:
+//   { avatarUrl, size, link, displayName, atSign }
+// `size` is a Tailwind size class for the badge (default 'w-5 h-5'); `link`
+// wraps the whole thing in a profile-navigating button; `displayName` shows a
+// name instead of the @handle; `atSign` (default true) prefixes "@".
+function userTag(username, opts) {
+  opts = opts || {};
+  const uname = String(username || '?');
+  const size = opts.size || 'w-5 h-5';
+  const label = opts.displayName != null
+    ? esc(opts.displayName)
+    : (opts.atSign === false ? '' : '@') + esc(uname);
+  const badge = avatarImg(uname, size, opts.avatarUrl);
+  const inner = `${badge}<span class="truncate">${label}</span>`;
+  if (opts.link) {
+    return `<button type="button" class="inline-flex items-center gap-1.5 min-w-0 hover:underline" ` +
+      `onclick="navigate('profile',{profileUser:'${esc(uname)}'})" aria-label="@${esc(uname)} profile">${inner}</button>`;
+  }
+  return `<span class="inline-flex items-center gap-1.5 min-w-0 align-middle">${inner}</span>`;
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -1046,7 +1086,7 @@ function updateHeader() {
     identityBtn.classList.add('flex');
   }
 
-  document.getElementById('drawer-username').textContent = '@' + S.user.username;
+  document.getElementById('drawer-username').innerHTML = avatarImg(S.user.username, 'w-6 h-6', S.user.avatar_url) + '<span class="truncate">@' + esc(S.user.username) + '</span>';
   document.getElementById('drawer-wallet').textContent = hasWallet ? (shortAddr(S.user.usernode_pubkey) || '') : 'No wallet linked';
   document.getElementById('drawer-user').classList.remove('hidden');
   updatePoints();
@@ -1499,7 +1539,7 @@ window.openTipModal = (postId, creatorUsername) => {
   const amountInput = document.getElementById('tip-amount');
   const errorDiv = document.getElementById('tip-error');
 
-  title.textContent = `Send BLOOM to @${esc(creatorUsername)}`;
+  title.innerHTML = `<span class="inline-flex items-center gap-1.5 flex-wrap">Send BLOOM to ${userTag(creatorUsername, { size: 'w-6 h-6' })}</span>`;
   const bloomTipBal = S.balances['BLOOM'] || 0;
   balance.textContent = `${fmtAmt('BLOOM', bloomTipBal)} BLOOM`;
   amountInput.value = '';
@@ -2122,7 +2162,7 @@ window.openCopyTradeModal = async (username) => {
     modal.innerHTML = `
       <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-2xl w-full max-h-96 overflow-y-auto space-y-4 p-6">
         <div class="flex justify-between items-center">
-          <h2 class="font-bold text-xl">Copy Positions from @${esc(username)}</h2>
+          <h2 class="font-bold text-xl inline-flex items-center gap-1.5 flex-wrap">Copy Positions from ${userTag(username, { size: 'w-6 h-6' })}</h2>
           <button onclick="document.getElementById('copy-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl">✕</button>
         </div>
         <div class="space-y-3">
@@ -3584,7 +3624,7 @@ async function renderStake(sec) {
         return '<div class="flex items-center justify-between gap-3 py-2 border-b border-[rgba(255,255,255,0.04)] last:border-0">'
           + '<div class="flex items-center gap-2 min-w-0">'
           + tokenBadge(a.token, 'sm')
-          + '<div class="text-sm truncate"><span class="font-medium">@' + esc(a.username) + '</span>'
+          + '<div class="text-sm truncate inline-flex items-center gap-1.5">' + userTag(a.username, { size: 'w-5 h-5', link: true })
           + ' <span class="text-[#8b95ab]">' + a.action + '</span>'
           + ' <span class="font-semibold ' + actionCls + '">' + fmtAmt(a.token, a.amount) + ' ' + a.token + '</span></div>'
           + '</div>'
@@ -4301,7 +4341,7 @@ async function exploreContentHtml() {
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
         <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
-          <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1)">${esc((p.username||'?')[0].toUpperCase())}</div>
+          ${avatarImg(p.username, 'w-8 h-8', p.avatar_url)}
           <div class="text-left min-w-0">
             <div class="text-sm font-medium flex items-center gap-1 truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''} ${p.roi && p.roi.closed_trade_count > 0 ? `<span class="text-xs font-semibold ${p.roi.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} shrink-0">📈 ${p.roi.all_time_roi_pct >= 0 ? '+' : ''}${p.roi.all_time_roi_pct}%</span>` : ''}</div>
             <div class="text-xs text-[#8b95ab]">${p.followers} followers</div>
@@ -4330,7 +4370,7 @@ async function exploreContentHtml() {
       <div class="card space-y-1 overflow-hidden">
         <div class="aspect-square overflow-hidden rounded-lg bg-[#1c2236]"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
         <p class="text-xs font-medium truncate">${esc(n.name)}</p>
-        <p class="text-xs text-[#4e5872] truncate">@${esc(n.owner_username)}</p>
+        <p class="text-xs text-[#4e5872] truncate">${userTag(n.owner_username, { size: 'w-4 h-4' })}</p>
       </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>'}
   `;
   window.exploreFollow = async (username, btn) => {
@@ -5267,7 +5307,7 @@ function _renderSelected() {
   const wrap = document.getElementById('msg-selected');
   if (!wrap) return;
   wrap.innerHTML = _msgSelected.map(u =>
-    `<span class="tag-basic inline-flex items-center gap-1">@${esc(u)}
+    `<span class="tag-basic inline-flex items-center gap-1">${userTag(u, { size: 'w-4 h-4' })}
        <button class="text-zinc-400 hover:text-white" onclick="msgRemovePick('${esc(u)}')">✕</button></span>`
   ).join('');
 }
@@ -6283,7 +6323,7 @@ function nftCard(n, { onclick = '', mini = false } = {}) {
     <p class="text-xs text-[#8b95ab] truncate mb-1">${esc(n.collection||'BloomMoney Genesis')}</p>
     <div class="flex items-center justify-between">
       <span class="text-xs ${rc} capitalize">${esc(n.rarity||'common')}</span>
-      ${priceStr || `<span class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</span>`}
+      ${priceStr || `<span class="text-xs text-[#4e5872]">${userTag(n.owner_username, { size: 'w-4 h-4' })}</span>`}
     </div>
   </div>`;
 }
@@ -6527,11 +6567,11 @@ async function renderNFTDetail(sec, nftId) {
         <div class="card">
           <div class="flex justify-between text-sm mb-1">
             <span class="text-[#8b95ab]">Owner</span>
-            <span class="font-medium">@${esc(nft.owner_username)}</span>
+            <span class="font-medium">${userTag(nft.owner_username, { size: 'w-5 h-5', link: true })}</span>
           </div>
           <div class="flex justify-between text-sm mb-1">
             <span class="text-[#8b95ab]">Creator</span>
-            <span class="font-medium">@${esc(nft.creator_username||nft.owner_username)}</span>
+            <span class="font-medium">${userTag(nft.creator_username||nft.owner_username, { size: 'w-5 h-5', link: true })}</span>
           </div>
           <div class="flex justify-between text-sm">
             <span class="text-[#8b95ab]">Royalty</span>
@@ -6570,7 +6610,7 @@ async function renderNFTDetail(sec, nftId) {
           ${bids.length ? bids.map(b => `
             <div class="flex items-center gap-2 text-sm">
               <span class="font-medium">${(Number(b.price_usdc)/1e6).toFixed(2)} USDC</span>
-              <span class="text-[#8b95ab]">by @${esc(b.bidder_username)}</span>
+              <span class="text-[#8b95ab] inline-flex items-center gap-1">by ${userTag(b.bidder_username, { size: 'w-4 h-4' })}</span>
               <span class="text-xs text-[#4e5872] ml-auto">${tsAgo(b.created_at)}</span>
               ${isOwner ? `<button class="text-xs text-emerald-400 hover:underline" onclick="nftAcceptBid(${nft.id},${b.id})">Accept</button>` : ''}
               ${S.user && S.user.user_id === b.bidder_user_id ? `<button class="text-xs text-red-400 hover:underline" onclick="nftWithdrawBid(${b.id})">Withdraw</button>` : ''}
@@ -6584,7 +6624,7 @@ async function renderNFTDetail(sec, nftId) {
             const el = { mint:'✦ Minted', sale:'⇄ Sale', transfer:'→ Transfer' }[t.event_type] || t.event_type;
             return `<div class="flex items-center gap-2 text-xs text-[#8b95ab]">
               <span class="text-[#e8eaf0]">${el}</span>
-              <span>${t.to_username ? `to @${esc(t.to_username)}` : ''}</span>
+              <span class="inline-flex items-center gap-1">${t.to_username ? `to ${userTag(t.to_username, { size: 'w-4 h-4' })}` : ''}</span>
               ${t.price_usdc ? `<span class="text-emerald-400">${(Number(t.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
               <span class="ml-auto">${tsAgo(t.created_at)}</span>
             </div>`;
@@ -6851,7 +6891,7 @@ async function renderNFTPortfolio(sec, activeTab) {
             <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
             <div class="min-w-0 flex-1">
               <p class="text-sm font-medium truncate">${esc(e.nft_name||'')}</p>
-              <p class="text-xs"><span class="${typeColor}">${typeLabel}</span>${e.to_username ? ` to @${esc(e.to_username)}` : ''}</p>
+              <p class="text-xs inline-flex items-center gap-1 flex-wrap"><span class="${typeColor}">${typeLabel}</span>${e.to_username ? `<span class="inline-flex items-center gap-1">to ${userTag(e.to_username, { size: 'w-4 h-4' })}</span>` : ''}</p>
             </div>
             ${e.price_usdc ? `<span class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
             <span class="text-xs text-[#4e5872]">${tsAgo(e.created_at)}</span>
@@ -6884,9 +6924,9 @@ async function renderNFTActivity(sec) {
         <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
         <div class="min-w-0 flex-1">
           <p class="text-sm font-medium truncate cursor-pointer hover:text-[#7c5cfc]" onclick="window._nftNav('detail',${e.nft_id})">${esc(e.nft_name||'')}</p>
-          <p class="text-xs text-[#8b95ab]">
+          <p class="text-xs text-[#8b95ab] inline-flex items-center gap-1 flex-wrap">
             <span class="${typeColor}">${typeLabel}</span>
-            ${isSent ? ` to @${esc(e.to_username||'')}` : e.from_username ? ` from @${esc(e.from_username)}` : ''}
+            ${isSent ? `<span class="inline-flex items-center gap-1">to ${userTag(e.to_username||'', { size: 'w-4 h-4' })}</span>` : e.from_username ? `<span class="inline-flex items-center gap-1">from ${userTag(e.from_username, { size: 'w-4 h-4' })}</span>` : ''}
           </p>
         </div>
         ${e.price_usdc ? `<div class="text-right"><p class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</p></div>` : ''}
@@ -7060,7 +7100,7 @@ async function renderAdmin(sec) {
     <div class="overflow-x-auto"><table class="w-full text-sm">
       <thead><tr class="text-[#4e5872] text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${users.map(u => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
-        <td class="py-1.5 pr-3 font-medium">@${esc(u.username)}</td>
+        <td class="py-1.5 pr-3 font-medium">${userTag(u.username, { size: 'w-5 h-5', avatarUrl: u.avatar_url })}</td>
         <td class="pr-3 font-mono text-xs">${shortAddr(u.usernode_pubkey)}</td>
         <td class="pr-3">${kycTag(u.kyc_level||'')}</td>
         <td class="pr-3">${u.is_admin?'✓':''}</td>
@@ -7078,7 +7118,7 @@ async function renderAdmin(sec) {
     return verifications.length ? `<div class="space-y-3">${verifications.map(k => `
       <div class="card flex items-center justify-between gap-3">
         <div>
-          <div class="font-medium">@${esc(k.username)} → ${k.level}</div>
+          <div class="font-medium inline-flex items-center gap-1.5">${userTag(k.username, { size: 'w-5 h-5' })} <span>→ ${esc(k.level)}</span></div>
           <div class="text-xs text-[#8b95ab]">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
         </div>
         <div class="flex gap-2">
@@ -7098,7 +7138,7 @@ async function renderAdmin(sec) {
       <thead><tr class="text-[#4e5872] text-xs">${['ID','User','Content','Del','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${posts.map(p => `<tr class="border-t border-[rgba(255,255,255,0.06)] ${p.deleted?'opacity-40':''}">
         <td class="py-1 pr-3 text-[#8b95ab]">${p.id}</td>
-        <td class="pr-3">@${esc(p.username)}</td>
+        <td class="pr-3">${userTag(p.username, { size: 'w-5 h-5' })}</td>
         <td class="pr-3 max-w-xs truncate">${esc(p.content.slice(0,80))}</td>
         <td class="pr-3">${p.deleted?'🗑':''}</td>
         <td class="flex gap-1 py-1">
@@ -7182,14 +7222,14 @@ async function renderAdmin(sec) {
       api('GET', '/api/admin/transactions'),
     ]);
     const balRows = balances.map(b => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
-      <td class="py-1 pr-3">@${esc(b.username)}</td>
+      <td class="py-1 pr-3">${userTag(b.username, { size: 'w-5 h-5' })}</td>
       <td class="pr-3">${esc(b.token_symbol)}</td>
       <td class="pr-3">${(b.balance/1e6).toFixed(4)}</td>
       <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminAdjustBalance(${b.user_id},'${esc(b.token_symbol)}')">Adjust</button></td>
     </tr>`).join('');
     const txRows = transactions.map(t => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
       <td class="py-1 pr-3 text-[#8b95ab]">${t.id}</td>
-      <td class="pr-3">@${esc(t.username||'?')}</td>
+      <td class="pr-3">${userTag(t.username||'?', { size: 'w-5 h-5' })}</td>
       <td class="pr-3">${esc(t.type)}</td>
       <td class="pr-3">${esc(t.token_symbol)}</td>
       <td class="pr-3">${(t.amount/1e6).toFixed(4)}</td>
@@ -7211,7 +7251,7 @@ async function renderAdmin(sec) {
         <td class="py-1 pr-3 text-[#8b95ab]">${n.id}</td>
         <td class="pr-3 font-mono text-xs">${esc(n.token_id)}</td>
         <td class="pr-3">${esc(n.name)}</td>
-        <td class="pr-3">@${esc(n.owner_username||'?')}</td>
+        <td class="pr-3">${userTag(n.owner_username||'?', { size: 'w-5 h-5' })}</td>
         <td class="pr-3 text-[#8b95ab]">${esc(n.collection||'')}</td>
         <td class="pr-3">${n.burned?'🔥':''}</td>
         <td class="py-1">${!n.burned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminBurnNFT(${n.id})">Burn</button>` : ''}</td>
@@ -7225,7 +7265,7 @@ async function renderAdmin(sec) {
       <thead><tr class="text-[#4e5872] text-xs">${['When','Admin','Action','Target','Note'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${actions.map(a => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
         <td class="py-1 pr-3 text-[#8b95ab] text-xs">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td>
-        <td class="pr-3">@${esc(a.username||'?')}</td>
+        <td class="pr-3">${userTag(a.username||'?', { size: 'w-5 h-5' })}</td>
         <td class="pr-3">${esc(a.action_type)}</td>
         <td class="pr-3">${esc(String(a.target_user_id||a.target_market_id||a.target_post_id||''))}</td>
         <td class="pr-3 text-[#8b95ab]">${esc(a.reason||'')}</td>
