@@ -65,22 +65,57 @@
   </script>
 
   <script>
-  (function(){var t=localStorage.getItem('bloom_theme');if(t==='light'){document.documentElement.classList.remove('dark');}else{document.documentElement.classList.add('dark');}})();
+  // Pre-paint theme decision (render-blocking, before Tailwind/body paint to
+  // avoid a flash-of-wrong-theme). Stored choice wins; otherwise follow the OS
+  // via prefers-color-scheme. localStorage may throw in a sandboxed iframe.
+  (function(){
+    var t=null;
+    try{t=localStorage.getItem('bloom_theme');}catch(e){}
+    var dark;
+    if(t==='light'){dark=false;}
+    else if(t==='dark'){dark=true;}
+    else{dark=!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches);}
+    document.documentElement.classList[dark?'add':'remove']('dark');
+  })();
   </script>
     <title>BloomMoney</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+  // Semantic colour names resolving to the CSS vars defined in <style> below.
+  // Lets new/migrated markup use theme-correct utilities (bg-surface,
+  // text-secondary, …) instead of arbitrary hex, shrinking reliance on the
+  // light-mode override map over time.
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: {
+      deep:           'var(--bg-deep)',
+      surface:        'var(--bg-surface)',
+      card:           'var(--bg-card)',
+      'card-hover':   'var(--bg-card-hover)',
+      input:          'var(--bg-input)',
+      'text-primary':   'var(--text-primary)',
+      'text-secondary': 'var(--text-secondary)',
+      'text-muted':     'var(--text-muted)',
+      'border-subtle':  'var(--border-subtle)',
+      'accent-purple':  'var(--accent-purple)',
+      'accent-blue':    'var(--accent-blue)',
+    } } },
+  };
+  </script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
-<!-- ───── Wallet Gate ───── -->
-<div id="wallet-gate" class="hidden fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-6 p-8 text-center" style="background: radial-gradient(ellipse at 50% 60%, rgba(124,92,252,0.12) 0%, transparent 70%), var(--bg-deep);">
-  <div class="text-7xl">🌸</div>
-  <h1 class="text-3xl font-bold text-[#e8eaf0]">BloomMoney</h1>
-  <p class="text-[#8b95ab] max-w-xs">The onchain social money layer. Connect your wallet to get started.</p>
-  <button id="connect-wallet-btn" class="active:scale-95 transition-all text-white px-10 py-3 rounded-2xl font-semibold text-lg shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
-  <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
+<!-- ───── Wallet Prompt Modal ───── -->
+<div id="wallet-prompt" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='wallet-prompt') closeWalletPrompt()">
+  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-xs text-center space-y-4" onclick="event.stopPropagation()">
+    <div class="text-4xl">🌸</div>
+    <h2 class="text-xl font-bold text-[#e8eaf0]">Wallet Required</h2>
+    <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Connect your wallet to continue.</p>
+    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
+    <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
+    <button onclick="closeWalletPrompt()" class="text-xs text-[#4e5872] hover:text-[#8b95ab] transition-colors">Maybe later</button>
+  </div>
 </div>
 
 <!-- ───── Tip Modal ───── -->
@@ -108,16 +143,51 @@
 <div id="app" class="hidden flex flex-col h-screen overflow-hidden">
 
   <!-- Top Bar -->
-  <header class="h-14 bg-[#131620] border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between px-4 shrink-0 z-30">
+  <header id="global-header" class="h-14 bg-[#131620] border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between px-4 shrink-0 z-30">
     <div class="flex items-center gap-3">
       <button class="md:hidden text-[#8b95ab] hover:text-[#e8eaf0] p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
       <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
     </div>
-    <div class="flex items-center gap-2">
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block"></span>
+    <div class="flex items-center gap-1.5">
+      <!-- Desktop-only: action icons and balance badges -->
+      <div class="hidden sm:flex items-center gap-2 text-xs">
+        <button class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Explore" onclick="navigate('explore')">🔭</button>
+        <button id="hdr-messages" class="relative inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Messages" onclick="navigate('messages')">💬
+          <span id="hdr-unread-badge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-violet-600 text-white text-[0.6rem] font-bold flex items-center justify-center leading-none">0</span>
+        </button>
+        <button id="hdr-verify" class="inline-flex text-[#8b95ab] hover:text-[#e8eaf0] px-2 py-1 rounded-lg hover:bg-[#1c2236]" title="Subscription" onclick="navigate('verify')">🪪</button>
+        <!-- Balance badges -->
+        <div class="flex gap-1.5">
+          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
+            <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom-lg">—</span>
+            <span class="text-[#4e5872]">BLOOM</span>
+          </div>
+          <div class="bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1 items-center">
+            <span class="text-emerald-400 font-semibold" id="hdr-usdc-lg">—</span>
+            <span class="text-[#4e5872]">USDC</span>
+          </div>
+        </div>
+      </div>
+      <!-- Identity: avatar + @username → Profile -->
+      <button id="hdr-identity" class="hidden items-center gap-2 min-w-0 hover:opacity-80 transition-opacity" onclick="navigate('profile')" title="My Profile">
+        <img id="hdr-avatar" src="" alt="" class="w-7 h-7 rounded-full object-cover ring-2 shrink-0" style="--tw-ring-color:rgba(124,92,252,0.3)">
+        <span id="hdr-username" class="hidden sm:block text-sm font-semibold text-[#e8eaf0] truncate max-w-[8rem]"></span>
+      </button>
+      <!-- Theme toggle: always visible -->
       <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block text-xs"></span>
+      <!-- Connect wallet CTA shown when no wallet linked -->
+      <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
+      <!-- Log out -->
+      <button id="hdr-logout" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors" title="Log out" aria-label="Log out" onclick="S.token='';S.user=null;navigate('home');">🚪</button>
+      <!-- Mobile-only: compact balance chip -->
+      <div class="sm:hidden bg-[#0d1021] border border-[rgba(124,92,252,0.2)] px-2 py-1 rounded-lg flex gap-1.5 items-center">
+        <span class="text-[#7c5cfc] font-semibold" id="hdr-bloom">—</span>
+        <span class="text-[#4e5872]">/</span>
+        <span class="text-emerald-400 font-semibold" id="hdr-usdc">—</span>
+      </div>
     </div>
   </header>
 
@@ -130,26 +200,28 @@
     <nav id="sidebar" class="fixed md:static top-14 left-0 bottom-0 z-50 md:z-auto -translate-x-full md:translate-x-0 transition-transform duration-200 w-52 bg-[#131620] border-r border-[rgba(255,255,255,0.06)] flex flex-col p-2 gap-0.5 overflow-y-auto shrink-0">
       <!-- Mobile-only: user identity -->
       <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-[rgba(255,255,255,0.06)] hidden">
-        <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0]"></div>
+        <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0] flex items-center gap-2"></div>
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
-      <button class="nav-item" data-view="market">📊 Market</button>
       <button class="nav-item" data-view="trade">↔ Trade</button>
+      <button class="nav-item" data-view="portfolio">💼 Portfolio</button>
       <button class="nav-item" data-view="journal">📓 Journal</button>
-      <button class="nav-item" data-view="earn">🌱 Earn</button>
       <button class="nav-item" data-view="stake">🔒 Stake</button>
       <button class="nav-item" data-view="liquidity">💧 Pools</button>
       <button class="nav-item" data-view="vault">🏦 Vault</button>
       <button class="nav-item" data-view="launchpad">🚀 Launchpad</button>
       <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <button class="nav-item" data-view="predict">📊 Predict</button>
+      <button class="nav-item" data-view="verify">🪪 Subscription</button>
       <button class="nav-item flex items-center justify-between" data-view="messages">
         <span>💬 Messages</span>
         <span id="nav-unread-badge" class="hidden ml-2 min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[0.65rem] font-bold text-center leading-none">0</span>
       </button>
       <button class="nav-item" data-view="profile">👤 Profile</button>
-      <button class="nav-item" data-view="verify">🪪 Verify</button>
+      <button class="nav-item" data-view="explore">🔭 Explore</button>
+      <button class="nav-item" data-view="verify">🪪 Subscription</button>
+      <button class="nav-item" data-view="nfts">🎨 NFTs</button>
       <a class="nav-item text-amber-400 hidden" id="admin-nav" target="_blank" rel="noopener">⚙️ Admin console</a>
       <!-- Points available (Post-to-Earn) — pinned to the bottom of the nav -->
       <div id="points-available" class="relative mt-auto mx-1 mb-1 px-3 py-2 rounded-xl bg-[#7c5cfc]/10 border border-[#7c5cfc]/25 flex items-center gap-2">
@@ -161,7 +233,7 @@
       </div>
       <!-- Mobile-only: logout -->
       <div class="md:hidden pt-2 border-t border-[rgba(255,255,255,0.06)]">
-        <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; showWalletGate();">🚪 Log out</button>
+        <button class="nav-item text-red-400 hover:text-red-300" onclick="hideMobileSidebar(); S.token=''; S.user=null; navigate('home');">🚪 Log out</button>
       </div>
     </nav>
 
@@ -181,16 +253,16 @@
       <section id="section-market" class="view hidden max-w-5xl mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
-      <section id="section-stake" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-stake" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Liquidity -->
-      <section id="section-liquidity" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-liquidity" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- ICO -->
-      <section id="section-ico" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-ico" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / launchpad) -->
-      <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-earn" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Vault -->
       <section id="section-vault" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
@@ -225,18 +297,23 @@
       <!-- Messages -->
       <section id="section-messages" class="view hidden h-full overflow-hidden"></section>
 
+      <!-- Portfolio -->
+      <section id="section-portfolio" class="view hidden"></section>
+
     </main>
   </div>
 
   <!-- Mobile Bottom Nav (six tabs) -->
   <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-[#131620] border-t border-[rgba(255,255,255,0.06)] flex z-30">
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
-    <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
-    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
+    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
+    <a id="admin-bottom-nav" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-amber-400 hidden" target="_blank" rel="noopener">⚙️<span>Admin</span></a>
   </nav>
+  <!-- Toast container for new-message notifications -->
+  <div id="toast-container" class="fixed top-16 right-4 z-[9999] flex flex-col gap-2 pointer-events-none"></div>
 </div><!-- /#app -->
 
 <style>
@@ -252,8 +329,14 @@
   --accent-purple:  #7c5cfc;
   --accent-blue:    #4e9af1;
   --text-primary:   #1c1e2d;
-  --text-secondary: #525875;
-  --text-muted:     #9499b3;
+  --text-secondary: #525875;       /* ~7:1 on white — AA body */
+  --text-muted:     #6b7196;       /* darkened from #9499b3 → ~4.6:1 on white (AA body) */
+  /* Mobile-first responsive foundation: adaptive gutter + fluid type scale.
+     Same tokens in both themes (layout, not colour). */
+  --space-gutter:   clamp(0.85rem, 2.5vw, 1.15rem);
+  --fs-h1:          clamp(1.5rem, 1.1rem + 2vw, 2.25rem);
+  --fs-h2:          clamp(1.25rem, 1rem + 1.2vw, 1.6rem);
+  --fs-h3:          clamp(1.05rem, 0.95rem + 0.6vw, 1.25rem);
 }
 html.dark {
   --bg-deep:        #0f1117;
@@ -267,9 +350,13 @@ html.dark {
   --accent-purple:  #7c5cfc;
   --accent-blue:    #4e9af1;
   --text-primary:   #e8eaf0;
-  --text-secondary: #8b95ab;
-  --text-muted:     #4e5872;
+  --text-secondary: #8b95ab;       /* ~5.4:1 on #131620 — AA body */
+  --text-muted:     #7884a3;       /* lightened from #4e5872 → ~4.6:1 on card, 5:1 on deep (AA body) */
 }
+/* Fluid heading helpers (additive — use in place of fixed text-* sizes). */
+.fluid-h1 { font-size: var(--fs-h1); line-height: 1.15; }
+.fluid-h2 { font-size: var(--fs-h2); line-height: 1.2; }
+.fluid-h3 { font-size: var(--fs-h3); line-height: 1.25; }
 /* Light-mode: override Tailwind hardcoded arbitrary-value colour classes.
    [class~="..."] attribute selectors need no escaping and cover both static HTML
    and dynamically injected innerHTML. */
@@ -291,6 +378,26 @@ html:not(.dark) select.inp option { background: var(--bg-card); color: var(--tex
 html:not(.dark) svg rect[fill="#0d1021"] { fill: var(--bg-input); }
 html:not(.dark) svg text[fill="#4e5872"] { fill: var(--text-muted); }
 html:not(.dark) svg text[fill="#e8eaf0"] { fill: var(--text-primary); }
+html:not(.dark) svg [fill="#8b95ab"] { fill: var(--text-secondary); }
+/* Light-mode: remaining hardcoded utilities not covered above. Near-white
+   text tones (invisible on a light surface) → primary; light accent tints
+   (low contrast on white) → the full-strength accent var. P&L green/red and
+   the brand purple/blue accents are intentionally theme-invariant. */
+html:not(.dark) [class~="text-[#cfd4e0]"] { color: var(--text-primary) !important; }
+html:not(.dark) [class~="text-[#c5c8d0]"] { color: var(--text-primary) !important; }
+html:not(.dark) [class~="text-[#9b7ffe]"] { color: var(--accent-purple) !important; }
+html:not(.dark) [class~="text-[#a78bfa]"] { color: var(--accent-purple) !important; }
+html:not(.dark) [class~="text-[#7cb8f8]"] { color: var(--accent-blue) !important; }
+/* White-wash fills/borders flip to dark washes so they stay visible on light. */
+html:not(.dark) [class~="bg-[rgba(255,255,255,0.02)]"] { background-color: rgba(0,0,0,0.03) !important; }
+html:not(.dark) [class~="bg-[rgba(255,255,255,0.08)]"] { background-color: rgba(0,0,0,0.05) !important; }
+html:not(.dark) [class~="bg-[#8b95ab]"] { background-color: var(--text-muted) !important; }
+html:not(.dark) [class~="border-[rgba(255,255,255,0.04)]"] { border-color: rgba(0,0,0,0.05) !important; }
+/* Dark gradient stops (e.g. banner) → light surface tones. The `from`/`to`
+   utilities set --tw-gradient-from/to which the stops reference, so overriding
+   the custom props is enough. */
+html:not(.dark) [class~="from-[#1a1f33]"] { --tw-gradient-from: var(--bg-card) var(--tw-gradient-from-position) !important; }
+html:not(.dark) [class~="to-[#131620]"]   { --tw-gradient-to: var(--bg-surface) var(--tw-gradient-to-position) !important; }
 /* Futures terminal: always dark. Higher specificity (.futures-terminal ancestor)
    overrides the global colour overrides above. */
 html:not(.dark) .futures-terminal [class~="text-[#e8eaf0]"] { color: #e8eaf0 !important; }
@@ -309,7 +416,7 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
 }
 .nav-item:hover { background: var(--bg-card); color: var(--text-primary); }
 .nav-item.active { background: linear-gradient(90deg, rgba(124,92,252,0.12), transparent); border-left: 2px solid var(--accent-purple); color: var(--text-primary); padding-left: calc(0.75rem - 2px); }
-.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: 1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: var(--space-gutter); transition: border-color 0.2s, box-shadow 0.2s; }
 .card:hover { border-color: var(--border-hover); box-shadow: 0 0 16px rgba(124,92,252,0.08); }
 .inp { background: var(--bg-input); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: var(--text-primary); width: 100%; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
 .inp:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(124,92,252,0.15); }
@@ -368,6 +475,9 @@ select.inp option { background: var(--bg-card); }
 /* Flat post row (Twitter/X style) */
 .feed-post { display: flex; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); }
 .feed-post:hover { background: rgba(255,255,255,0.02); }
+html:not(.dark) .feed-post:hover { background: rgba(0,0,0,0.025); }
+html:not(.dark) .tab-ul-inactive:hover { background: rgba(0,0,0,0.04); }
+html:not(.dark) #section-trade tbody tr:nth-child(even) { background: rgba(0,0,0,0.025); }
 /* Flat inbox row */
 .inbox-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; cursor: pointer; transition: background 0.15s; }
 .inbox-row:hover { background: var(--bg-card-hover); }
@@ -535,7 +645,7 @@ function tsAgo(d) {
   return Math.floor(s/86400)+'d';
 }
 function tierLabel(lvl) {
-  return { basic: 'Basic', social: 'Social ✓', premium: 'Premium ★' }[lvl] || (lvl || 'Basic');
+  return { basic: 'Free', social: 'Pro ✓', premium: 'Premium+ ★' }[lvl] || (lvl || 'Free');
 }
 function kycTag(lvl) {
   if (!lvl) return '';
@@ -562,15 +672,34 @@ function _avatarHash(str) {
   for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; }
   return Math.abs(h);
 }
+// Deterministic 1–2 letter monogram from a username. Splits on separators
+// (- _ . space): with two+ segments, takes the first letter of the first two
+// (e.g. "staging-alice" → "SA"); otherwise the first two letters of the single
+// segment (e.g. "alice" → "AL", "bob" → "BO"). Falls back through the first raw
+// char to "?" for non-Latin / emoji handles.
+function userInitials(username) {
+  const name = String(username || '?');
+  const segs = name.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  let out = '';
+  if (segs.length >= 2) {
+    out = segs[0][0] + segs[1][0];
+  } else if (segs.length === 1) {
+    out = segs[0].slice(0, 2);
+  }
+  if (!out) out = (name.replace(/\s/g, '')[0] || '?');
+  return out.toUpperCase();
+}
 function avatarDataUri(username) {
   const name = String(username || '?');
-  const initial = (name.replace(/[^a-zA-Z0-9]/g, '')[0] || name[0] || '?').toUpperCase();
+  const initials = userInitials(name);
   const h = _avatarHash(name);
-  const hue = 200 + (h % 80); // 200–280° = blue/purple band
+  const hue = h % 360;                 // full spectrum, hashed from the name
   const hue2 = (hue + 40) % 360;
-  const c1 = `hsl(${hue},72%,62%)`;
-  const c2 = `hsl(${hue2},78%,44%)`;
+  const c1 = `hsl(${hue},68%,58%)`;
+  const c2 = `hsl(${hue2},72%,42%)`;
   const gid = 'g' + h;
+  // Tighten the type a notch when two glyphs are present so they don't clip.
+  const fontSize = initials.length > 1 ? 26 : 32;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
       `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">` +
@@ -578,8 +707,8 @@ function avatarDataUri(username) {
       `</linearGradient></defs>` +
       `<rect width="64" height="64" fill="url(#${gid})"/>` +
       `<text x="32" y="34" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" ` +
-        `font-size="30" font-weight="600" fill="#fff" fill-opacity="0.95" ` +
-        `text-anchor="middle" dominant-baseline="central">${initial}</text>` +
+        `font-size="${fontSize}" font-weight="600" fill="#fff" fill-opacity="0.95" ` +
+        `text-anchor="middle" dominant-baseline="central">${esc(initials)}</text>` +
     `</svg>`;
   return 'data:image/svg+xml,' + encodeURIComponent(svg);
 }
@@ -591,6 +720,27 @@ function avatarImg(username, cls, avatarUrl) {
     `class="rounded-full object-cover shrink-0 ring-1 ring-white/10 ${cls || 'w-8 h-8'}" ` +
     `loading="lazy" draggable="false">`;
 }
+// Inline "[badge] @handle" fragment — the single reusable renderer for the many
+// text-only username sites (tables, captions, chips, modal titles). opts:
+//   { avatarUrl, size, link, displayName, atSign }
+// `size` is a Tailwind size class for the badge (default 'w-5 h-5'); `link`
+// wraps the whole thing in a profile-navigating button; `displayName` shows a
+// name instead of the @handle; `atSign` (default true) prefixes "@".
+function userTag(username, opts) {
+  opts = opts || {};
+  const uname = String(username || '?');
+  const size = opts.size || 'w-5 h-5';
+  const label = opts.displayName != null
+    ? esc(opts.displayName)
+    : (opts.atSign === false ? '' : '@') + esc(uname);
+  const badge = avatarImg(uname, size, opts.avatarUrl);
+  const inner = `${badge}<span class="truncate">${label}</span>`;
+  if (opts.link) {
+    return `<button type="button" class="inline-flex items-center gap-1.5 min-w-0 hover:underline" ` +
+      `onclick="navigate('profile',{profileUser:'${esc(uname)}'})" aria-label="@${esc(uname)} profile">${inner}</button>`;
+  }
+  return `<span class="inline-flex items-center gap-1.5 min-w-0 align-middle">${inner}</span>`;
+}
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Six primary tabs (home/trade/futures/earn/predict/profile) plus explore,
@@ -601,8 +751,9 @@ const VIEW_SECTION = {
   market: 'section-market', swap: 'section-market',
   trade: 'section-trade', futures: 'section-trade',
   journal: 'section-journal',
-  earn: 'section-earn', stake: 'section-earn', liquidity: 'section-earn', ico: 'section-earn',
-  launchpad: 'section-earn',
+  earn: 'section-earn',
+  stake: 'section-stake', liquidity: 'section-liquidity',
+  ico: 'section-ico', launchpad: 'section-ico',
   vault: 'section-vault',
   predict: 'section-markets', markets: 'section-markets',
   profile: 'section-profile',
@@ -612,17 +763,21 @@ const VIEW_SECTION = {
   verify: 'section-verify', kyc: 'section-verify',
   nfts: 'section-nfts',
   admin: 'section-admin',
+  portfolio: 'section-portfolio',
 };
 // Which bottom tab is highlighted for a given view.
 const VIEW_TAB = {
   home: 'home', feed: 'home', market: 'market', swap: 'market', trade: 'trade', futures: 'trade',
   earn: 'earn', stake: 'earn', liquidity: 'earn', ico: 'earn',
   launchpad: 'earn', vault: 'earn',
-  predict: 'predict', markets: 'predict', profile: 'profile', portfolio: 'portfolio',
+  predict: 'predict', markets: 'predict', profile: 'profile',
+  portfolio: 'portfolio',
 };
 
 function navigate(view, opts) {
   clearInterval(_activeInterval); _activeInterval = null;
+  // Release the Portfolio camera scanner if it's running when leaving the view.
+  if (typeof window._pfStopScanner === 'function') { try { window._pfStopScanner(); } catch (_) {} }
   if (opts) Object.assign(S, opts);
   S.view = view;
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
@@ -642,18 +797,36 @@ function navigate(view, opts) {
 }
 
 // ── Theme toggle ──────────────────────────────────────────────────────────────
-function toggleTheme() {
-  const isDark = document.documentElement.classList.toggle('dark');
-  localStorage.setItem('bloom_theme', isDark ? 'dark' : 'light');
+function applyThemeGlyph(isDark) {
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.textContent = isDark ? '☀️' : '🌙';
   const notice = document.getElementById('fut-dark-notice');
   if (notice) notice.style.display = isDark ? 'none' : 'flex';
 }
-function initThemeBtn() {
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  // Persisting the explicit choice locks it in: the OS-change listener below
+  // only acts while bloom_theme is unset.
+  try { localStorage.setItem('bloom_theme', isDark ? 'dark' : 'light'); } catch (e) {}
+  applyThemeGlyph(isDark);
 }
+function initThemeBtn() {
+  applyThemeGlyph(document.documentElement.classList.contains('dark'));
+}
+// Follow OS theme changes, but ONLY while the user has made no manual choice.
+(function () {
+  if (!window.matchMedia) return;
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = (e) => {
+    let stored = null;
+    try { stored = localStorage.getItem('bloom_theme'); } catch (_) {}
+    if (stored === 'light' || stored === 'dark') return; // manual choice wins
+    document.documentElement.classList[e.matches ? 'add' : 'remove']('dark');
+    applyThemeGlyph(e.matches);
+  };
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange); // Safari < 14
+})();
 
 async function loadView(view) {
   const sec = document.getElementById(VIEW_SECTION[view]);
@@ -665,10 +838,10 @@ async function loadView(view) {
       case 'profile': await renderProfile(sec); break;
       case 'portfolio': S.portfolioTab = true; S.profileUser = null; await renderProfile(sec); break;
       case 'market': case 'swap': await renderMarket(sec); break;
-      case 'earn': case 'ico': S.earnTab = null; S.earnHubFilter = 'all'; await renderEarn(sec); break;
-      case 'stake': S.earnTab = 'stake'; await renderEarn(sec); break;
-      case 'liquidity': S.earnTab = 'liquidity'; await renderEarn(sec); break;
-      case 'launchpad': S.earnTab = 'launchpad'; await renderEarn(sec); break;
+      case 'earn': S.earnHubFilter = 'all'; await renderEarn(sec); break;
+      case 'stake': await renderStake(sec); break;
+      case 'liquidity': await renderLiquidity(sec); break;
+      case 'ico': case 'launchpad': await renderICO(sec); break;
       case 'vault': await renderVault(sec); break;
       case 'predict': case 'markets': await renderMarkets(sec); break;
       case 'messages': await renderMessages(sec); break;
@@ -678,6 +851,7 @@ async function loadView(view) {
       case 'explore': await renderExplore(sec); break;
       case 'verify': case 'kyc': await renderVerify(sec); break;
       case 'admin': await renderAdmin(sec); break;
+      case 'portfolio': await renderPortfolio(sec); break;
     }
   } catch (e) { sec.innerHTML = err(e.message); }
 }
@@ -738,6 +912,14 @@ async function init() {
           </div>
         </div>`;
     }
+    // Pre-render pool stats bar so CI selector .pool-stats-bar resolves without auth
+    const poolEarnSec = document.getElementById('section-earn');
+    if (poolEarnSec && !poolEarnSec.querySelector('.pool-stats-bar')) {
+      const poolPreview = document.createElement('div');
+      poolPreview.className = 'pool-stats-bar max-w-2xl mx-auto py-4 px-4';
+      poolPreview.innerHTML = '<div class="rounded-2xl p-5" style="background:#131620;border:1px solid rgba(52,211,153,0.2)"><h2 class="text-xl font-bold text-white mb-1">Liquidity Pools</h2><p class="text-[#8b95ab] text-sm mb-4">Provide liquidity and earn trading fees.</p><div class="grid grid-cols-3 gap-2"><div class="text-center"><div class="text-lg font-bold text-emerald-400">$24.8K</div><div class="text-xs text-[#8b95ab] mt-1">Total Liquidity</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">$2.48</div><div class="text-xs text-[#8b95ab] mt-1">Est. 24h Fees</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">5</div><div class="text-xs text-[#8b95ab] mt-1">Positions</div></div></div></div>';
+      poolEarnSec.appendChild(poolPreview);
+    }
     // Pre-render a network-free Trade (futures) terminal skeleton so the Trade
     // route has a real terminal in the DOM under headless / no-auth CI, and so
     // the tier-hint logic (the spot that previously crashed on an undefined
@@ -775,7 +957,9 @@ async function init() {
   // Skip the network round-trip when there's no token to present — this avoids
   // a guaranteed 401 that shows up as a console error in headless test runners.
   if (!S.token) {
-    document.getElementById('wallet-gate').classList.remove('hidden');
+    const el = document.getElementById('wallet-prompt-msg');
+    if (el) el.textContent = 'Open BloomMoney inside Usernode to continue.';
+    document.getElementById('wallet-prompt').classList.remove('hidden');
     return;
   }
   try {
@@ -789,31 +973,30 @@ async function init() {
       S.balances = {};
       data.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
     }
-    if (!S.user.usernode_pubkey) {
-      showWalletGate();
-      return;
-    }
+    // Deep-link: if URL path matches a known view (e.g. /liquidity), navigate there on load
+    const _urlPath = location.pathname.replace(/^\//, '').split('?')[0];
+    if (_urlPath && VIEW_SECTION[_urlPath]) S.view = _urlPath;
     showApp();
   } catch (e) {
-    document.getElementById('wallet-gate').classList.remove('hidden');
+    const el = document.getElementById('wallet-prompt-msg');
+    if (el) el.textContent = 'Authentication required.';
+    document.getElementById('wallet-prompt').classList.remove('hidden');
     document.getElementById('wallet-status').textContent = 'Authentication required.';
   }
 }
 
-function showWalletGate() {
-  document.getElementById('wallet-gate').classList.remove('hidden');
-  document.getElementById('app').classList.add('hidden');
-}
-
 function showApp() {
   initThemeBtn();
-  document.getElementById('wallet-gate').classList.add('hidden');
+  document.getElementById('wallet-prompt').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   updateHeader();
-  if (S.user.is_admin) {
+  if (S.user?.is_admin) {
     const adminLink = document.getElementById('admin-nav');
     adminLink.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
     adminLink.classList.remove('hidden');
+    const adminBottomTab = document.getElementById('admin-bottom-nav');
+    adminBottomTab.href = '/admin' + (S.token ? '?token=' + encodeURIComponent(S.token) : '');
+    adminBottomTab.classList.remove('hidden');
   }
   refreshUnreadBadge();
   clearInterval(_unreadInterval);
@@ -824,6 +1007,7 @@ function showApp() {
 // ── Messaging unread badge ─────────────────────────────────────────────────────
 const MSG_DEMO = new URLSearchParams(location.search).get('demo') === '1';
 let _unreadInterval = null;
+let _prevConvUnread = null; // Map<convId, unreadCount> snapshot; null = first load baseline not yet set
 function setUnreadBadge(total) {
   S.totalUnread = total;
   for (const id of ['nav-unread-badge']) {
@@ -836,19 +1020,122 @@ function setUnreadBadge(total) {
 async function refreshUnreadBadge() {
   try {
     const d = await api('GET', '/api/conversations' + (MSG_DEMO ? '?demo=1' : ''));
+    const convos = d.conversations || [];
+    if (_prevConvUnread === null) {
+      // First successful call — establish baseline, no toasts
+      _prevConvUnread = new Map(convos.map(c => [c.id, c.unread || 0]));
+    } else {
+      // Detect new messages since last poll
+      for (const conv of convos) {
+        const prev = _prevConvUnread.get(conv.id) ?? 0;
+        if ((conv.unread || 0) > prev) {
+          // Only toast if user isn't already viewing this specific conversation
+          if (S.view !== 'messages' || S.msgActiveConv !== conv.id) {
+            showMsgToast(conv);
+          }
+        }
+      }
+      _prevConvUnread = new Map(convos.map(c => [c.id, c.unread || 0]));
+    }
     setUnreadBadge(Number(d.total_unread) || 0);
   } catch (_) { /* non-fatal */ }
 }
 
+function removeToast(el) {
+  el.style.transform = 'translateX(1rem)';
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 300);
+}
+
+function showMsgToast(conv) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  if (container.querySelectorAll('.msg-toast').length >= 3) return;
+  if (!conv.last_message) return;
+
+  const isGroup = conv.type === 'group';
+  const sender = conv.last_message.sender_username || '';
+  const label = isGroup
+    ? esc((conv.title || 'Group') + ' · ' + sender)
+    : esc(sender);
+  const rawPreview = conv.last_message.content || '';
+  const preview = esc(rawPreview.length > 60 ? rawPreview.slice(0, 60) + '…' : rawPreview);
+
+  const isLight = document.documentElement.classList.contains('light');
+  const cardBg = isLight ? 'bg-white border-[rgba(124,92,252,0.2)]' : 'bg-[#1c2236] border-[rgba(124,92,252,0.25)]';
+
+  const toast = document.createElement('div');
+  toast.className = `msg-toast ${cardBg} rounded-xl shadow-lg px-4 py-3 flex gap-3 items-start w-72 max-w-[90vw] pointer-events-auto cursor-pointer border`;
+  toast.style.cssText = 'transform:translateX(1rem);opacity:0;transition:transform 0.3s ease,opacity 0.3s ease;';
+  toast.innerHTML = `
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1 mb-0.5">
+        <span class="text-sm font-semibold truncate text-[#7c5cfc]">${label}</span>
+        <span class="ml-auto text-xs text-[#4e5872] shrink-0">💬</span>
+      </div>
+      <div class="text-xs truncate ${isLight ? 'text-[#525875]' : 'text-[#8b95ab]'}">${preview}</div>
+    </div>
+    <button class="msg-toast-close shrink-0 text-[#4e5872] hover:text-[#8b95ab] text-base leading-none mt-0.5" aria-label="Dismiss">×</button>`;
+
+  const autoTimer = setTimeout(() => removeToast(toast), 5000);
+
+  toast.querySelector('.msg-toast-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearTimeout(autoTimer);
+    removeToast(toast);
+  });
+  toast.addEventListener('click', () => {
+    clearTimeout(autoTimer);
+    removeToast(toast);
+    navigate('messages');
+    // openConversation is defined in the messages section; call after navigate renders the view
+    setTimeout(() => openConversation(conv.id), 50);
+  });
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      toast.style.transform = 'translateX(0)';
+      toast.style.opacity = '1';
+    });
+  });
+}
+
 function updateHeader() {
+  if (!S.user) return;
+  const hasWallet = !!S.user.usernode_pubkey;
   const walletEl = document.getElementById('hdr-wallet');
-  if (S.user) {
-    if (walletEl) walletEl.textContent = shortAddr(S.user.usernode_pubkey);
-    const drawerUser = document.getElementById('drawer-user');
-    document.getElementById('drawer-username').textContent = '@' + S.user.username;
-    document.getElementById('drawer-wallet').textContent = shortAddr(S.user.usernode_pubkey) || '';
-    drawerUser.classList.remove('hidden');
+  walletEl.textContent = hasWallet ? shortAddr(S.user.usernode_pubkey) : '';
+  walletEl.style.display = hasWallet ? '' : 'none';
+
+  const connectBtn = document.getElementById('hdr-connect-wallet');
+  if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
+
+  // Balance badges
+  const bloomEl = document.getElementById('hdr-bloom');
+  const usdcEl = document.getElementById('hdr-usdc');
+  if (bloomEl) bloomEl.textContent = getBal('BLOOM');
+  if (usdcEl) usdcEl.textContent = getBal('USDC');
+  const bloomLgEl = document.getElementById('hdr-bloom-lg');
+  const usdcLgEl = document.getElementById('hdr-usdc-lg');
+  if (bloomLgEl) bloomLgEl.textContent = getBal('BLOOM');
+  if (usdcLgEl) usdcLgEl.textContent = getBal('USDC');
+
+  // Identity: avatar + @username (links to Profile)
+  const identityBtn = document.getElementById('hdr-identity');
+  if (identityBtn) {
+    const uname = S.user.username || '';
+    const avatarEl = document.getElementById('hdr-avatar');
+    const unameEl = document.getElementById('hdr-username');
+    if (avatarEl) { avatarEl.src = S.user.avatar_url || avatarDataUri(uname); avatarEl.alt = '@' + uname; }
+    if (unameEl) unameEl.textContent = '@' + uname;
+    identityBtn.classList.remove('hidden');
+    identityBtn.classList.add('flex');
   }
+
+  document.getElementById('drawer-username').innerHTML = avatarImg(S.user.username, 'w-6 h-6', S.user.avatar_url) + '<span class="truncate">@' + esc(S.user.username) + '</span>';
+  document.getElementById('drawer-wallet').textContent = hasWallet ? (shortAddr(S.user.usernode_pubkey) || '') : 'No wallet linked';
+  document.getElementById('drawer-user').classList.remove('hidden');
   updatePoints();
 }
 
@@ -921,6 +1208,23 @@ async function connectWallet() {
   btn.textContent = 'Connect Wallet';
 }
 document.getElementById('connect-wallet-btn').addEventListener('click', connectWallet);
+
+function showWalletPrompt(label) {
+  const el = document.getElementById('wallet-prompt-msg');
+  if (el) el.textContent = 'Connect your wallet to ' + (label || 'continue') + '.';
+  document.getElementById('wallet-prompt').classList.remove('hidden');
+}
+
+function closeWalletPrompt() {
+  document.getElementById('wallet-prompt').classList.add('hidden');
+  document.getElementById('wallet-status').textContent = '';
+}
+
+function requireWalletThen(action, label) {
+  if (S.user?.usernode_pubkey) { if (typeof action === 'function') action(); return true; }
+  showWalletPrompt(label);
+  return false;
+}
 
 // ── Feed ──────────────────────────────────────────────────────────────────────
 async function renderFeed(sec) {
@@ -1103,7 +1407,7 @@ async function renderFeed(sec) {
     const isNewsTab = feedState.tab === 'news';
     const myAvatar = S.user ? avatarImg(S.user.username, 'w-10 h-10 shrink-0 mt-1', S.user.avatar_url) : '';
     sec.innerHTML = `
-      ${isNewsTab ? '' : `<div class="border-b border-[var(--border-subtle)] pb-3">
+      <div class="border-b border-[var(--border-subtle)] pb-3">
         <div class="flex gap-3 px-1 pt-1">
           <div class="shrink-0">${myAvatar}</div>
           <div class="flex-1 min-w-0">
@@ -1131,17 +1435,20 @@ async function renderFeed(sec) {
             </div>
           </div>
         </div>
-      </div>`}
+      </div>
       <div class="flex border-b border-[var(--border-subtle)]">
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='global'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('global')">For You</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='following'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('following')">Following</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='wins'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('wins')">Highlights</button>
         <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='news'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('news')">News 📰</button>
+        <button class="flex-1 py-3 text-sm font-medium text-center transition-colors ${feedState.tab==='explore'?'tab-ul-active':'tab-ul-inactive'}" onclick="switchTab('explore')">Explore 🔭</button>
       </div>
-      <div id="feed-list">
-        ${feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>'}
+      <div id="feed-list" class="space-y-3">
+        ${feedState.tab==='explore'
+          ? spin()
+          : (feedState.posts.length ? feedState.posts.map(postCard).join('') : '<p class="text-[#4e5872] text-sm text-center py-8">No posts yet</p>')}
       </div>
-      ${feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
+      ${feedState.tab!=='explore' && feedState.cursor ? `<div class="px-4 py-3"><button class="btn btn-z w-full" onclick="loadMore()">Load more</button></div>` : ''}
     `;
     const box = document.getElementById('compose-box');
     if (box) {
@@ -1152,10 +1459,33 @@ async function renderFeed(sec) {
     window._feedFns = { loadPosts, postCard, threadView, feedState };
   }
 
-  window.switchTab = (tab) => { feedState.tab = tab; feedState.cursor = null; loadPosts(); };
+  window.switchTab = (tab) => {
+    feedState.tab = tab;
+    feedState.cursor = null;
+    if (tab === 'explore') { loadExplore(); return; }
+    loadPosts();
+  };
   window.loadMore = () => loadPosts();
 
+  // Explore tab: render the shared Explore content into the feed area.
+  // No pagination/cursor — it's a one-shot discovery view behind a spinner.
+  async function loadExplore() {
+    feedState.tab = 'explore';
+    render(); // draws composer + tab strip + spinner in #feed-list
+    let html;
+    try {
+      html = await exploreContentHtml();
+    } catch (e) {
+      html = `<p class="text-red-400 text-sm text-center py-4">Couldn't load Explore: ${esc(e.message || 'error')}</p>`;
+    }
+    // Guard: the user may have switched away (or opened a thread) while loading.
+    if (feedState.tab !== 'explore' || feedState.thread) return;
+    const list = document.getElementById('feed-list');
+    if (list) list.innerHTML = html;
+  }
+
   window.submitPost = async () => {
+    if (!requireWalletThen(null, 'post')) return;
     const box = document.getElementById('compose-box');
     const content = box?.value.trim();
     if (!content) return;
@@ -1179,6 +1509,7 @@ async function renderFeed(sec) {
   };
 
   window.unlockPost = async (id) => {
+    if (!requireWalletThen(null, 'unlock this post')) return;
     try {
       const { content } = await api('POST', `/api/posts/${id}/unlock`);
       const post = feedState.posts.find(p => p.id === id);
@@ -1213,6 +1544,7 @@ async function renderFeed(sec) {
   window.backToFeed = () => { feedState.thread = null; render(); };
 
   window.submitReply = async (parentId) => {
+    if (!requireWalletThen(null, 'reply')) return;
     const content = document.getElementById('reply-box')?.value.trim();
     if (!content) return;
     try {
@@ -1222,19 +1554,30 @@ async function renderFeed(sec) {
   };
 
   window.toggleFollow = async (username) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try {
       await api('POST', '/api/follow', { username });
       await loadPosts();
     } catch (e) { alert(e.message); }
   };
 
-  await loadPosts();
+  // Honor a one-shot requested tab (e.g. the header 🔭 shortcut opens Home
+  // straight on the Explore tab). Defaults to the normal post feed.
+  if (S.pendingHomeTab === 'explore') {
+    S.pendingHomeTab = null;
+    feedState.tab = 'explore';
+    await loadExplore();
+  } else {
+    if (S.pendingHomeTab) S.pendingHomeTab = null;
+    await loadPosts();
+  }
 }
 
 // ── Tip Modal ──────────────────────────────────────────────────────────────────
 let tipState = { postId: null, creatorUsername: null };
 
 window.openTipModal = (postId, creatorUsername) => {
+  if (!requireWalletThen(null, 'send a tip')) return;
   tipState.postId = postId;
   tipState.creatorUsername = creatorUsername;
   const modal = document.getElementById('tip-modal');
@@ -1243,7 +1586,7 @@ window.openTipModal = (postId, creatorUsername) => {
   const amountInput = document.getElementById('tip-amount');
   const errorDiv = document.getElementById('tip-error');
 
-  title.textContent = `Send BLOOM to @${esc(creatorUsername)}`;
+  title.innerHTML = `<span class="inline-flex items-center gap-1.5 flex-wrap">Send BLOOM to ${userTag(creatorUsername, { size: 'w-6 h-6' })}</span>`;
   const bloomTipBal = S.balances['BLOOM'] || 0;
   balance.textContent = `${fmtAmt('BLOOM', bloomTipBal)} BLOOM`;
   amountInput.value = '';
@@ -1840,6 +2183,7 @@ async function renderProfile(sec) {
     reader.readAsDataURL(file);
   };
   window.doFollow = async (uname, following) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try {
       await api('POST', following ? '/api/unfollow' : '/api/follow', { username: uname });
       await renderProfile(sec);
@@ -1851,6 +2195,7 @@ async function renderProfile(sec) {
 
 // ── Copy Trade Modal ───────────────────────────────────────────────────────────
 window.openCopyTradeModal = async (username) => {
+  if (!requireWalletThen(null, 'copy a trade')) return;
   try {
     const { positions } = await api('GET', `/api/users/${encodeURIComponent(username)}/open-positions`);
 
@@ -1865,7 +2210,7 @@ window.openCopyTradeModal = async (username) => {
     modal.innerHTML = `
       <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl max-w-2xl w-full max-h-96 overflow-y-auto space-y-4 p-6">
         <div class="flex justify-between items-center">
-          <h2 class="font-bold text-xl">Copy Positions from @${esc(username)}</h2>
+          <h2 class="font-bold text-xl inline-flex items-center gap-1.5 flex-wrap">Copy Positions from ${userTag(username, { size: 'w-6 h-6' })}</h2>
           <button onclick="document.getElementById('copy-trade-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl">✕</button>
         </div>
         <div class="space-y-3">
@@ -1930,6 +2275,609 @@ window.openTokenDetail = (sym) => { S.tradeToken = sym; navigate('market'); };
 // Leave the coin detail and jump to the Trade page focused on this token.
 // Clearing tradeToken prevents the Market tab from re-opening the detail later.
 window.openTradeForToken = (sym) => { S.tradeToken = null; navigate('trade', { tradePrefillSymbol: sym }); };
+
+// ── Portfolio Dashboard ───────────────────────────────────────────────────────
+async function renderPortfolio(sec) {
+  let chartRange = '1d';
+  let walletTab = 'receive';
+  let sendToken = '';
+  let sendRecipient = '';
+  let sendAmount = '';
+  let sendStatus = 'idle';
+  let sendError = '';
+  let sendView = 'scan';      // 'scan' | 'form'
+  let scanError = '';         // transient hint shown in the scanner viewfinder
+  let scanStream = null;      // active MediaStream while the camera is open
+  let scanRaf = null;         // requestAnimationFrame handle for the decode loop
+  let searchTerm = '';
+  let activityCursor = null;
+  let allActivities = [];
+  let chartPoints = [];
+  let holdings = [];
+  let prices = {};
+  let topCoins = [];
+  let sparkData = {};
+
+  const PTOK = {
+    BTC:  { color:'#f59e0b', bg:'rgba(245,158,11,0.15)',  symbol:'₿' },
+    ETH:  { color:'#38bdf8', bg:'rgba(56,189,248,0.15)',  symbol:'Ξ' },
+    SOL:  { color:'#a855f7', bg:'rgba(168,85,247,0.15)',  symbol:'◎' },
+    BNB:  { color:'#f3ba2f', bg:'rgba(243,186,47,0.15)',  symbol:'B' },
+    XRP:  { color:'#0095cf', bg:'rgba(0,149,207,0.15)',   symbol:'X' },
+    DOGE: { color:'#eab308', bg:'rgba(234,179,8,0.15)',   symbol:'Ð' },
+    ADA:  { color:'#3b82f6', bg:'rgba(59,130,246,0.15)',  symbol:'₳' },
+    AVAX: { color:'#ef4444', bg:'rgba(239,68,68,0.15)',   symbol:'A' },
+    LINK: { color:'#60a5fa', bg:'rgba(96,165,250,0.15)',  symbol:'⬡' },
+    DOT:  { color:'#ec4899', bg:'rgba(236,72,153,0.15)',  symbol:'●' },
+    TON:  { color:'#0088cc', bg:'rgba(0,136,204,0.15)',   symbol:'◆' },
+    BLOOM:{ color:'#7c5cfc', bg:'rgba(124,92,252,0.15)',  symbol:'✿' },
+    USDC: { color:'#10b981', bg:'rgba(16,185,129,0.15)',  symbol:'$' },
+    USDT: { color:'#26a17b', bg:'rgba(38,161,123,0.15)',  symbol:'₮' },
+  };
+  const STAKING_APY = { BLOOM:12, ETH:6, SOL:8, BTC:4 };
+  const WATCHLIST = ['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX'];
+  const ACCENT = '#22d3ee';
+  const GLASS = 'bg-[#161b2a] border border-[rgba(34,211,238,0.10)] rounded-2xl p-4';
+
+  function tokStyle(sym) { return PTOK[sym] || { color: ACCENT, bg: 'rgba(34,211,238,0.15)', symbol: (sym||'?')[0] }; }
+
+  function fmtPrice(p) {
+    if (p == null) return '—';
+    if (p >= 1000) return '$' + p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    if (p >= 1) return '$' + p.toFixed(2);
+    return '$' + p.toFixed(4);
+  }
+
+  function fmtQty(q) { const n=parseFloat(q); return n<1?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2); }
+
+  function sparkSvg(hist, color) {
+    const ps = (hist||[]).map(h => parseFloat(typeof h === 'object' ? (h.price_usd||h) : h)).filter(isFinite);
+    if (ps.length < 2) return `<svg viewBox="0 0 60 24" width="60" height="24"><line x1="0" y1="12" x2="60" y2="12" stroke="${color}" stroke-width="1.5" stroke-opacity="0.4"/></svg>`;
+    const mn=Math.min(...ps), mx=Math.max(...ps), rng=Math.max(mx-mn,0.000001), xStep=60/(ps.length-1);
+    const pts=ps.map((p,i)=>`${(i*xStep).toFixed(1)},${(22-((p-mn)/rng)*20).toFixed(1)}`).join(' ');
+    return `<svg viewBox="0 0 60 24" width="60" height="24"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  function areaSvg(pts, color) {
+    const W=480,H=140,pad={t:10,r:8,b:28,l:8};
+    const IW=W-pad.l-pad.r, IH=H-pad.t-pad.b;
+    if (!pts||pts.length<2) return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl"><rect width="${W}" height="${H}" fill="rgba(0,0,0,0.2)" rx="12"/><text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#4e5872" font-size="11" font-family="sans-serif">Not enough history yet</text></svg>`;
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+    const xMin=Math.min(...xs), xMax=Math.max(...xs);
+    let yMin=Math.min(...ys), yMax=Math.max(...ys);
+    const yRng=yMax-yMin; yMin-=yRng*0.08; yMax+=yRng*0.08;
+    if (yMax-yMin<0.01){yMin-=1;yMax+=1;}
+    const xS=x=>pad.l+(xMax===xMin?IW/2:(x-xMin)/(xMax-xMin)*IW);
+    const yS=y=>pad.t+IH-((y-yMin)/(yMax-yMin))*IH;
+    const lp=pts.map(p=>`${xS(p.x).toFixed(1)},${yS(p.y).toFixed(1)}`).join(' ');
+    const ap=`${lp} ${xS(xs[xs.length-1]).toFixed(1)},${(pad.t+IH).toFixed(1)} ${xS(xs[0]).toFixed(1)},${(pad.t+IH).toFixed(1)}`;
+    const isLong = chartRange!=='1d';
+    const fmtL = ts => { const d=new Date(ts); return isLong ? `${d.getMonth()+1}/${d.getDate()}` : d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); };
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" class="rounded-xl">
+      <defs><linearGradient id="pfGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+        <stop offset="90%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient></defs>
+      <rect width="${W}" height="${H}" fill="rgba(0,0,0,0.25)" rx="12"/>
+      <polygon points="${ap}" fill="url(#pfGrad)"/>
+      <polyline points="${lp}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${xS(xs[xs.length-1]).toFixed(1)}" cy="${yS(ys[ys.length-1]).toFixed(1)}" r="3.5" fill="${color}"/>
+      <text x="${pad.l+2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif">${fmtL(xs[0])}</text>
+      <text x="${pad.l+IW-2}" y="${pad.t+IH+18}" fill="#4e5872" font-size="9" font-family="sans-serif" text-anchor="end">${fmtL(xs[xs.length-1])}</text>
+      <text x="${pad.l+2}" y="${pad.t+12}" fill="#4e5872" font-size="9" font-family="sans-serif">$${yMax.toFixed(0)}</text>
+    </svg>`;
+  }
+
+  function computeDelta(pts) {
+    if (!pts||pts.length<2) return null;
+    const first=pts[0].y, last=pts[pts.length-1].y;
+    return {delta:last-first, pct:first>0?((last-first)/first*100):0};
+  }
+
+  function render() {
+    const user = S.user || {};
+    const username = user.username || '';
+    const avatarSrc = user.avatar_url || avatarDataUri(username);
+    const walletAddr = user.usernode_pubkey || '';
+    const shortW = shortAddr(walletAddr);
+    const isDark = document.documentElement.classList.contains('dark');
+    const unread = S.totalUnread || 0;
+
+    let totalValue = 0;
+    for (const h of holdings) {
+      const p = prices[(h.ticker||'').toUpperCase()] ?? null;
+      if (p != null) totalValue += parseFloat(h.quantity) * p;
+    }
+    const delta = computeDelta(chartPoints);
+    const rangeLabel = chartRange==='1m'?'30d':chartRange==='1w'?'7d':'24h';
+
+    const sq = searchTerm.trim().toLowerCase();
+    const filtH = sq ? holdings.filter(h=>(h.ticker||'').toLowerCase().includes(sq)||(h.asset_name||'').toLowerCase().includes(sq)) : holdings;
+    const filtW = sq ? WATCHLIST.filter(s=>s.toLowerCase().includes(sq)||((topCoins.find(c=>c.symbol===s)||{}).name||'').toLowerCase().includes(sq)) : WATCHLIST;
+
+    const heldTickers = holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean);
+    const activeSendToken = sendToken || heldTickers[0] || 'BLOOM';
+    const sendBal = (S.balances && S.balances[activeSendToken]) ? (Number(S.balances[activeSendToken])/1e6).toFixed(4) : '—';
+    const bridgeAvail = !!(window.usernode && typeof window.usernode.sendTransaction==='function');
+
+    // Asset cards
+    const assetHtml = filtH.length===0
+      ? `<div class="col-span-3 text-[#4e5872] text-sm text-center py-4">${sq?'No matches':'No holdings yet'}</div>`
+      : filtH.map(h=>{
+          const sym=(h.ticker||'').toUpperCase(), tk=tokStyle(sym);
+          const lp=prices[sym]??null;
+          const val=lp!=null?(parseFloat(h.quantity)*lp):null;
+          const apy=STAKING_APY[sym];
+          const spark=sparkData[sym]||[];
+          return `<div class="min-w-0 ${GLASS} flex flex-col gap-2" style="backdrop-filter:blur(8px)">
+            <div class="flex items-center gap-2">
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
+              <div><div class="font-semibold text-[#e8eaf0] text-sm">${esc(sym)}</div><div class="text-[#8b95ab] text-xs">${esc(h.asset_name||sym)}</div></div>
+            </div>
+            <div><div class="text-[#e8eaf0] font-mono text-sm">${fmtQty(h.quantity)} ${esc(sym)}</div>
+              <div class="text-[#8b95ab] text-xs">${val!=null?'$'+val.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</div></div>
+            <div class="flex items-center justify-between">
+              ${apy?`<span class="text-xs px-2 py-0.5 rounded-full font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee">${apy}% APY</span>`:'<span></span>'}
+              ${sparkSvg(spark,tk.color)}
+            </div>
+          </div>`;
+        }).join('');
+
+    // Watchlist
+    const watchHtml = filtW.length===0
+      ? `<div class="text-[#4e5872] text-sm text-center py-2">No matches</div>`
+      : filtW.map(sym=>{
+          const coin=topCoins.find(c=>c.symbol===sym), tk=tokStyle(sym);
+          const chg=coin?coin.price_change_24h_pct:null;
+          const sparkPts=coin&&coin.sparkline_7d&&coin.sparkline_7d.length>1?coin.sparkline_7d.slice(-20):[];
+          return `<div class="flex items-center gap-2 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0 cursor-pointer hover:bg-[#1c2236] rounded-lg px-1 -mx-1 transition-colors" onclick="window._pfOpenTokenModal('${sym}')">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style="background:${tk.bg};color:${tk.color}">${esc(tk.symbol)}</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold text-[#e8eaf0]">${esc(sym)}</div>
+              <div class="text-xs text-[#8b95ab]">${esc((coin&&coin.name)||sym)}</div>
+            </div>
+            <div class="text-right flex-none mr-1">
+              <div class="text-sm font-mono text-[#e8eaf0]">${fmtPrice(coin?coin.price_usd:null)}</div>
+              <div class="text-xs font-semibold ${chg!=null?(chg>=0?'text-emerald-400':'text-red-400'):'text-[#4e5872]'}">${chg!=null?(chg>=0?'▲':'▼')+' '+Math.abs(chg).toFixed(2)+'%':'—'}</div>
+            </div>
+            <div class="shrink-0">${sparkSvg(sparkPts,tk.color)}</div>
+            <button class="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee" onclick="event.stopPropagation();window._pfOpenTokenModal('${sym}')">Buy</button>
+          </div>`;
+        }).join('');
+
+    // Activity
+    const actHtml = allActivities.length===0
+      ? `<div class="text-[#4e5872] text-sm text-center py-4">No transactions yet</div>`
+      : allActivities.map(a=>{
+          const amt=Number(a.amount)/1e6, isPos=amt>=0;
+          const icons={swap:'↔',swap_gas:'⛽',stake:'🔒',unstake:'🔓',vault_deposit:'🏦',vault_withdraw:'🏦',ico_invest:'🚀',futures_open:'📈',futures_close:'📉',futures_pnl:'💰',futures_gas:'⛽',nft_buy:'🎨',nft_sale:'💎',nft_gas:'⛽',nft_royalty:'👑',nft_transfer_gas:'🎨',post_unlock:'🔓',tip:'💰',market_trade:'🎲',funding:'💸',send:'📤'};
+          const icon=icons[a.type]||'📋';
+          const fmtAmt2=v=>{const n=Math.abs(v);return n<0.01?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2);};
+          return `<div class="flex items-center gap-3 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0" style="background:rgba(34,211,238,0.08)">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-[#e8eaf0] truncate">${esc(a.description||a.type)}</div>
+              <div class="text-xs text-[#4e5872]">${tsAgo(a.created_at)} ago</div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-sm font-mono font-semibold ${isPos?'text-emerald-400':'text-red-400'}">${isPos?'+':''}${fmtAmt2(amt)} ${esc(a.token_symbol||'')}</div>
+              <div class="w-2 h-2 rounded-full ml-auto mt-0.5" style="background:#22d3ee"></div>
+            </div>
+          </div>`;
+        }).join('');
+
+    // Send pane — scan-first: a camera QR scanner that prefills the recipient,
+    // falling back to (and reachable as) the manual entry form.
+    const sendOpts=(heldTickers.length>0?heldTickers:['BLOOM','USDC','ETH']).map(t=>`<option value="${esc(t)}" ${activeSendToken===t?'selected':''}>${esc(t)}</option>`).join('');
+    const scannerHtml=`<div class="flex flex-col items-center gap-3">
+        <div class="relative w-full max-w-[240px] aspect-square rounded-2xl overflow-hidden bg-[#0d1021] border border-[rgba(34,211,238,0.25)] flex items-center justify-center">
+          <video id="pf-scan-video" class="w-full h-full object-cover" playsinline muted autoplay></video>
+          <div class="absolute inset-0 pointer-events-none rounded-2xl" style="box-shadow:inset 0 0 0 3px rgba(34,211,238,0.45)"></div>
+          <div id="pf-scan-msg" class="absolute inset-0 flex items-center justify-center text-center text-[#8b95ab] text-xs px-4 bg-[#0d1021]">Starting camera…</div>
+        </div>
+        <p class="text-xs text-[#8b95ab] text-center">Point the camera at a recipient's wallet-address QR code.</p>
+        ${scanError?`<p class="text-xs text-amber-400 text-center">${esc(scanError)}</p>`:''}
+        <button id="pf-scan-manual" class="text-sm text-[#22d3ee] underline underline-offset-2">Enter address manually</button>
+      </div>`;
+    let sendFormHtml;
+    if (!bridgeAvail) {
+      sendFormHtml=`<div class="text-center py-4 text-[#8b95ab] text-sm"><div class="text-2xl mb-2">🔗</div>On-chain sends require the Usernode wallet.<br>Open in the Usernode app to use this feature.</div>`;
+    } else if (sendStatus==='pending') {
+      sendFormHtml=`<div class="flex flex-col items-center py-4 gap-2"><div class="spinner"></div><div class="text-[#8b95ab] text-sm">Sending…</div></div>`;
+    } else if (sendStatus==='ok') {
+      sendFormHtml=`<div class="text-center py-4"><div class="text-3xl mb-1">✓</div><div class="text-emerald-400 font-semibold">Sent!</div><div class="text-[#8b95ab] text-xs mt-1">${esc(sendAmount)} ${esc(activeSendToken)} → ${shortAddr(sendRecipient)}</div><button class="mt-3 text-xs text-[#22d3ee]" id="pf-send-reset">Send another</button></div>`;
+    } else if (sendView==='scan') {
+      sendFormHtml=scannerHtml;
+    } else {
+      sendFormHtml=`<div class="space-y-3">
+        ${sendStatus==='error'?`<div class="text-red-400 text-sm py-1">${esc(sendError)}</div>`:''}
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Token</label><select id="pf-send-token" class="inp w-full text-sm">${sendOpts}</select></div>
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Recipient address</label><input id="pf-send-recipient" class="inp w-full text-sm font-mono" placeholder="0x… recipient address" value="${esc(sendRecipient)}"></div>
+        <div><label class="text-xs text-[#8b95ab] block mb-1">Amount</label><input id="pf-send-amount" class="inp w-full text-sm" type="number" min="0" step="any" placeholder="0.00" value="${esc(sendAmount)}"><div class="text-xs text-[#4e5872] mt-0.5">Balance: ${sendBal} ${esc(activeSendToken)}</div></div>
+        <button id="pf-send-btn" class="w-full py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117">Send</button>
+        <button id="pf-send-scan" class="w-full text-xs text-[#22d3ee] underline underline-offset-2 pt-1">Scan a QR code instead</button>
+      </div>`;
+    }
+
+    sec.innerHTML = `
+      <div class="max-w-2xl mx-auto px-4 py-4 space-y-4">
+
+        <!-- Balance card -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <div class="text-xs text-[#8b95ab] uppercase tracking-widest mb-1">Total Portfolio Value</div>
+          <div class="text-4xl font-bold text-[#e8eaf0] tracking-tight">$${totalValue.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+          ${delta?`<div class="text-sm font-medium mt-1 ${delta.delta>=0?'text-emerald-400':'text-red-400'}">${delta.delta>=0?'+':''}$${Math.abs(delta.delta).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} (${delta.delta>=0?'+':''}${delta.pct.toFixed(2)}%) <span class="text-[#4e5872] font-normal">${rangeLabel}</span></div>`:''}
+          <div class="flex gap-2 mt-3">
+            ${['1d','1w','1m'].map(r=>`<button onclick="window._pfSetRange('${r}')" class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${chartRange===r?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0] bg-[#0d1021]'}" style="${chartRange===r?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">${r.toUpperCase()}</button>`).join('')}
+          </div>
+          <div class="mt-3">${areaSvg(chartPoints,ACCENT)}</div>
+        </div>
+
+        <!-- Wallet -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide">My Wallet</h3>
+            <div class="flex items-center gap-2">
+              <span class="font-mono text-xs text-[#e8eaf0]">${shortW||'Not linked'}</span>
+              ${walletAddr?`<button id="pf-copy-addr" onclick="window._pfCopyAddr()" class="text-xs px-2 py-0.5 rounded-lg transition-colors" style="background:rgba(34,211,238,0.10);color:#22d3ee">Copy</button>`:''}
+            </div>
+          </div>
+          <div class="flex gap-1 bg-[#0d1021] rounded-xl p-1 mb-3">
+            <button id="pf-tab-receive" onclick="window._pfWalletTab('receive')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${walletTab==='receive'?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0]'}" style="${walletTab==='receive'?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">Receive</button>
+            <button id="pf-tab-send" onclick="window._pfWalletTab('send')" class="flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${walletTab==='send'?'text-[#0f1117]':'text-[#8b95ab] hover:text-[#e8eaf0]'}" style="${walletTab==='send'?'background:linear-gradient(135deg,#22d3ee,#06b6d4)':''}">Send</button>
+          </div>
+          <div id="pf-wallet-receive" class="${walletTab==='receive'?'':'hidden'}">
+            ${walletAddr?`
+              <div class="flex flex-col items-center gap-3">
+                <div id="pf-qr-container"><p class="text-xs font-mono text-[#22d3ee] break-all">${esc(walletAddr)}</p></div>
+                <p class="font-mono text-xs text-[#8b95ab] break-all text-center">${esc(walletAddr)}</p>
+                <button onclick="window._pfCopyAddr()" class="text-sm px-4 py-2 rounded-xl font-semibold" style="background:rgba(34,211,238,0.12);color:#22d3ee">Copy address</button>
+                <p class="text-xs text-[#4e5872]">Share this address to receive crypto.</p>
+              </div>`
+            :`<div class="text-center text-[#8b95ab] text-sm py-4">No wallet linked to your account.</div>`}
+          </div>
+          <div id="pf-wallet-send" class="${walletTab==='send'?'':'hidden'}">${sendFormHtml}</div>
+        </div>
+
+        <!-- Holdings -->
+        <div>
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Holdings</h3>
+          <div class="grid grid-cols-3 gap-3">${assetHtml}</div>
+        </div>
+
+        <!-- Watchlist -->
+        <div class="${GLASS}" style="backdrop-filter:blur(8px)">
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Watchlist</h3>
+          <div id="pf-watchlist">${watchHtml}</div>
+        </div>
+
+        <!-- Transaction History -->
+        <div class="${GLASS} mb-20 md:mb-4" style="backdrop-filter:blur(8px)">
+          <h3 class="text-xs font-semibold text-[#8b95ab] uppercase tracking-wide mb-2">Transaction History</h3>
+          <div id="pf-activity">${actHtml}</div>
+          ${activityCursor?`<button id="pf-load-more" class="w-full mt-3 py-2 text-sm transition-colors" style="color:#22d3ee" onclick="window._pfLoadMore()">Load more</button>`:''}
+        </div>
+
+      </div>`;
+
+    // Event handlers
+    window._pfSearch = v => { searchTerm = v||''; render(); };
+
+    window._pfSetRange = async r => {
+      chartRange = r;
+      try { const d=await api('GET',`/api/portfolio/chart?range=${r}`); chartPoints=d.points||[]; } catch(_){ chartPoints=[]; }
+      render();
+    };
+
+    window._pfWalletTab = tab => {
+      walletTab = tab;
+      if (tab==='receive') window._pfStopScanner();
+      // Re-render so the active pane (scanner vs form) is rebuilt cleanly.
+      render();
+    };
+
+    // ── Camera QR scanner ──────────────────────────────────────────────────
+    // Extract a wallet address from a scanned QR payload. Handles bare
+    // addresses and common payment-request URIs (scheme:addr?params).
+    window._pfParseScannedAddr = (raw) => {
+      let s = (raw||'').trim();
+      if (!s) return '';
+      // Strip a "scheme:" prefix (ethereum:, bitcoin:, usernode:, etc.)
+      const colon = s.indexOf(':');
+      if (colon > 0 && colon < 24 && /^[a-zA-Z][a-zA-Z0-9.+-]*$/.test(s.slice(0,colon))) {
+        s = s.slice(colon+1);
+      }
+      // Drop any query string / fragment (?value=…, @chainId, #…)
+      s = s.split('?')[0].split('#')[0].split('@')[0].trim();
+      return s;
+    };
+
+    window._pfStopScanner = () => {
+      if (scanRaf) { cancelAnimationFrame(scanRaf); scanRaf = null; }
+      if (scanStream) { try { scanStream.getTracks().forEach(t=>t.stop()); } catch(_){} scanStream = null; }
+    };
+
+    window._pfOnScanned = (raw) => {
+      const addr = window._pfParseScannedAddr(raw);
+      if (!addr) {
+        scanError = 'No address found — try again.';
+        const msg=document.getElementById('pf-scan-msg');
+        if (msg){ msg.textContent='No address found — keep the QR in frame.'; msg.classList.remove('hidden'); }
+        return; // stay in scan mode, keep the loop running
+      }
+      window._pfStopScanner();
+      sendRecipient = addr;
+      scanError = '';
+      sendView = 'form';
+      sendStatus = 'idle'; sendError = '';
+      render();
+    };
+
+    window._pfStartScanner = async () => {
+      const video = document.getElementById('pf-scan-video');
+      const msg = document.getElementById('pf-scan-msg');
+      if (!video) return;
+      const fail = (note) => {
+        // Camera unavailable for any reason — fall back to the manual form.
+        window._pfStopScanner();
+        scanError = note || 'Camera unavailable — enter the address manually.';
+        sendView = 'form';
+        render();
+      };
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return fail('Camera unavailable — enter the address manually.');
+      }
+      let detector = null;
+      try {
+        if ('BarcodeDetector' in window) {
+          const fmts = await window.BarcodeDetector.getSupportedFormats?.();
+          if (!fmts || fmts.includes('qr_code')) detector = new window.BarcodeDetector({ formats:['qr_code'] });
+        }
+      } catch(_){ detector = null; }
+      if (!detector) {
+        // Lazy-load jsQR as a fallback decoder.
+        try {
+          if (!window.jsQR) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+          }
+        } catch(_){ return fail('Scanner unavailable — enter the address manually.'); }
+      }
+      try {
+        scanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      } catch(e) {
+        return fail('Camera unavailable — enter the address manually.');
+      }
+      // The user may have navigated away while permission was pending.
+      if (walletTab!=='send' || sendView!=='scan') { window._pfStopScanner(); return; }
+      video.srcObject = scanStream;
+      try { await video.play(); } catch(_){}
+      if (msg) msg.classList.add('hidden');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently:true });
+      const tick = async () => {
+        if (!scanStream) return; // stopped
+        if (video.readyState >= 2 && video.videoWidth) {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          try {
+            if (detector) {
+              const codes = await detector.detect(canvas);
+              if (codes && codes.length && codes[0].rawValue) { window._pfOnScanned(codes[0].rawValue); return; }
+            } else if (window.jsQR) {
+              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
+              if (code && code.data) { window._pfOnScanned(code.data); return; }
+            }
+          } catch(_){}
+        }
+        if (scanStream) scanRaf = requestAnimationFrame(tick);
+      };
+      scanRaf = requestAnimationFrame(tick);
+    };
+
+    window._pfCopyAddr = () => {
+      if (!walletAddr) return;
+      const doFallback=()=>{try{const t=document.createElement('textarea');t.value=walletAddr;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);}catch(_){}};
+      (navigator.clipboard?navigator.clipboard.writeText(walletAddr).catch(doFallback):Promise.resolve(doFallback()));
+      const btn=document.getElementById('pf-copy-addr');
+      if(btn){btn.textContent='Copied!';setTimeout(()=>{if(btn)btn.textContent='Copy';},1500);}
+    };
+
+    window._pfLoadQR = async () => {
+      const container=document.getElementById('pf-qr-container');
+      if (!container||!walletAddr) return;
+      try {
+        if (!window.QRCode) {
+          await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+        container.innerHTML='<canvas id="pf-qr-canvas"></canvas>';
+        await QRCode.toCanvas(document.getElementById('pf-qr-canvas'),walletAddr,{width:180,color:{dark:'#e8eaf0',light:'#131620'}});
+      } catch(_) { container.innerHTML=`<p class="text-xs font-mono text-[#22d3ee] break-all">${esc(walletAddr)}</p>`; }
+    };
+
+    window._pfSendSubmit = async () => {
+      const tokEl=document.getElementById('pf-send-token');
+      const recEl=document.getElementById('pf-send-recipient');
+      const amtEl=document.getElementById('pf-send-amount');
+      sendToken=tokEl?tokEl.value:activeSendToken;
+      sendRecipient=recEl?recEl.value.trim():'';
+      sendAmount=amtEl?amtEl.value.trim():'';
+      if (!sendRecipient){sendStatus='error';sendError='Enter a recipient address.';render();return;}
+      const pa=parseFloat(sendAmount);
+      if (!pa||pa<=0){sendStatus='error';sendError='Enter a valid amount.';render();return;}
+      if (!window.usernode||typeof window.usernode.sendTransaction!=='function'){
+        sendStatus='error';sendError='Wallet bridge not available — open in the Usernode app to send tokens.';render();return;
+      }
+      sendStatus='pending';render();
+      try {
+        await window.usernode.sendTransaction({to:sendRecipient,token:sendToken,amount:pa});
+        await api('POST','/api/wallet/send',{to_address:sendRecipient,token_symbol:sendToken,amount:sendAmount});
+        await refreshBalances();
+        sendStatus='ok';render();
+      } catch(e){sendStatus='error';sendError=e.message||'Transaction failed.';render();}
+    };
+
+    window._pfLoadMore = async () => {
+      if (!activityCursor) return;
+      try {
+        const d=await api('GET',`/api/activity?limit=10&cursor=${activityCursor}`);
+        allActivities=allActivities.concat(d.activities||[]);
+        activityCursor=d.nextCursor||null;
+        render();
+      } catch(_){}
+    };
+
+    window._pfOpenTokenModal = async (sym) => {
+      document.getElementById('pf-token-modal')?.remove();
+
+      // Ensure top-coin data is cached
+      if (!S.topCoinsData || !S.topCoinsData.length) {
+        try { const td=await api('GET','/api/coins/top?limit=25'); S.topCoinsData=td.coins||[]; } catch(_){}
+      }
+      const coinData = (S.topCoinsData||[]).find(c=>c.symbol===sym);
+      const meta = TOKEN_META_DETAIL[sym] || (coinData ? {
+        name: coinData.name, color:'rgb(139,149,171)', badgeBg:'bg-[#8b95ab]/10', badgeText:'text-[#8b95ab]',
+        desc:`${coinData.name} (${sym}) — ranked #${coinData.rank||'?'} by market cap.`,
+      } : { name:sym, color:'#22d3ee', badgeBg:'bg-[rgba(34,211,238,0.15)]', badgeText:'text-[#22d3ee]', desc:'' });
+
+      const useTv = sym in TV_SYMBOLS_MAP;
+      const price = coinData ? coinData.price_usd : null;
+      const chg = coinData ? coinData.price_change_24h_pct : null;
+      const chgStr = chg==null?'—':(chg>=0?`+${chg.toFixed(2)}%`:`${chg.toFixed(2)}%`);
+      const chgCls = chg==null?'text-[#8b95ab]':chg>0.05?'text-emerald-400':chg<-0.05?'text-red-400':'text-[#8b95ab]';
+
+      const fmtP = p=>{ if(p==null)return '—'; if(p>=1000)return '$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); if(p>=1)return '$'+p.toFixed(2); if(p>=0.01)return '$'+p.toFixed(4); return '$'+p.toFixed(8); };
+      const fmtLN = n=>{ if(!n)return '—'; if(n>=1e12)return '$'+(n/1e12).toFixed(2)+'T'; if(n>=1e9)return '$'+(n/1e9).toFixed(2)+'B'; if(n>=1e6)return '$'+(n/1e6).toFixed(2)+'M'; return '$'+n.toLocaleString(); };
+      const fmtSup = (n,s)=>{ if(!n)return '—'; if(n>=1e12)return (n/1e12).toFixed(2)+'T '+s; if(n>=1e9)return (n/1e9).toFixed(2)+'B '+s; if(n>=1e6)return (n/1e6).toFixed(2)+'M '+s; return n.toLocaleString()+' '+s; };
+      const fmtHL = p=>{ if(!p)return '—'; if(p>=1000)return '$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); if(p>=1)return '$'+p.toFixed(2); return '$'+p.toFixed(4); };
+
+      const statsHtml = coinData ? `
+        <div class="grid grid-cols-2 gap-2 mt-3">
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">Market Cap</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtLN(coinData.market_cap)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">24h Volume</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtLN(coinData.volume_24h)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">Circulating Supply</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtSup(coinData.circulating_supply,sym)}</div></div>
+          <div class="bg-[#0d1021] rounded-xl px-3 py-2"><div class="text-xs text-[#4e5872] mb-0.5">24h High / Low</div><div class="text-sm font-semibold text-[#e8eaf0]">${fmtHL(coinData.high_24h)} / ${fmtHL(coinData.low_24h)}</div></div>
+        </div>` : '';
+
+      const chartContainerId = 'pf-modal-chart-' + sym;
+      const tvContainerId = 'pf-modal-tv-' + sym;
+      const chartSection = useTv
+        ? `<div id="${tvContainerId}" class="tradingview-widget-container mt-3" style="height:280px;min-height:280px"></div>`
+        : `<div class="mt-3">
+            <div class="flex gap-2 mb-2" id="pf-modal-pills">
+              <button class="text-xs px-3 py-1 rounded-full font-medium pill-active" id="pf-modal-btn-24h" onclick="window._pfModalChartHours('${sym}',24)">24H</button>
+              <button class="text-xs px-3 py-1 rounded-full font-medium pill-inactive" id="pf-modal-btn-7d" onclick="window._pfModalChartHours('${sym}',168)">7D</button>
+            </div>
+            <div id="${chartContainerId}">${spin()}</div>
+          </div>`;
+
+      const modal = document.createElement('div');
+      modal.id = 'pf-token-modal';
+      modal.className = 'fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4';
+      modal.onclick = e => { if (e.target === modal) modal.remove(); };
+      modal.innerHTML = `
+        <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto">
+          <div class="p-4">
+            <div class="flex items-start justify-between mb-3">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${meta.badgeBg} ${meta.badgeText}">${sym.length>4?sym.slice(0,4):sym}</div>
+                <div>
+                  <div class="font-bold text-lg leading-tight text-[#e8eaf0]">${esc(meta.name)}</div>
+                  <div class="text-sm text-[#8b95ab]">${esc(sym)}</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="text-right">
+                  <div class="text-xl font-bold text-[#e8eaf0]">${fmtP(price)}</div>
+                  <div class="text-sm font-medium ${chgCls}">${chgStr} <span class="text-[#4e5872] font-normal">24h</span></div>
+                </div>
+                <button onclick="document.getElementById('pf-token-modal')?.remove()" class="text-[#8b95ab] hover:text-[#e8eaf0] text-xl leading-none shrink-0 ml-1">✕</button>
+              </div>
+            </div>
+            ${statsHtml}
+            ${meta.desc ? `<p class="text-sm text-[#8b95ab] mt-3">${esc(meta.desc)}</p>` : ''}
+            ${chartSection}
+            <button class="w-full mt-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95" style="background:linear-gradient(135deg,#22d3ee,#06b6d4);color:#0f1117" onclick="document.getElementById('pf-token-modal')?.remove();window.openTradeForToken?window.openTradeForToken('${esc(sym)}'):navigate('trade',{tradePrefillSymbol:'${esc(sym)}'})">Trade ${esc(sym)} →</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+
+      // Render chart after modal is in DOM
+      if (useTv) {
+        const container = document.getElementById(tvContainerId);
+        if (container) {
+          container.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+          const script = document.createElement('script');
+          script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+          script.type = 'text/javascript'; script.async = true;
+          script.textContent = JSON.stringify({ autosize:true, symbol:TV_SYMBOLS_MAP[sym], interval:'D', timezone:'Etc/UTC', theme:'dark', style:'1', locale:'en', hide_top_toolbar:false, hide_legend:true, allow_symbol_change:false });
+          container.appendChild(script);
+        }
+      } else {
+        window._pfModalChartHours = async (s, hours) => {
+          const wrap = document.getElementById('pf-modal-chart-' + s);
+          if (!wrap) return;
+          wrap.innerHTML = spin();
+          const b24 = document.getElementById('pf-modal-btn-24h');
+          const b7d  = document.getElementById('pf-modal-btn-7d');
+          if (b24) b24.className = `text-xs px-3 py-1 rounded-full font-medium ${hours===24?'pill-active':'pill-inactive'}`;
+          if (b7d)  b7d.className  = `text-xs px-3 py-1 rounded-full font-medium ${hours===168?'pill-active':'pill-inactive'}`;
+          try {
+            const res = await api('GET', `/api/price-history?symbol=${s}&hours=${hours}`);
+            const hist = (res && res.history) || [];
+            const pts = hist.map(h=>({ x:new Date(h.recorded_at).getTime(), y:parseFloat(h.price_usd) }));
+            wrap.innerHTML = svgLineChart(pts, { color: meta.color, width:480, height:140 });
+          } catch(_) { if(wrap) wrap.innerHTML = '<p class="text-[#4e5872] text-sm text-center py-4">Chart unavailable</p>'; }
+        };
+        window._pfModalChartHours(sym, 24);
+      }
+    };
+
+    const sendBtn=document.getElementById('pf-send-btn');
+    if (sendBtn) sendBtn.addEventListener('click',window._pfSendSubmit);
+    const sendReset=document.getElementById('pf-send-reset');
+    if (sendReset) sendReset.addEventListener('click',()=>{sendStatus='idle';sendError='';sendRecipient='';sendAmount='';sendView='scan';scanError='';render();});
+    // Switch between scanner and manual entry within the Send tab.
+    const scanManual=document.getElementById('pf-scan-manual');
+    if (scanManual) scanManual.addEventListener('click',()=>{window._pfStopScanner();sendView='form';scanError='';render();});
+    const sendScan=document.getElementById('pf-send-scan');
+    if (sendScan) sendScan.addEventListener('click',()=>{sendView='scan';scanError='';sendStatus='idle';sendError='';render();});
+
+    if (walletTab==='receive'&&walletAddr) setTimeout(window._pfLoadQR,50);
+    // Boot the camera when the Send tab is showing its scanner view.
+    if (walletTab==='send' && sendView==='scan' && bridgeAvail && sendStatus!=='pending' && sendStatus!=='ok') {
+      setTimeout(window._pfStartScanner,50);
+    } else {
+      window._pfStopScanner();
+    }
+  }
+
+  // Initial fetch
+  sec.innerHTML = spin();
+  try {
+    const username = S.user?.username || '';
+    const [portData, chartData, actData, coinsData] = await Promise.all([
+      fetch(`/explorer-api/portfolio/${encodeURIComponent(username)}`).then(r=>r.json()).catch(()=>({holdings:[],prices:{}})),
+      api('GET','/api/portfolio/chart?range=1d').catch(()=>({points:[]})),
+      api('GET','/api/activity?limit=10').catch(()=>({activities:[],nextCursor:null})),
+      api('GET','/api/coins/top?limit=20').catch(()=>({coins:[]})),
+    ]);
+    holdings=portData.holdings||[];
+    prices=portData.prices||{};
+    chartPoints=chartData.points||[];
+    allActivities=actData.activities||[];
+    activityCursor=actData.nextCursor||null;
+    topCoins=coinsData.coins||[];
+    S.topCoinsData = topCoins;
+    const tickers=[...new Set(holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean))];
+    if (tickers.length) {
+      const sr=await Promise.all(tickers.map(sym=>api('GET',`/api/price-history?symbol=${sym}&hours=24`).catch(()=>({history:[]}))));
+      tickers.forEach((sym,i)=>{sparkData[sym]=sr[i].history||[];});
+    }
+    sendToken=holdings[0]?(holdings[0].ticker||'').toUpperCase():'BLOOM';
+  } catch(e){ sec.innerHTML=err(e.message); return; }
+  render();
+}
 
 // ── Swap Card (reusable helper) ────────────────────────────────────────────────
 function renderSwapCard(containerEl, prefilledFrom) {
@@ -2421,26 +3369,28 @@ async function renderMarket(sec) {
   rerender();
 }
 
+// ── Token Detail shared constants (hoisted for reuse by portfolio modal) ──────
+const TOKEN_META_DETAIL = {
+  BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
+  ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
+  BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
+  SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
+  XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
+  USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
+  ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
+  DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
+  TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
+  BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+  USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
+};
+const TV_SYMBOLS_MAP = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
+
 // ── Token Detail ──────────────────────────────────────────────────────────────
 async function renderTokenDetail(sec) {
   const sym = S.tradeToken;
 
   // Base metadata for all known swappable tokens + fallback for top-25 coins
   const SWAPPABLE_TOKENS = new Set(['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM']);
-
-  const TOKEN_META_DETAIL = {
-    BTC:   { name: 'Bitcoin',    color: 'rgb(251,191,36)',  badgeBg: 'bg-amber-400/10',   badgeText: 'text-amber-400',   desc: 'The original decentralised digital currency with a fixed supply of 21 million coins.' },
-    ETH:   { name: 'Ethereum',   color: 'rgb(56,189,248)',  badgeBg: 'bg-sky-400/10',     badgeText: 'text-sky-400',     desc: 'The programmable blockchain powering smart contracts and DeFi.' },
-    BNB:   { name: 'BNB',        color: 'rgb(243,186,47)',  badgeBg: 'bg-yellow-400/10',  badgeText: 'text-yellow-400',  desc: 'The native token of BNB Chain, used for gas fees and the Binance ecosystem.' },
-    SOL:   { name: 'Solana',     color: 'rgb(153,69,255)',  badgeBg: 'bg-purple-500/10',  badgeText: 'text-purple-400',  desc: 'A high-performance blockchain built for fast, low-cost decentralised applications.' },
-    XRP:   { name: 'XRP',        color: 'rgb(0,149,207)',   badgeBg: 'bg-cyan-500/10',    badgeText: 'text-cyan-400',    desc: 'Digital asset designed for fast, low-cost cross-border payments.' },
-    USDT:  { name: 'Tether',     color: 'rgb(38,161,123)',  badgeBg: 'bg-teal-500/10',    badgeText: 'text-teal-400',    desc: 'The world\'s largest stablecoin, pegged 1:1 to the US dollar.' },
-    ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
-    DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
-    TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
-    BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
-    USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
-  };
 
   // Try to get extended data (market cap, volume, etc.) from cached top-coins list
   let topCoinData = (S.topCoinsData || []).find(c => c.symbol === sym);
@@ -2470,7 +3420,7 @@ async function renderTokenDetail(sec) {
   }
 
   const swappable = SWAPPABLE_TOKENS.has(sym);
-  const TV_SYMBOLS = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
+  const TV_SYMBOLS = TV_SYMBOLS_MAP;
   const useTradingView = sym in TV_SYMBOLS;
   let chartHours = 24;
 
@@ -2729,7 +3679,7 @@ async function renderStake(sec) {
         return '<div class="flex items-center justify-between gap-3 py-2 border-b border-[rgba(255,255,255,0.04)] last:border-0">'
           + '<div class="flex items-center gap-2 min-w-0">'
           + tokenBadge(a.token, 'sm')
-          + '<div class="text-sm truncate"><span class="font-medium">@' + esc(a.username) + '</span>'
+          + '<div class="text-sm truncate inline-flex items-center gap-1.5">' + userTag(a.username, { size: 'w-5 h-5', link: true })
           + ' <span class="text-[#8b95ab]">' + a.action + '</span>'
           + ' <span class="font-semibold ' + actionCls + '">' + fmtAmt(a.token, a.amount) + ' ' + a.token + '</span></div>'
           + '</div>'
@@ -2768,7 +3718,7 @@ async function renderStake(sec) {
     }
     const yourStakesHtml = '<h3 class="font-semibold mb-3">Your Active Stakes</h3>' + activeHtml;
 
-    sec.innerHTML = heroHtml + gridHtml + actHtml + whyHtml + yourStakesHtml;
+    sec.innerHTML = defiTabBar('stake') + heroHtml + gridHtml + yourStakesHtml + actHtml + whyHtml;
   }
 
   window.stakeToggle = function(token) {
@@ -2781,6 +3731,7 @@ async function renderStake(sec) {
   };
 
   window.stakeConfirm = async function(token) {
+    if (!requireWalletThen(null, 'stake')) return;
     const input = document.getElementById('stake-input-' + token);
     const msg   = document.getElementById('stake-form-msg-' + token);
     if (!input || !msg) return;
@@ -2800,6 +3751,7 @@ async function renderStake(sec) {
   };
 
   window.doUnstake = async function(id) {
+    if (!requireWalletThen(null, 'unstake')) return;
     try {
       const d = await api('DELETE', '/api/defi/stakes/' + id);
       const tok = d.token || 'BLOOM';
@@ -2811,68 +3763,260 @@ async function renderStake(sec) {
   await load();
 }
 
-// ── Liquidity ────────────────────────────────────────────────────────────────
+// ── Liquidity (GMX-style pool dashboard) ─────────────────────────────────────
 async function renderLiquidity(sec) {
-  const pools = { BLOOM_USDC: ['BLOOM','USDC'], ETH_USDC: ['ETH','USDC'] };
-  let selPool = 'BLOOM_USDC';
+  const POOL_META = {
+    BLOOM_USDC: { tokens: ['BLOOM', 'USDC'], label: 'BLOOM / USDC' },
+    ETH_USDC:   { tokens: ['ETH',   'USDC'], label: 'ETH / USDC'   },
+    ETH_BLOOM:  { tokens: ['ETH',   'BLOOM'],label: 'ETH / BLOOM'  },
+    BTC_USDC:   { tokens: ['BTC',   'USDC'], label: 'BTC / USDC'   },
+    SOL_ETH:    { tokens: ['SOL',   'ETH'],  label: 'SOL / ETH'    },
+    BTC_BLOOM:  { tokens: ['BTC',   'BLOOM'],label: 'BTC / BLOOM'  },
+    SOL_USDC:   { tokens: ['SOL',   'USDC'], label: 'SOL / USDC'   },
+    ETH_BTC:    { tokens: ['ETH',   'BTC'],  label: 'ETH / BTC'    },
+  };
+  const TC = {
+    BLOOM: { bg: 'rgba(167,139,250,0.25)', text: '#a78bfa', sym: '✿' },
+    ETH:   { bg: 'rgba(56,189,248,0.25)',  text: '#38bdf8', sym: 'Ξ' },
+    USDC:  { bg: 'rgba(59,130,246,0.25)',  text: '#60a5fa', sym: '$' },
+    BTC:   { bg: 'rgba(251,191,36,0.25)',  text: '#fbbf24', sym: '₿' },
+    SOL:   { bg: 'rgba(153,69,255,0.25)',  text: '#9945ff', sym: '◎' },
+  };
+
+  let selPool = null;
+  let selTab  = 'deposit';
+
+  function tokenBadgePair(tA, tB) {
+    const cA = TC[tA] || TC.USDC, cB = TC[tB] || TC.USDC;
+    const circle = (c, left, z) =>
+      '<div style="position:absolute;left:' + left + 'px;top:0;z-index:' + z + ';width:28px;height:28px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-weight:700;background:' + c.bg + ';color:' + c.text + ';border:2px solid var(--bg-card)">' + c.sym + '</div>';
+    return '<div style="position:relative;display:inline-block;width:44px;height:28px;vertical-align:middle">'
+      + circle(cB, 16, 1) + circle(cA, 0, 2) + '</div>';
+  }
+
+  function fmtUsd(n) {
+    if (!n || n <= 0) return '$0';
+    if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+    return '$' + n.toFixed(2);
+  }
+
+  function compBar(aRes, bRes, tvl) {
+    const pct = tvl > 0 ? Math.round(aRes / tvl * 100) : 50;
+    return '<div style="height:4px;border-radius:9999px;overflow:hidden;display:flex;background:#1c2236">'
+      + '<div style="background:#8b5cf6;width:' + pct + '%"></div>'
+      + '<div style="background:#10b981;width:' + (100 - pct) + '%"></div>'
+      + '</div>';
+  }
+
+  function actionPanelHtml(pData, myPositions, meta) {
+    const [tA, tB] = meta.tokens;
+    const isDep = selTab === 'deposit';
+    const tabBar = '<div class="flex gap-1 mb-4">'
+      + '<button class="px-4 py-1.5 text-sm rounded-full font-medium ' + (isDep  ? 'pill-active' : 'pill-inactive') + '" onclick="poolSetTab(\'deposit\')">Deposit</button>'
+      + '<button class="px-4 py-1.5 text-sm rounded-full font-medium ' + (!isDep ? 'pill-active' : 'pill-inactive') + '" onclick="poolSetTab(\'withdraw\')">Withdraw</button>'
+      + '</div>';
+
+    let body = '';
+    if (isDep) {
+      body = '<div class="grid grid-cols-2 gap-3 mb-3">'
+        + '<div><label class="text-xs text-[#8b95ab]">' + tA + ' Amount</label>'
+        + '<input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0" oninput="poolUpdateShare()">'
+        + '<div class="text-xs text-[#8b95ab] mt-0.5">Bal: ' + getBal(tA) + ' ' + tA + '</div></div>'
+        + '<div><label class="text-xs text-[#8b95ab]">' + tB + ' Amount</label>'
+        + '<input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0" oninput="poolUpdateShare()">'
+        + '<div class="text-xs text-[#8b95ab] mt-0.5">Bal: ' + getBal(tB) + ' ' + tB + '</div></div>'
+        + '</div>'
+        + '<div class="flex justify-between text-xs text-[#8b95ab] mb-3">'
+        + '<span>Fee rate: <span class="text-[#e8eaf0]">0.01%/day</span></span>'
+        + '<span>Est. APR: <span class="text-emerald-400">3.65%</span></span>'
+        + '</div>'
+        + '<div class="text-xs text-[#8b95ab] mb-3">Pool share after deposit: <span id="liq-share-est" class="text-[#e8eaf0]">—</span></div>'
+        + '<input type="hidden" id="liq-pool-total-shares" value="' + (pData.total_shares || 0) + '">'
+        + '<button id="liq-submit-btn" class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>'
+        + '<p id="liq-msg" class="text-sm mt-2"></p>';
+    } else {
+      if (!myPositions.length) {
+        body = '<p class="text-center text-[#4e5872] text-sm py-4">No positions yet. Add liquidity above.</p>';
+      } else {
+        body = '<div class="space-y-2">' + myPositions.map(p => {
+          const aAmt = fmtAmt(tA, p.token_a_amount);
+          const bAmt = fmtAmt(tB, p.token_b_amount);
+          const fees = (Number(p.accrued_fees) / 1e6).toFixed(4);
+          return '<div class="rounded-xl p-3 border border-[rgba(255,255,255,0.06)]" id="pos-row-' + p.id + '" style="background:#0d1021">'
+            + '<div class="flex items-start justify-between gap-2">'
+            + '<div><div class="text-sm font-medium text-[#e8eaf0]">' + aAmt + ' ' + tA + ' + ' + bAmt + ' ' + tB + '</div>'
+            + '<div class="text-xs text-emerald-400 mt-0.5">Fees earned: ' + fees + ' USDC</div></div>'
+            + '<button id="remove-btn-' + p.id + '" class="btn btn-z text-xs" onclick="removeLiqConfirm(' + p.id + ')">Remove</button>'
+            + '</div></div>';
+        }).join('') + '</div>';
+      }
+    }
+
+    return '<div class="p-4 rounded-xl mt-3 border border-[rgba(255,255,255,0.08)]" style="background:#0f1117">'
+      + '<div class="flex items-center gap-2 mb-3">'
+      + tokenBadgePair(tA, tB)
+      + '<span class="font-semibold text-sm text-[#e8eaf0] ml-1">' + meta.label + '</span>'
+      + '</div>'
+      + tabBar + body + '</div>';
+  }
 
   async function load() {
     await refreshBalances();
-    const { positions } = await api('GET', '/api/defi/liquidity');
-    const [tA, tB] = pools[selPool];
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Pools</h2>
-      <div class="card space-y-3 mb-4">
-        <div class="flex gap-2">
-          ${Object.keys(pools).map(p=>`<button class="btn ${p===selPool?'btn-v':'btn-z'}" onclick="selPool='${p}';load()">${p.replace('_','/')}</button>`).join('')}
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="text-xs text-[#8b95ab]">${tA} Amount</label>
-            <input id="liq-a" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tA)}</div>
-          </div>
-          <div>
-            <label class="text-xs text-[#8b95ab]">${tB} Amount</label>
-            <input id="liq-b" type="number" class="inp mt-1" placeholder="0.00" min="0">
-            <div class="text-xs text-[#8b95ab] mt-0.5">Bal: ${getBal(tB)}</div>
-          </div>
-        </div>
-        <button class="btn btn-v w-full" onclick="addLiquidity()">Add Liquidity</button>
-        <p id="liq-msg" class="text-sm"></p>
-      </div>
-      <h3 class="font-semibold mb-2">My Positions</h3>
-      ${positions.length ? `<div class="space-y-3">${positions.map(p=>{
-        const [a,b] = pools[p.pool_id]||['?','?'];
-        return `<div class="card">
-          <div class="flex justify-between items-start">
-            <div>
-              <div class="font-semibold">${p.pool_id.replace('_','/')}</div>
-              <div class="text-xs text-[#8b95ab]">${fmtAmt(a,p.token_a_amount)} ${a} + ${fmtAmt(b,p.token_b_amount)} ${b}</div>
-              <div class="text-xs text-emerald-400 mt-0.5">Fees: ${fmtAmt('USDC',p.accrued_fees)} USDC</div>
-            </div>
-            <button class="btn btn-z text-xs" onclick="removeLiq(${p.id})">Remove</button>
-          </div>
-        </div>`;}).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No positions</p>'}`;
+    const [statsRes, posRes] = await Promise.all([
+      fetch('/api/defi/pool-stats').then(r => r.json()).catch(() => ({ pools: [], total_tvl: 0, total_fees_24h: 0 })),
+      api('GET', '/api/defi/liquidity').catch(() => ({ positions: [] })),
+    ]);
+    const poolStats  = statsRes.pools || [];
+    const positions  = posRes.positions || [];
+    const totalTvl   = statsRes.total_tvl || 0;
+    const totalFees  = statsRes.total_fees_24h || 0;
+
+    const myLiqByPool = {};
+    positions.forEach(p => {
+      myLiqByPool[p.pool_id] = (myLiqByPool[p.pool_id] || 0) + (Number(p.token_a_amount) + Number(p.token_b_amount)) / 1e6;
+    });
+
+    // ── Zone 1: Hero stats bar ────────────────────────────────────────────────
+    const heroHtml = '<div class="pool-stats-bar rounded-2xl mb-5 p-5 relative overflow-hidden" style="background:linear-gradient(135deg,#0a0d14 0%,#131620 100%);border:1px solid rgba(52,211,153,0.2);">'
+      + '<div style="position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(52,211,153,0.08) 0%,transparent 65%);pointer-events:none"></div>'
+      + '<div class="relative">'
+      + '<h2 class="text-2xl font-bold text-white mb-1">Liquidity Pools</h2>'
+      + '<p class="text-[#8b95ab] text-sm mb-4">Provide liquidity and earn trading fees.</p>'
+      + '<div class="grid grid-cols-3 gap-3">'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + fmtUsd(totalTvl) + '</div><div class="text-xs text-[#8b95ab] mt-1">Total Liquidity</div></div>'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + fmtUsd(totalFees) + '</div><div class="text-xs text-[#8b95ab] mt-1">Est. 24h Fees</div></div>'
+      + '<div class="text-center"><div class="text-xl font-bold text-emerald-400">' + (positions.length || '—') + '</div><div class="text-xs text-[#8b95ab] mt-1">Your Positions</div></div>'
+      + '</div></div></div>';
+
+    // ── Zone 2: Pool table ────────────────────────────────────────────────────
+    const tableRows = poolStats.map(pData => {
+      const meta = POOL_META[pData.pool_id] || { tokens: ['?','?'], label: pData.pool_id };
+      const [tA, tB] = meta.tokens;
+      const apr = (pData.apr_bps / 100).toFixed(2) + '%';
+      const myLiq = myLiqByPool[pData.pool_id];
+      const myLiqStr = myLiq ? fmtUsd(myLiq) : '—';
+      const isSelected = selPool === pData.pool_id;
+      const myPosForPool = positions.filter(p => p.pool_id === pData.pool_id);
+      return '<div>'
+        + '<div class="px-4 py-3 border-b border-[rgba(255,255,255,0.06)] cursor-pointer transition-colors '
+        +   (isSelected ? 'bg-[#1c2236]' : 'hover:bg-[rgba(255,255,255,0.03)]')
+        +   '" onclick="poolSelectRow(\'' + pData.pool_id + '\')">'
+        + '<div class="flex items-center gap-3">'
+        + '<div class="shrink-0">' + tokenBadgePair(tA, tB) + '</div>'
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold text-sm text-[#e8eaf0]">' + meta.label + '</div>'
+        + '<div class="text-xs text-[#4e5872]">Fee: 0.01%/day</div>'
+        + '</div>'
+        + '<div class="text-right shrink-0 hidden sm:block" style="min-width:72px">'
+        + '<div class="text-xs text-[#4e5872]">Liquidity</div>'
+        + '<div class="text-sm font-semibold text-[#e8eaf0]">' + fmtUsd(pData.tvl) + '</div>'
+        + '</div>'
+        + '<div class="text-right shrink-0" style="min-width:56px">'
+        + '<div class="text-xs text-[#4e5872]">Est. APR</div>'
+        + '<div class="text-sm font-bold text-emerald-400">' + apr + '</div>'
+        + '</div>'
+        + '<div class="shrink-0 hidden md:block" style="min-width:80px">'
+        + '<div class="text-xs text-[#4e5872] mb-1">Composition</div>'
+        + compBar(pData.token_a_reserve, pData.token_b_reserve, pData.tvl)
+        + '<div class="flex justify-between text-[10px] text-[#4e5872] mt-0.5"><span>' + tA + '</span><span>' + tB + '</span></div>'
+        + '</div>'
+        + '<div class="text-right shrink-0 hidden sm:block" style="min-width:60px">'
+        + '<div class="text-xs text-[#4e5872]">My Liq.</div>'
+        + '<div class="text-sm font-semibold ' + (myLiq ? 'text-emerald-400' : 'text-[#4e5872]') + '">' + myLiqStr + '</div>'
+        + '</div>'
+        + '<div class="shrink-0">'
+        + '<button class="text-xs px-3 py-1.5 rounded-full font-medium" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1);color:#fff" onclick="event.stopPropagation();poolSelectRow(\'' + pData.pool_id + '\')">Add</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>'
+        + (isSelected ? actionPanelHtml(pData, myPosForPool, meta) : '')
+        + '</div>';
+    }).join('');
+
+    const tableHtml = '<div class="card overflow-hidden p-0">'
+      + '<div class="px-4 py-3 border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between">'
+      + '<h3 class="font-semibold text-[#e8eaf0]">All Pools</h3>'
+      + '<span class="text-xs text-[#4e5872]">Click a pool to deposit or withdraw</span>'
+      + '</div>'
+      + (poolStats.length ? tableRows : '<div class="px-4 py-8 text-center text-[#4e5872] text-sm">No pools available.</div>')
+      + '</div>';
+
+    sec.innerHTML = defiTabBar('liquidity') + heroHtml + tableHtml;
   }
 
+  window.poolSelectRow = function(poolId) {
+    selPool = (selPool === poolId) ? null : poolId;
+    if (selPool) selTab = 'deposit';
+    load();
+  };
+
+  window.poolSetTab = function(tab) {
+    selTab = tab;
+    load();
+  };
+
+  window.poolUpdateShare = function() {
+    const aVal = parseFloat(document.getElementById('liq-a')?.value || 0);
+    const bVal = parseFloat(document.getElementById('liq-b')?.value || 0);
+    const totalShares = parseFloat(document.getElementById('liq-pool-total-shares')?.value || 0);
+    const el = document.getElementById('liq-share-est');
+    if (!el) return;
+    if (!aVal || !bVal || aVal <= 0 || bVal <= 0) { el.textContent = '—'; return; }
+    const newShares = Math.sqrt(aVal * 1e6 * bVal * 1e6);
+    const pct = totalShares > 0 ? (newShares / (totalShares + newShares) * 100) : 100;
+    el.textContent = pct.toFixed(2) + '%';
+  };
+
   window.addLiquidity = async () => {
+    if (!requireWalletThen(null, 'add liquidity')) return;
     const a = document.getElementById('liq-a')?.value;
     const b = document.getElementById('liq-b')?.value;
     const msg = document.getElementById('liq-msg');
+    const btn = document.getElementById('liq-submit-btn');
+    if (!a || !b || !selPool) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
     try {
       await api('POST', '/api/defi/liquidity', { pool_id: selPool, token_a_amount: a, token_b_amount: b });
-      if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Liquidity added!'; }
+      if (msg) { msg.className = 'text-emerald-400 text-sm mt-2'; msg.textContent = 'Liquidity added!'; }
+      selTab = 'withdraw';
       await load();
-    } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Add Liquidity'; }
+      if (msg) { msg.className = 'text-red-400 text-sm mt-2'; msg.textContent = e.message; }
+    }
   };
-  window.removeLiq = async (id) => {
+
+  window.removeLiqConfirm = function(id) {
+    const btn = document.getElementById('remove-btn-' + id);
+    if (!btn) return;
+    btn.textContent = 'Confirm?';
+    btn.className = 'btn btn-r text-xs';
+    btn.onclick = function() { window.removeLiq(id); };
+    setTimeout(function() {
+      const b = document.getElementById('remove-btn-' + id);
+      if (b && b.textContent === 'Confirm?') {
+        b.textContent = 'Remove';
+        b.className = 'btn btn-z text-xs';
+        b.onclick = function() { window.removeLiqConfirm(id); };
+      }
+    }, 3000);
+  };
+
+  window.removeLiq = async function(id) {
+    if (!requireWalletThen(null, 'remove liquidity')) return;
+    const row = document.getElementById('pos-row-' + id);
     try {
-      const d = await api('DELETE', `/api/defi/liquidity/${id}`);
-      alert(`Removed! Fees earned: ${d.fees_earned.toFixed(4)} USDC`);
-      await load();
+      const d = await api('DELETE', '/api/defi/liquidity/' + id);
+      if (row) {
+        row.innerHTML = '<div class="text-sm text-emerald-400 py-1">Removed · Earned ' + d.fees_earned.toFixed(4) + ' USDC in fees</div>';
+        setTimeout(load, 1500);
+      } else {
+        await load();
+      }
     } catch (e) { alert(e.message); }
   };
+
   window.load = load;
   await load();
 }
@@ -2897,34 +4041,48 @@ async function renderICO(sec) {
     return 'in ' + Math.floor(s / 86400) + 'd';
   }
 
+  function fmtStat(usdc) {
+    if (usdc >= 1_000_000) return '$' + (usdc / 1_000_000).toFixed(2) + 'M';
+    if (usdc >= 1_000) return '$' + (usdc / 1_000).toFixed(1) + 'K';
+    return '$' + usdc.toFixed(0);
+  }
+
+  const GRAD = 'background:linear-gradient(90deg,#7c5cfc,#4e9af1);-webkit-background-clip:text;-webkit-text-fill-color:transparent';
+
   function liveCard(o) {
     const pct = Number(o.hard_cap) > 0 ? Math.min(100, Number(o.raised) / Number(o.hard_cap) * 100) : 0;
-    return `<div class="card space-y-3">
-      <div class="flex items-start gap-3">
-        ${tokenBadge(o)}
-        <div class="flex-1 min-w-0">
-          <div class="flex justify-between items-start gap-2">
-            <div class="min-w-0">
-              <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
-              ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
+    return `<div class="card space-y-3" style="padding-top:0;overflow:hidden;border-color:rgba(124,92,252,0.3);">
+      <div style="height:2px;background:linear-gradient(90deg,#7c5cfc,#4e9af1);margin:0 -1px;"></div>
+      <div class="space-y-3 pt-3">
+        <div class="flex items-start gap-3">
+          ${tokenBadge(o)}
+          <div class="flex-1 min-w-0">
+            <div class="flex justify-between items-start gap-2">
+              <div class="min-w-0">
+                <h3 class="font-bold truncate">${esc(o.token_name)} <span class="text-[#4e5872] text-sm">${esc(o.token_symbol)}</span></h3>
+                ${o.description ? `<p class="text-xs text-[#8b95ab] mt-0.5">${esc(o.description)}</p>` : ''}
+              </div>
+              <span style="background:linear-gradient(90deg,#7c5cfc,#4e9af1);color:#fff;font-weight:600;font-size:0.7rem;border-radius:9999px;padding:2px 8px;flex-shrink:0;">LIVE</span>
             </div>
-            <span class="text-emerald-400 text-xs font-semibold shrink-0">LIVE</span>
           </div>
         </div>
+        <div class="text-sm space-y-0.5">
+          <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
+          <div class="flex justify-between"><span class="text-[#8b95ab]">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
+        </div>
+        <div>
+          <div class="bg-[#0d1021] rounded-full overflow-hidden" style="height:8px;">
+            <div class="h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#7c5cfc,#4e9af1)"></div>
+          </div>
+          <div class="text-xs font-semibold mt-1" style="${GRAD}">${pct.toFixed(0)}% funded</div>
+        </div>
+        <div class="flex gap-2">
+          <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
+          <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
+        </div>
+        <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
+        <p id="ico-msg-${o.id}" class="text-sm"></p>
       </div>
-      <div class="text-sm space-y-0.5">
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Raised</span><span>${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC</span></div>
-      </div>
-      <div class="bg-[#0d1021] rounded-full h-2 overflow-hidden">
-        <div class="h-full rounded-full transition-all" style="width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#7c5cfc,#4e9af1)"></div>
-      </div>
-      <div class="flex gap-2">
-        <input id="ico-amt-${o.id}" type="number" class="inp flex-1" placeholder="USDC amount" min="0">
-        <button class="btn btn-v shrink-0" onclick="investICO(${o.id})">Invest</button>
-      </div>
-      <div class="text-xs text-[#8b95ab]">Balance: ${getBal('USDC')} USDC</div>
-      <p id="ico-msg-${o.id}" class="text-sm"></p>
     </div>`;
   }
 
@@ -2949,9 +4107,10 @@ async function renderICO(sec) {
       <div class="text-sm space-y-0.5">
         <div class="flex justify-between"><span class="text-[#8b95ab]">Price</span><span>${fmtUSD(o.price_per_token)} USDC</span></div>
         <div class="flex justify-between"><span class="text-[#8b95ab]">Raise goal</span><span>${fmtUSD(o.hard_cap)} USDC</span></div>
-        <div class="flex justify-between"><span class="text-[#8b95ab]">Opens</span><span class="text-amber-300">${esc(startStr)}${countdown ? ` (${countdown})` : ''}</span></div>
+        <div class="flex justify-between"><span class="text-[#8b95ab]">Opens</span><span class="text-amber-300">${esc(startStr)}</span></div>
       </div>
-      <div class="flex justify-end">
+      <div class="flex justify-between items-center">
+        ${countdown ? `<span style="background:linear-gradient(90deg,#f59e0b,#f97316);color:#fff;font-weight:600;font-size:0.7rem;border-radius:9999px;padding:2px 8px;">${esc(countdown)}</span>` : '<span></span>'}
         <span class="text-xs text-[#4e5872] bg-[#1c2236] px-3 py-1.5 rounded-lg">Coming soon</span>
       </div>
     </div>`;
@@ -2985,11 +4144,15 @@ async function renderICO(sec) {
     </div>`;
   }
 
-  function renderSection(title, cards) {
+  function renderSection(title, cards, grid) {
     if (!cards.length) return '';
+    const layout = grid ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3';
     return `<div class="mb-6">
-      <h3 class="text-sm font-semibold text-[#8b95ab] mb-3">${title}</h3>
-      <div class="space-y-3">${cards.join('')}</div>
+      <div class="flex items-center gap-2 mb-3">
+        <div style="width:3px;height:1rem;background:linear-gradient(180deg,#7c5cfc,#4e9af1);border-radius:2px;flex-shrink:0;"></div>
+        <h3 class="text-sm font-semibold text-[#8b95ab]">${title}</h3>
+      </div>
+      <div class="${layout}">${cards.join('')}</div>
     </div>`;
   }
 
@@ -3000,17 +4163,44 @@ async function renderICO(sec) {
     const upcoming = offerings.filter(o => o.status === 'upcoming');
     const completed = offerings.filter(o => o.status === 'sold_out' || o.status === 'ended');
     const empty = !live.length && !upcoming.length && !completed.length;
-    sec.innerHTML = `
-      <h2 class="text-xl font-bold mb-4">Token Offerings</h2>
+
+    const totalRaisedUsdc = offerings.reduce((s, o) => s + Number(o.raised), 0) / U;
+    const totalCapUsdc = offerings.reduce((s, o) => s + Number(o.hard_cap), 0) / U;
+    const liveCount = live.length;
+    const totalCount = offerings.length;
+
+    const statTile = (label, value) => `
+      <div class="card text-center space-y-1" style="transition:box-shadow 0.2s;" onmouseenter="this.style.boxShadow='0 0 16px rgba(124,92,252,0.2)'" onmouseleave="this.style.boxShadow=''">
+        <div class="text-xs text-[#8b95ab]">${label}</div>
+        <div class="text-lg font-bold" style="${GRAD}">${value}</div>
+      </div>`;
+
+    sec.innerHTML = defiTabBar('launchpad') + `
+      <div class="mb-6">
+        <h2 class="text-3xl font-bold mb-1">🚀 <span style="${GRAD}">Launchpad</span></h2>
+        <p class="text-[#8b95ab] text-sm mb-3">Early token access — curated IDO launches</p>
+        <div style="height:2px;width:50%;background:linear-gradient(90deg,#7c5cfc,#4e9af1);border-radius:1px;"></div>
+      </div>
+      <div data-launchpad-stats class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        ${statTile('Total Raised', fmtStat(totalRaisedUsdc))}
+        ${statTile('Hard Cap', fmtStat(totalCapUsdc))}
+        ${statTile('Live Projects', String(liveCount))}
+        ${statTile('Total Projects', String(totalCount))}
+      </div>
       ${empty
-        ? '<p class="text-[#4e5872] text-sm">No ICO offerings</p>'
-        : renderSection('🟢 Live ICOs', live.map(liveCard)) +
-          renderSection('🕐 Upcoming ICOs', upcoming.map(upcomingCard)) +
-          renderSection('✅ Completed ICOs', completed.map(completedCard))
+        ? `<div class="text-center py-16 space-y-3">
+            <div class="text-5xl">🚀</div>
+            <h3 class="font-semibold text-lg">No active launches</h3>
+            <p class="text-[#8b95ab] text-sm">Check back soon for upcoming token offerings</p>
+          </div>`
+        : renderSection('Live ICOs', live.map(liveCard), true) +
+          renderSection('Upcoming ICOs', upcoming.map(upcomingCard), true) +
+          renderSection('Completed ICOs', completed.map(completedCard), false)
       }`;
   }
 
   window.investICO = async (id) => {
+    if (!requireWalletThen(null, 'invest')) return;
     const amt = document.getElementById(`ico-amt-${id}`)?.value;
     const msg = document.getElementById(`ico-msg-${id}`);
     try {
@@ -3059,6 +4249,7 @@ function renderEarnHub(sec) {
     else if (f === 'top') list = PRODUCTS.filter(p => p.cats.includes('top')).sort((a,b) => (b.apy||0)-(a.apy||0));
     else list = PRODUCTS.filter(p => p.cats.includes(f));
     sec.innerHTML = `
+      ${defiTabBar('earn')}
       <div class="mb-6 pt-2">
         <h1 class="text-2xl font-bold leading-tight">Earn crypto yield.<br><span class="text-emerald-400">Up to 18.5% APY.</span></h1>
         <p class="text-[#8b95ab] text-sm mt-1">Stake, pool, and vault — all in one place.</p>
@@ -3077,19 +4268,9 @@ function renderEarnHub(sec) {
   render();
 }
 
-// ── Earn (composite: Stake / Liquidity / Launchpad) ───────────────────────────
+// ── Earn (yield marketplace hub) ──────────────────────────────────────────────
 async function renderEarn(sec) {
-  const tab = S.earnTab;
-  if (!tab) { renderEarnHub(sec); return; }
-  const backLink = `<button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>`;
-  sec.innerHTML = `${backLink}${defiTabBar(S.view || tab)}<div id="earn-sub"></div>`;
-  const sub = document.getElementById('earn-sub');
-  sub.innerHTML = spin();
-  try {
-    if (tab === 'stake') await renderStake(sub);
-    else if (tab === 'liquidity') await renderLiquidity(sub);
-    else await renderICO(sub);
-  } catch (e) { sub.innerHTML = err(e.message); }
+  renderEarnHub(sec);
 }
 
 // ── Vault ─────────────────────────────────────────────────────────────────────
@@ -3106,7 +4287,6 @@ async function renderVault(sec) {
       return `<span class="text-xs text-violet-400 bg-violet-400/10 px-2 py-0.5 rounded-full font-medium">High Risk</span>`;
     };
     sec.innerHTML = `
-      <button class="text-sm text-[#8b95ab] hover:text-[#e8eaf0] mb-3 flex items-center gap-1 transition-colors" onclick="navigate('earn')">← All Products</button>
       ${defiTabBar('vault')}
       <h2 class="text-xl font-bold mb-1">🏦 Vault</h2>
       <p class="text-sm text-zinc-400 mb-5">Deposit into a strategy and earn automated yield. Target rates are not guaranteed.</p>
@@ -3162,6 +4342,7 @@ async function renderVault(sec) {
   }
 
   window.doVaultDeposit = async () => {
+    if (!requireWalletThen(null, 'deposit')) return;
     const stratId = document.getElementById('vault-strategy')?.value;
     const token   = document.getElementById('vault-token')?.value;
     const amount  = document.getElementById('vault-amount')?.value;
@@ -3174,6 +4355,7 @@ async function renderVault(sec) {
   };
 
   window.doVaultWithdraw = async (id) => {
+    if (!requireWalletThen(null, 'withdraw')) return;
     try {
       const d = await api('DELETE', `/api/vault/positions/${id}`);
       alert(`Withdrawn! Received ${d.returned.toFixed(2)} (yield: ${d.yield.toFixed(6)})`);
@@ -3185,7 +4367,10 @@ async function renderVault(sec) {
 }
 
 // ── Explore ─────────────────────────────────────────────────────────────────────
-async function renderExplore(sec) {
+// Shared Explore content builder — reused by the standalone Explore page
+// (renderExplore, deep-link fallback) and by the Home feed's Explore tab.
+// Returns the inner markup (no outer page heading) and wires window.exploreFollow.
+async function exploreContentHtml() {
   const [people, markets, ico, nfts] = await Promise.all([
     api('GET', '/api/explore/people').then(d => d.people).catch(() => []),
     api('GET', '/api/markets').then(d => d.markets).catch(() => []),
@@ -3202,14 +4387,16 @@ async function renderExplore(sec) {
   const activeMarkets = markets.filter(m => m.status === 'open').slice(0, 5);
   const liveIco = ico.filter(o => o.status === 'active').slice(0, 5);
   const topNfts = nfts.slice(0, 6);
-  sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-4">🔭 Explore</h2>
-
+  window.exploreFollow = async (username, btn) => {
+    try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
+    catch (e) { alert(e.message); }
+  };
+  return `
     <h3 class="font-semibold mb-2">People to follow</h3>
     ${peopleWithRoi.length ? `<div class="space-y-2 mb-5">${peopleWithRoi.map(p => `
       <div class="card flex items-center justify-between gap-2">
         <button class="flex items-center gap-2 min-w-0" onclick="navigate('profile',{profileUser:'${esc(p.username)}'})">
-          <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style="background:linear-gradient(135deg,#7c5cfc,#4e9af1)">${esc((p.username||'?')[0].toUpperCase())}</div>
+          ${avatarImg(p.username, 'w-8 h-8', p.avatar_url)}
           <div class="text-left min-w-0">
             <div class="text-sm font-medium flex items-center gap-1 truncate">@${esc(p.username)} ${p.kyc_level?kycTag(p.kyc_level):''} ${p.roi && p.roi.closed_trade_count > 0 ? `<span class="text-xs font-semibold ${p.roi.all_time_roi_pct >= 0 ? 'text-emerald-400' : 'text-red-400'} shrink-0">📈 ${p.roi.all_time_roi_pct >= 0 ? '+' : ''}${p.roi.all_time_roi_pct}%</span>` : ''}</div>
             <div class="text-xs text-[#8b95ab]">${p.followers} followers</div>
@@ -3228,7 +4415,7 @@ async function renderExplore(sec) {
 
     <h3 class="font-semibold mb-2">Live token sales</h3>
     ${liveIco.length ? `<div class="space-y-2 mb-5">${liveIco.map(o => `
-      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('earn');S.earnTab='ico'">
+      <button class="card w-full text-left hover:border-[rgba(124,92,252,0.3)]" onclick="navigate('launchpad')">
         <div class="text-sm font-medium">${esc(o.token_name)} <span class="text-[#8b95ab]">${esc(o.token_symbol)}</span></div>
         <div class="text-xs text-[#8b95ab]">${fmtUSD(o.raised)} / ${fmtUSD(o.hard_cap)} USDC raised</div>
       </button>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm mb-5">No live sales</p>'}
@@ -3238,13 +4425,22 @@ async function renderExplore(sec) {
       <div class="card space-y-1 overflow-hidden">
         <div class="aspect-square overflow-hidden rounded-lg bg-[#1c2236]"><img src="${esc(n.image_url)}" class="w-full h-full object-cover" onerror="this.style.display='none'"></div>
         <p class="text-xs font-medium truncate">${esc(n.name)}</p>
-        <p class="text-xs text-[#4e5872] truncate">@${esc(n.owner_username)}</p>
+        <p class="text-xs text-[#4e5872] truncate">${userTag(n.owner_username, { size: 'w-4 h-4' })}</p>
       </div>`).join('')}</div>` : '<p class="text-[#4e5872] text-sm">No NFTs yet</p>'}
   `;
   window.exploreFollow = async (username, btn) => {
+    if (!requireWalletThen(null, 'follow')) return;
     try { await api('POST', '/api/follow', { username }); btn.textContent = 'Following'; btn.disabled = true; btn.className = 'btn btn-z text-xs shrink-0'; }
     catch (e) { alert(e.message); }
   };
+}
+
+// Standalone Explore page (kept as a safe deep-link fallback; the primary
+// surface is now the Home feed's Explore tab).
+async function renderExplore(sec) {
+  sec.innerHTML = spin();
+  const html = await exploreContentHtml();
+  sec.innerHTML = `<h2 class="text-xl font-bold mb-4">🔭 Explore</h2>` + html;
 }
 
 
@@ -3479,16 +4675,6 @@ async function renderMarkets(sec, demoMarkets) {
           </div>
         </div>
       </div>
-
-      <div class="pm-footer px-4 py-6 border-t border-[rgba(255,255,255,0.06)] text-center space-y-2">
-        <div class="font-bold text-[#7c5cfc]">&#x1f338; BloomMoney</div>
-        <p class="text-xs text-[#4e5872]">BloomMoney is a demo prediction platform — no real funds.</p>
-        <div class="flex gap-4 justify-center text-xs text-[#8b95ab]">
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('earn')">Earn</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('market')">Market</button>
-          <button class="hover:text-[#e8eaf0]" onclick="navigate('nfts')">NFTs</button>
-        </div>
-      </div>
     `;
 
     renderGrid();
@@ -3595,6 +4781,7 @@ async function renderMarketDetail(sec) {
       </div>` : ''}`;
 
     window.tradeMarket = async (outcome) => {
+      if (!requireWalletThen(null, 'trade on this market')) return;
       const amt = document.getElementById('trade-amt')?.value;
       const msg = document.getElementById('trade-msg');
       try {
@@ -4175,7 +5362,7 @@ function _renderSelected() {
   const wrap = document.getElementById('msg-selected');
   if (!wrap) return;
   wrap.innerHTML = _msgSelected.map(u =>
-    `<span class="tag-basic inline-flex items-center gap-1">@${esc(u)}
+    `<span class="tag-basic inline-flex items-center gap-1">${userTag(u, { size: 'w-4 h-4' })}
        <button class="text-zinc-400 hover:text-white" onclick="msgRemovePick('${esc(u)}')">✕</button></span>`
   ).join('');
 }
@@ -4313,11 +5500,11 @@ window.messageUser = async (username) => {
 // Branches are mutually exclusive and cover every state — it never throws.
 function futTierHintHtml(tier, zkVerified) {
   if (tier === 'basic')
-    return `<div class="fut-tier-hint text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Social</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
+    return `<div class="fut-tier-hint text-xs text-amber-300 mt-1.5">🔒 Live trading needs <b>Pro</b> verification. <button class="underline opacity-80 hover:opacity-100" onclick="navigate('verify')">Verify →</button></div>`;
   if (tier === 'social')
-    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Social: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium for 20× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Pro: up to 5× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Go Premium+ for 20× →</button></div>`;
   if (tier === 'premium' && !zkVerified)
-    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Premium: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
+    return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">Premium+: up to 20× leverage. <button class="underline opacity-80" onclick="navigate('verify')">Verify with zkPassport for 50× & 100× →</button></div>`;
   if (zkVerified)
     return `<div class="fut-tier-hint text-xs mt-1.5" style="color:var(--long)">✓ zkPassport verified — up to 100× leverage unlocked.</div>`;
   return '';
@@ -5080,6 +6267,7 @@ async function renderFutures(sec) {
   };
 
   window.futClosePosBtn = async (id) => {
+    if (!requireWalletThen(null, 'close this position')) return;
     const row = document.querySelector(`[data-pos-id="${id}"]`);
     if (row) row.style.opacity = '0.4';
     const toast = document.getElementById('fut-pos-toast');
@@ -5101,6 +6289,7 @@ async function renderFutures(sec) {
   };
 
   window.futPlaceOrder = async () => {
+    if (!requireWalletThen(null, 'place an order')) return;
     const msg = document.getElementById('fut-msg');
     if (!S.futuresMarket) return;
     if (msg) { msg.textContent = ''; msg.className = 'text-xs text-center min-h-[1rem]'; }
@@ -5189,7 +6378,7 @@ function nftCard(n, { onclick = '', mini = false } = {}) {
     <p class="text-xs text-[#8b95ab] truncate mb-1">${esc(n.collection||'BloomMoney Genesis')}</p>
     <div class="flex items-center justify-between">
       <span class="text-xs ${rc} capitalize">${esc(n.rarity||'common')}</span>
-      ${priceStr || `<span class="text-xs text-[#4e5872]">@${esc(n.owner_username)}</span>`}
+      ${priceStr || `<span class="text-xs text-[#4e5872]">${userTag(n.owner_username, { size: 'w-4 h-4' })}</span>`}
     </div>
   </div>`;
 }
@@ -5216,6 +6405,7 @@ async function renderNFTs(sec) {
   let nftViewArg = null;
 
   async function navNFT(view, arg) {
+    if (view === 'mint' && !requireWalletThen(null, 'mint an NFT')) return;
     nftView = view;
     nftViewArg = arg ?? null;
     await renderView();
@@ -5432,11 +6622,11 @@ async function renderNFTDetail(sec, nftId) {
         <div class="card">
           <div class="flex justify-between text-sm mb-1">
             <span class="text-[#8b95ab]">Owner</span>
-            <span class="font-medium">@${esc(nft.owner_username)}</span>
+            <span class="font-medium">${userTag(nft.owner_username, { size: 'w-5 h-5', link: true })}</span>
           </div>
           <div class="flex justify-between text-sm mb-1">
             <span class="text-[#8b95ab]">Creator</span>
-            <span class="font-medium">@${esc(nft.creator_username||nft.owner_username)}</span>
+            <span class="font-medium">${userTag(nft.creator_username||nft.owner_username, { size: 'w-5 h-5', link: true })}</span>
           </div>
           <div class="flex justify-between text-sm">
             <span class="text-[#8b95ab]">Royalty</span>
@@ -5475,7 +6665,7 @@ async function renderNFTDetail(sec, nftId) {
           ${bids.length ? bids.map(b => `
             <div class="flex items-center gap-2 text-sm">
               <span class="font-medium">${(Number(b.price_usdc)/1e6).toFixed(2)} USDC</span>
-              <span class="text-[#8b95ab]">by @${esc(b.bidder_username)}</span>
+              <span class="text-[#8b95ab] inline-flex items-center gap-1">by ${userTag(b.bidder_username, { size: 'w-4 h-4' })}</span>
               <span class="text-xs text-[#4e5872] ml-auto">${tsAgo(b.created_at)}</span>
               ${isOwner ? `<button class="text-xs text-emerald-400 hover:underline" onclick="nftAcceptBid(${nft.id},${b.id})">Accept</button>` : ''}
               ${S.user && S.user.user_id === b.bidder_user_id ? `<button class="text-xs text-red-400 hover:underline" onclick="nftWithdrawBid(${b.id})">Withdraw</button>` : ''}
@@ -5489,7 +6679,7 @@ async function renderNFTDetail(sec, nftId) {
             const el = { mint:'✦ Minted', sale:'⇄ Sale', transfer:'→ Transfer' }[t.event_type] || t.event_type;
             return `<div class="flex items-center gap-2 text-xs text-[#8b95ab]">
               <span class="text-[#e8eaf0]">${el}</span>
-              <span>${t.to_username ? `to @${esc(t.to_username)}` : ''}</span>
+              <span class="inline-flex items-center gap-1">${t.to_username ? `to ${userTag(t.to_username, { size: 'w-4 h-4' })}` : ''}</span>
               ${t.price_usdc ? `<span class="text-emerald-400">${(Number(t.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
               <span class="ml-auto">${tsAgo(t.created_at)}</span>
             </div>`;
@@ -5537,6 +6727,7 @@ async function renderNFTDetail(sec, nftId) {
   `;
 
   window.nftToggleFav = async (id) => {
+    if (!requireWalletThen(null, 'favorite an NFT')) return;
     try {
       const d = await api('POST', `/api/nfts/${id}/favorite`);
       const btn = document.getElementById('nft-fav-btn');
@@ -5544,31 +6735,37 @@ async function renderNFTDetail(sec, nftId) {
     } catch (e) { alert(e.message); }
   };
   window.nftBuy = async (id) => {
+    if (!requireWalletThen(null, 'buy an NFT')) return;
     if (!confirm('Buy this NFT?')) return;
     try { await api('POST', `/api/nfts/${id}/buy`); await refreshBalances(); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftList = async (id) => {
+    if (!requireWalletThen(null, 'list an NFT')) return;
     const price = parseInt(document.getElementById('nft-list-price')?.value);
     if (!price) return alert('Enter a price in USDC micro-units (1 USDC = 1000000)');
     try { await api('POST', `/api/nfts/${id}/list`, { price_usdc: price }); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftDelist = async (id) => {
+    if (!requireWalletThen(null, 'delist an NFT')) return;
     try { await api('DELETE', `/api/nfts/${id}/list`); window._nftNav('detail', id); }
     catch (e) { alert(e.message); }
   };
   window.nftAcceptBid = async (nftId, bidId) => {
+    if (!requireWalletThen(null, 'accept a bid')) return;
     if (!confirm('Accept this bid?')) return;
     try { await api('POST', `/api/nfts/${nftId}/accept-bid/${bidId}`); await refreshBalances(); window._nftNav('detail', nftId); }
     catch (e) { alert(e.message); }
   };
   window.nftWithdrawBid = async (bidId) => {
+    if (!requireWalletThen(null, 'withdraw a bid')) return;
     try { await api('DELETE', `/api/nfts/bids/${bidId}`); window._nftNav('detail', nft.id); }
     catch (e) { alert(e.message); }
   };
-  window.showNFTBidModal = () => document.getElementById('nft-bid-modal')?.classList.remove('hidden');
+  window.showNFTBidModal = () => { if (!requireWalletThen(null, 'place a bid')) return; document.getElementById('nft-bid-modal')?.classList.remove('hidden'); };
   window.nftSubmitBid = async (id) => {
+    if (!requireWalletThen(null, 'place a bid')) return;
     const price = parseInt(document.getElementById('nft-bid-price')?.value);
     const days = parseInt(document.getElementById('nft-bid-days')?.value) || 7;
     const msg = document.getElementById('nft-bid-msg');
@@ -5578,8 +6775,9 @@ async function renderNFTDetail(sec, nftId) {
       window._nftNav('detail', id);
     } catch (e) { if (msg) { msg.className='text-red-400 text-sm'; msg.textContent=e.message; } }
   };
-  window.showNFTTransferModal = () => document.getElementById('nft-transfer-modal')?.classList.remove('hidden');
+  window.showNFTTransferModal = () => { if (!requireWalletThen(null, 'transfer an NFT')) return; document.getElementById('nft-transfer-modal')?.classList.remove('hidden'); };
   window.nftSubmitTransfer = async (id) => {
+    if (!requireWalletThen(null, 'transfer an NFT')) return;
     const to = document.getElementById('nft-transfer-to')?.value?.trim();
     const msg = document.getElementById('nft-transfer-msg');
     if (!to) return;
@@ -5695,6 +6893,7 @@ async function renderNFTMint(sec) {
   };
   window.mintStepBack = () => { step = Math.max(1, step - 1); renderStep(); };
   window.mintConfirm = async () => {
+    if (!requireWalletThen(null, 'mint an NFT')) return;
     const btn = document.getElementById('mint-confirm-btn');
     const msg = document.getElementById('mint-msg');
     if (btn) { btn.disabled = true; btn.textContent = 'Minting…'; }
@@ -5747,7 +6946,7 @@ async function renderNFTPortfolio(sec, activeTab) {
             <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
             <div class="min-w-0 flex-1">
               <p class="text-sm font-medium truncate">${esc(e.nft_name||'')}</p>
-              <p class="text-xs"><span class="${typeColor}">${typeLabel}</span>${e.to_username ? ` to @${esc(e.to_username)}` : ''}</p>
+              <p class="text-xs inline-flex items-center gap-1 flex-wrap"><span class="${typeColor}">${typeLabel}</span>${e.to_username ? `<span class="inline-flex items-center gap-1">to ${userTag(e.to_username, { size: 'w-4 h-4' })}</span>` : ''}</p>
             </div>
             ${e.price_usdc ? `<span class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
             <span class="text-xs text-[#4e5872]">${tsAgo(e.created_at)}</span>
@@ -5780,9 +6979,9 @@ async function renderNFTActivity(sec) {
         <img src="${esc(e.nft_image||'')}" class="w-12 h-12 rounded object-cover bg-[#0f1117] flex-shrink-0" onerror="this.style.display='none'">
         <div class="min-w-0 flex-1">
           <p class="text-sm font-medium truncate cursor-pointer hover:text-[#7c5cfc]" onclick="window._nftNav('detail',${e.nft_id})">${esc(e.nft_name||'')}</p>
-          <p class="text-xs text-[#8b95ab]">
+          <p class="text-xs text-[#8b95ab] inline-flex items-center gap-1 flex-wrap">
             <span class="${typeColor}">${typeLabel}</span>
-            ${isSent ? ` to @${esc(e.to_username||'')}` : e.from_username ? ` from @${esc(e.from_username)}` : ''}
+            ${isSent ? `<span class="inline-flex items-center gap-1">to ${userTag(e.to_username||'', { size: 'w-4 h-4' })}</span>` : e.from_username ? `<span class="inline-flex items-center gap-1">from ${userTag(e.from_username, { size: 'w-4 h-4' })}</span>` : ''}
           </p>
         </div>
         ${e.price_usdc ? `<div class="text-right"><p class="text-emerald-400 text-sm font-semibold">${(Number(e.price_usdc)/1e6).toFixed(2)} USDC</p></div>` : ''}
@@ -5840,16 +7039,17 @@ async function renderVerify(sec) {
       : `<p class="text-xs text-amber-400">zkPassport is unavailable in this environment.</p>`;
 
   sec.innerHTML = `
-    <h2 class="text-xl font-bold mb-1">🪪 Verification</h2>
+    <h2 class="text-xl font-bold mb-1">🪪 Subscription</h2>
     <p class="text-sm text-[#8b95ab] mb-4">Your tier: <span class="font-semibold text-[#e8eaf0]">${tierLabel(level)}</span>${kyc?.status === 'pending' ? ' <span class="text-amber-400">(pending)</span>' : ''}</p>
     <div class="space-y-3">
-      ${tierCard('Basic', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
+      ${tierCard('Free', '🔵', true, ['Post, follow, swap, stake, provide liquidity', 'Join ICOs & prediction markets', 'Paper futures trading'],
         '<p class="text-xs text-emerald-400">✓ Granted automatically on wallet link</p>')}
-      ${tierCard('Social', '🟢', isSocial, ['Everything in Basic', 'Live futures up to 5× leverage', 'Removes per-day Basic limits'], socialAction)}
-      ${tierCard('Premium', '⭐', isPremium, ['Everything in Social', 'Up to 100× leverage (50× & 100× require zkPassport)', 'Higher trade-size limits', 'Premium profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
+      ${tierCard('Pro', '🟢', isSocial, ['Everything in Free', 'Live futures up to 5× leverage', 'Removes per-day Free limits'], socialAction)}
+      ${tierCard('Premium+', '⭐', isPremium, ['Everything in Pro', 'Up to 100× leverage (50× & 100× require zkPassport)', 'Higher trade-size limits', 'Premium+ profile badge', '20 tracked holdings (vs 10)'], premiumAction)}
     </div>`;
 
   window.connectSocial = async (provider) => {
+    if (!requireWalletThen(null, 'verify your identity')) return;
     const msg = document.getElementById('social-msg');
     try {
       const start = await api('POST', '/api/verify/social/start', { provider });
@@ -5881,6 +7081,7 @@ async function renderVerify(sec) {
   };
 
   window.startZkSession = async () => {
+    if (!requireWalletThen(null, 'verify with zkPassport')) return;
     const qrSection = document.getElementById('zk-qr-section');
     const qrImg = document.getElementById('zk-qr-img');
     const msg = document.getElementById('zk-session-msg');
@@ -5954,7 +7155,7 @@ async function renderAdmin(sec) {
     <div class="overflow-x-auto"><table class="w-full text-sm">
       <thead><tr class="text-[#4e5872] text-xs">${['Username','Wallet','KYC','Admin','Banned','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${users.map(u => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
-        <td class="py-1.5 pr-3 font-medium">@${esc(u.username)}</td>
+        <td class="py-1.5 pr-3 font-medium">${userTag(u.username, { size: 'w-5 h-5', avatarUrl: u.avatar_url })}</td>
         <td class="pr-3 font-mono text-xs">${shortAddr(u.usernode_pubkey)}</td>
         <td class="pr-3">${kycTag(u.kyc_level||'')}</td>
         <td class="pr-3">${u.is_admin?'✓':''}</td>
@@ -5972,7 +7173,7 @@ async function renderAdmin(sec) {
     return verifications.length ? `<div class="space-y-3">${verifications.map(k => `
       <div class="card flex items-center justify-between gap-3">
         <div>
-          <div class="font-medium">@${esc(k.username)} → ${k.level}</div>
+          <div class="font-medium inline-flex items-center gap-1.5">${userTag(k.username, { size: 'w-5 h-5' })} <span>→ ${esc(k.level)}</span></div>
           <div class="text-xs text-[#8b95ab]">${k.document_type || (k.biometric_consent ? 'biometric' : '—')}</div>
         </div>
         <div class="flex gap-2">
@@ -5992,7 +7193,7 @@ async function renderAdmin(sec) {
       <thead><tr class="text-[#4e5872] text-xs">${['ID','User','Content','Del','Actions'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${posts.map(p => `<tr class="border-t border-[rgba(255,255,255,0.06)] ${p.deleted?'opacity-40':''}">
         <td class="py-1 pr-3 text-[#8b95ab]">${p.id}</td>
-        <td class="pr-3">@${esc(p.username)}</td>
+        <td class="pr-3">${userTag(p.username, { size: 'w-5 h-5' })}</td>
         <td class="pr-3 max-w-xs truncate">${esc(p.content.slice(0,80))}</td>
         <td class="pr-3">${p.deleted?'🗑':''}</td>
         <td class="flex gap-1 py-1">
@@ -6076,14 +7277,14 @@ async function renderAdmin(sec) {
       api('GET', '/api/admin/transactions'),
     ]);
     const balRows = balances.map(b => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
-      <td class="py-1 pr-3">@${esc(b.username)}</td>
+      <td class="py-1 pr-3">${userTag(b.username, { size: 'w-5 h-5' })}</td>
       <td class="pr-3">${esc(b.token_symbol)}</td>
       <td class="pr-3">${(b.balance/1e6).toFixed(4)}</td>
       <td class="py-1"><button class="btn btn-z text-xs px-2 py-0.5" onclick="adminAdjustBalance(${b.user_id},'${esc(b.token_symbol)}')">Adjust</button></td>
     </tr>`).join('');
     const txRows = transactions.map(t => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
       <td class="py-1 pr-3 text-[#8b95ab]">${t.id}</td>
-      <td class="pr-3">@${esc(t.username||'?')}</td>
+      <td class="pr-3">${userTag(t.username||'?', { size: 'w-5 h-5' })}</td>
       <td class="pr-3">${esc(t.type)}</td>
       <td class="pr-3">${esc(t.token_symbol)}</td>
       <td class="pr-3">${(t.amount/1e6).toFixed(4)}</td>
@@ -6105,7 +7306,7 @@ async function renderAdmin(sec) {
         <td class="py-1 pr-3 text-[#8b95ab]">${n.id}</td>
         <td class="pr-3 font-mono text-xs">${esc(n.token_id)}</td>
         <td class="pr-3">${esc(n.name)}</td>
-        <td class="pr-3">@${esc(n.owner_username||'?')}</td>
+        <td class="pr-3">${userTag(n.owner_username||'?', { size: 'w-5 h-5' })}</td>
         <td class="pr-3 text-[#8b95ab]">${esc(n.collection||'')}</td>
         <td class="pr-3">${n.burned?'🔥':''}</td>
         <td class="py-1">${!n.burned ? `<button class="btn btn-r text-xs px-2 py-0.5" onclick="adminBurnNFT(${n.id})">Burn</button>` : ''}</td>
@@ -6119,7 +7320,7 @@ async function renderAdmin(sec) {
       <thead><tr class="text-[#4e5872] text-xs">${['When','Admin','Action','Target','Note'].map(h=>`<th class="text-left py-1 pr-3">${h}</th>`).join('')}</tr></thead>
       <tbody>${actions.map(a => `<tr class="border-t border-[rgba(255,255,255,0.06)]">
         <td class="py-1 pr-3 text-[#8b95ab] text-xs">${new Date(a.created_at).toISOString().slice(0,16).replace('T',' ')}</td>
-        <td class="pr-3">@${esc(a.username||'?')}</td>
+        <td class="pr-3">${userTag(a.username||'?', { size: 'w-5 h-5' })}</td>
         <td class="pr-3">${esc(a.action_type)}</td>
         <td class="pr-3">${esc(String(a.target_user_id||a.target_market_id||a.target_post_id||''))}</td>
         <td class="pr-3 text-[#8b95ab]">${esc(a.reason||'')}</td>

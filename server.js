@@ -81,7 +81,7 @@ function normalizeCategory(c) {
   return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
 }
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity', '/api/defi/pool-stats']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '2mb' }));
@@ -1731,20 +1731,59 @@ app.get('/api/defi/staking-activity', async (req, res) => {
 
 // ── DeFi: Liquidity ────────────────────────────────────────────────────────────
 
-const VALID_POOLS = { BLOOM_USDC: ['BLOOM', 'USDC'], ETH_USDC: ['ETH', 'USDC'] };
+const VALID_POOLS = {
+  BLOOM_USDC: ['BLOOM', 'USDC'],
+  ETH_USDC:   ['ETH',   'USDC'],
+  ETH_BLOOM:  ['ETH',   'BLOOM'],
+  BTC_USDC:   ['BTC',   'USDC'],
+  SOL_ETH:    ['SOL',   'ETH'],
+  BTC_BLOOM:  ['BTC',   'BLOOM'],
+  SOL_USDC:   ['SOL',   'USDC'],
+  ETH_BTC:    ['ETH',   'BTC'],
+};
 
 app.get('/api/defi/liquidity', async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT * FROM defi_liquidity_positions WHERE user_id=$1 AND removed_at IS NULL ORDER BY created_at DESC',
-      [req.user.id]
-    );
+    if (IS_STAGING && req.query.demo === '1') {
+      for (const poolId of Object.keys(VALID_POOLS)) {
+        const { rows: [exists] } = await pool.query(
+          'SELECT 1 FROM defi_liquidity_positions WHERE user_id=$1 AND pool_id=$2 AND removed_at IS NULL LIMIT 1',
+          [req.user.id, poolId]
+        );
+        if (!exists) {
+          const amtA = 500 * UNITS;
+          const amtB = 500 * UNITS;
+          const shares = Math.sqrt(amtA * amtB);
+          await pool.query(
+            `INSERT INTO defi_liquidity_positions(user_id,pool_id,token_a_amount,token_b_amount,shares,created_at)
+             VALUES($1,$2,$3,$4,$5,NOW()-INTERVAL '3 days')`,
+            [req.user.id, poolId, amtA, amtB, shares]
+          );
+        }
+      }
+    }
+    const { rows } = await pool.query(`
+      SELECT dlp.*,
+        CASE WHEN pool_totals.total_shares > 0
+          THEN ROUND((dlp.shares / pool_totals.total_shares * 100)::numeric, 4)
+          ELSE 0
+        END AS pool_share_pct
+      FROM defi_liquidity_positions dlp
+      JOIN (
+        SELECT pool_id, SUM(shares) AS total_shares
+        FROM defi_liquidity_positions
+        WHERE removed_at IS NULL
+        GROUP BY pool_id
+      ) pool_totals ON pool_totals.pool_id = dlp.pool_id
+      WHERE dlp.user_id=$1 AND dlp.removed_at IS NULL
+      ORDER BY dlp.created_at DESC
+    `, [req.user.id]);
     const now = Date.now();
     const positions = rows.map(p => {
       const days = (now - new Date(p.created_at).getTime()) / 86400000;
       const totalValue = Number(p.token_a_amount) + Number(p.token_b_amount);
       const fees = Math.floor(totalValue * 0.0001 * days);
-      return { ...p, accrued_fees: fees };
+      return { ...p, accrued_fees: fees, pool_share_pct: Number(p.pool_share_pct) };
     });
     res.json({ positions });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1812,6 +1851,48 @@ app.delete('/api/defi/liquidity/:id', async (req, res) => {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
+});
+
+// ── DeFi: Pool stats (public — aggregated TVL / composition / fees) ───────────
+
+app.get('/api/defi/pool-stats', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        pool_id,
+        COALESCE(SUM(token_a_amount + token_b_amount), 0)::bigint AS tvl_units,
+        COALESCE(SUM(shares), 0) AS total_shares,
+        COALESCE(SUM(token_a_amount), 0)::bigint AS token_a_reserve,
+        COALESCE(SUM(token_b_amount), 0)::bigint AS token_b_reserve,
+        COALESCE(SUM(CASE WHEN created_at <= NOW() - INTERVAL '1 day'
+          THEN FLOOR((token_a_amount + token_b_amount) * 0.0001) ELSE 0 END), 0)::bigint AS fees_24h_units
+      FROM defi_liquidity_positions
+      WHERE removed_at IS NULL
+      GROUP BY pool_id
+    `);
+    const byPoolId = {};
+    rows.forEach(r => { byPoolId[r.pool_id] = r; });
+    let totalTvl = 0;
+    let totalFees24h = 0;
+    const pools = Object.entries(VALID_POOLS).map(([poolId, tokens]) => {
+      const r = byPoolId[poolId] || {};
+      const tvl = fromUnits(Number(r.tvl_units) || 0);
+      const fees24h = fromUnits(Number(r.fees_24h_units) || 0);
+      totalTvl += tvl;
+      totalFees24h += fees24h;
+      return {
+        pool_id: poolId,
+        tokens,
+        tvl,
+        token_a_reserve: fromUnits(Number(r.token_a_reserve) || 0),
+        token_b_reserve: fromUnits(Number(r.token_b_reserve) || 0),
+        total_shares: Number(r.total_shares) || 0,
+        apr_bps: 36,
+        fees_24h: fees24h,
+      };
+    });
+    res.json({ pools, total_tvl: totalTvl, total_fees_24h: totalFees24h });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── DeFi: Vaults ──────────────────────────────────────────────────────────────
@@ -2313,6 +2394,49 @@ app.get('/api/activity', async (req, res) => {
     const nextCursor = hasMore ? activities[activities.length - 1].id : null;
     res.json({ activities, nextCursor });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Wallet Send (bridge sync) ────────────────────────────────────────────────
+
+app.post('/api/wallet/send', requireWallet, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { to_address, token_symbol, amount } = req.body;
+    const sym = (token_symbol || '').toUpperCase().trim();
+    const qty = parseAmount(amount);
+    if (!sym) return res.status(400).json({ error: 'token_symbol required' });
+    if (!qty) return res.status(400).json({ error: 'Invalid amount' });
+    if (!to_address || typeof to_address !== 'string' || !to_address.trim())
+      return res.status(400).json({ error: 'to_address required' });
+
+    await client.query('BEGIN');
+    const { rows: balRows } = await client.query(
+      'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
+      [req.user.id, sym]
+    );
+    const currentBal = balRows.length > 0 ? Number(balRows[0].balance) / 1e6 : 0;
+    if (currentBal < qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    const newBalUnits = Math.round((currentBal - qty) * 1e6);
+    await client.query(
+      `INSERT INTO wallet_balances (user_id, token_symbol, balance)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, token_symbol) DO UPDATE SET balance = EXCLUDED.balance`,
+      [req.user.id, sym, newBalUnits]
+    );
+    await client.query(
+      `INSERT INTO transactions (user_id, type, token_symbol, amount, description)
+       VALUES ($1, 'send', $2, $3, $4)`,
+      [req.user.id, sym, Math.round(qty * 1e6), `Sent ${qty} ${sym} to ${shortAddr(to_address.trim())}`]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, remaining: newBalUnits / 1e6 });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 // ── Trade Journal ─────────────────────────────────────────────────────────────
@@ -4194,7 +4318,7 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
-  if (!req.user) {
+  if (!req.user && !(IS_STAGING && req.query.demo === '1')) {
     return res.status(401).send(`<!doctype html><meta charset=utf-8><title>BloomMoney</title>
 <body style="font-family:system-ui;background:#0a0a0b;color:#e4e4e7;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
   <div style="max-width:24rem;padding:2rem;text-align:center">
@@ -4792,7 +4916,9 @@ async function start() {
         (9003,'staging-carol','0xSTAGING0000000000000000000000000000000003','Carol (Staging)','Prediction market oracle',false),
         (9004,'staging-dave','0xSTAGING0000000000000000000000000000000004','Dave (Staging)','Futures trading enthusiast',false),
         (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','BLOOM staker since day one',false),
-        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
+        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true),
+        (9007,'staging-zara','0xSTAGING0000000000000000000000000000000007','Zara (Staging)','Liquidity provider and yield farmer',false),
+        (9008,'staging-max','0xSTAGING0000000000000000000000000000000008','Max (Staging)','Launchpad degen, no uploaded avatar',false)
       ON CONFLICT(user_id) DO NOTHING
     `);
     // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
@@ -4970,6 +5096,29 @@ async function start() {
         (9001,'Staging BLOOM-USDC Auto Vault','BLOOM/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
         (9002,'Staging ETH Yield Vault','ETH/USDC',820,1200000,'Staging demo vault — Automated ETH yield strategy'),
         (9003,'Staging Stable Vault','USDC/DAI',510,500000,'Staging demo vault — Low-risk stablecoin vault')
+      ON CONFLICT(id) DO NOTHING
+    `);
+
+    // Seed liquidity positions so pool-stats dashboard shows real TVL/composition data
+    await pool.query(`
+      INSERT INTO defi_liquidity_positions(id,user_id,pool_id,token_a_amount,token_b_amount,shares,created_at) VALUES
+        (900151,9001,'BLOOM_USDC',500000000,500000000,500000000,NOW()-INTERVAL '5 days'),
+        (900152,9002,'BLOOM_USDC',1200000000,1200000000,1200000000,NOW()-INTERVAL '3 days'),
+        (900153,9003,'BLOOM_USDC',300000000,300000000,300000000,NOW()-INTERVAL '1 day'),
+        (900154,9004,'ETH_USDC',100000000,100000000,100000000,NOW()-INTERVAL '6 days'),
+        (900155,9005,'ETH_USDC',800000000,800000000,800000000,NOW()-INTERVAL '2 days'),
+        (900156,9001,'ETH_BLOOM',750000000,750000000,750000000,NOW()-INTERVAL '4 days'),
+        (900157,9002,'ETH_BLOOM',250000000,250000000,250000000,NOW()-INTERVAL '2 days'),
+        (900158,9003,'BTC_USDC',2000000000,2000000000,2000000000,NOW()-INTERVAL '7 days'),
+        (900159,9004,'BTC_USDC',500000000,500000000,500000000,NOW()-INTERVAL '3 days'),
+        (900160,9005,'SOL_ETH',400000000,400000000,400000000,NOW()-INTERVAL '5 days'),
+        (900161,9001,'SOL_ETH',900000000,900000000,900000000,NOW()-INTERVAL '1 day'),
+        (900162,9002,'BTC_BLOOM',1500000000,1500000000,1500000000,NOW()-INTERVAL '6 days'),
+        (900163,9003,'BTC_BLOOM',300000000,300000000,300000000,NOW()-INTERVAL '2 days'),
+        (900164,9004,'SOL_USDC',600000000,600000000,600000000,NOW()-INTERVAL '4 days'),
+        (900165,9005,'SOL_USDC',1100000000,1100000000,1100000000,NOW()-INTERVAL '3 days'),
+        (900166,9001,'ETH_BTC',350000000,350000000,350000000,NOW()-INTERVAL '7 days'),
+        (900167,9002,'ETH_BTC',850000000,850000000,850000000,NOW()-INTERVAL '2 days')
       ON CONFLICT(id) DO NOTHING
     `);
 

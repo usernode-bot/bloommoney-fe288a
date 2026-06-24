@@ -65,16 +65,47 @@
   })();
   </script>
 
+  <script>
+  // Parity with the app shell: theme is decided pre-paint. The landing is a
+  // dark-first marketing splash (no toggle, no light styling), so it stays on
+  // .dark; the shared palette below just keeps its accent/surfaces from
+  // drifting away from the app. localStorage may throw in a sandboxed iframe.
+  (function(){ document.documentElement.classList.add('dark'); })();
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+  // Remap the violet ramp the markup already uses onto the app's brand purple
+  // (#7c5cfc) so the landing accent matches the app shell, plus the shared
+  // semantic colour names resolving to the CSS vars below.
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: {
+      violet: { 300: '#a9a0ff', 400: '#9b7ffe', 500: '#7c5cfc', 600: '#6d4ef0', 700: '#5a3fd6' },
+      surface: 'var(--bg-surface)', card: 'var(--bg-card)', deep: 'var(--bg-deep)',
+      'accent-purple': 'var(--accent-purple)', 'accent-blue': 'var(--accent-blue)',
+    } } },
+  };
+  </script>
 
   <style>
+    /* Shared palette — same tokens as the app shell (public/index.html) so the
+       landing never drifts. Dark values apply (landing is always .dark). */
+    :root {
+      --bg-deep: #f4f5f8; --bg-surface: #ffffff; --bg-card: #f0f1f6;
+      --accent-purple: #7c5cfc; --accent-blue: #4e9af1;
+      --text-primary: #1c1e2d; --text-secondary: #525875; --text-muted: #6b7196;
+    }
+    html.dark {
+      --bg-deep: #0f1117; --bg-surface: #131620; --bg-card: #161b2a;
+      --accent-purple: #7c5cfc; --accent-blue: #4e9af1;
+      --text-primary: #e8eaf0; --text-secondary: #8b95ab; --text-muted: #7884a3;
+    }
     html { scroll-behavior: smooth; }
     .ptab { color: #a1a1aa; transition: color 0.15s, background 0.15s; }
     .ptab:hover { color: #fff; background: #27272a; }
-    .ptab.active { background: #7c3aed; color: #fff; }
+    .ptab.active { background: var(--accent-purple); color: #fff; }
     .benefit-item { display: flex; gap: 0.625rem; align-items: flex-start; }
-    .benefit-item::before { content: '✓'; color: #7c3aed; font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
+    .benefit-item::before { content: '✓'; color: var(--accent-purple); font-weight: 700; flex-shrink: 0; margin-top: 0.1rem; }
   </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 overflow-x-hidden">
