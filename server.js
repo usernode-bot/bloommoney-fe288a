@@ -4916,9 +4916,7 @@ async function start() {
         (9003,'staging-carol','0xSTAGING0000000000000000000000000000000003','Carol (Staging)','Prediction market oracle',false),
         (9004,'staging-dave','0xSTAGING0000000000000000000000000000000004','Dave (Staging)','Futures trading enthusiast',false),
         (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','BLOOM staker since day one',false),
-        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true),
-        (9007,'staging-zara','0xSTAGING0000000000000000000000000000000007','Zara (Staging)','Liquidity provider and yield farmer',false),
-        (9008,'staging-max','0xSTAGING0000000000000000000000000000000008','Max (Staging)','Launchpad degen, no uploaded avatar',false)
+        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
       ON CONFLICT(user_id) DO NOTHING
     `);
     // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
