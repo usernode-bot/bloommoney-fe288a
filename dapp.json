@@ -155,6 +155,8 @@
     { "name": "Linked accounts section in DOM", "path": "/?demo=1", "expectSelector": "#linked-accounts-section" },
     { "name": "ZK verified badge in DOM", "path": "/?demo=1", "expectSelector": ".tag-zk-verified" },
     { "name": "Market tab section in DOM", "path": "/?demo=1", "expectSelector": "#section-market" },
+    { "name": "Market nav button in sidebar", "path": "/?demo=1", "expectSelector": "[data-view='market']" },
+    { "name": "Market bottom nav tab in DOM", "path": "/?demo=1", "expectSelector": "[data-tab='market']" },
     { "name": "Opinion market history API returns JSON", "path": "/api/markets/9001/history", "expectSelector": "body" },
     { "name": "Daily opinion market history API returns JSON", "path": "/api/markets/9010/history", "expectSelector": "body" },
     { "name": "Futures history API returns JSON", "path": "/api/futures/markets/1/history", "expectSelector": "body" },
