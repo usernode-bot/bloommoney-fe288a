@@ -167,6 +167,8 @@
     { "name": "Market global stats bar renders", "path": "/?demo=1", "expectSelector": "#market-global-stats" },
     { "name": "Points available badge in DOM", "path": "/?demo=1", "expectSelector": "#points-available" },
     { "name": "ROI API returns JSON", "path": "/api/users/staging-alice/roi", "expectSelector": "body" },
+    { "name": "User posts API returns JSON", "path": "/api/users/staging-alice/posts?type=posts", "expectSelector": "body" },
+    { "name": "User replies API returns JSON", "path": "/api/users/staging-bob/posts?type=replies", "expectSelector": "body" },
     { "name": "Open positions API returns JSON", "path": "/api/users/staging-charlie/open-positions", "expectSelector": "body" },
     { "name": "Post card avatar renders", "path": "/?demo=1", "expectSelector": ".post-avatar" },
     { "name": "Uploaded avatar shown in feed", "path": "/?demo=1", "expectSelector": ".post-avatar[src^='data:image/svg+xml;base64']" },

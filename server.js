@@ -866,6 +866,60 @@ app.get('/api/profile/:username', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Viewer-aware list of a single user's posts/replies, mirroring the feed's
+// enrichment (author avatar/display name, is_premium), per-viewer like/unlock
+// state, and gatePost redaction. Used by the profile Posts/Replies tabs so they
+// list ALL of that user's content (cursor-paginated) instead of filtering the
+// newest-50 global feed client-side. `type=media` is accepted for forward
+// compatibility but returns empty: the posts table has no image/nft columns yet.
+app.get('/api/users/:username/posts', async (req, res) => {
+  try {
+    const type = req.query.type === 'replies' ? 'replies'
+               : req.query.type === 'media' ? 'media' : 'posts';
+    const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
+    const lim = Math.min(parseInt(req.query.limit) || 50, 50);
+
+    const { rows: [target] } = await pool.query(
+      'SELECT user_id FROM users WHERE username=$1', [req.params.username]
+    );
+    if (!target) return res.status(404).json({ error: 'Not found' });
+
+    // Media has no backing columns on posts (no image_url / nft_id), so it is
+    // always empty. Short-circuit to avoid referencing nonexistent columns.
+    if (type === 'media') return res.json({ posts: [], nextCursor: null });
+
+    const params = [target.user_id, lim];
+    const typeClause = type === 'replies' ? 'AND p.parent_id IS NOT NULL'
+                                          : 'AND p.parent_id IS NULL';
+    const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+    let { rows } = await pool.query(`
+      SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+             u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+      FROM posts p
+      LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+      LEFT JOIN users u ON u.user_id = p.user_id
+      WHERE p.user_id = $1 AND p.deleted = false ${typeClause} ${cursorClause}
+      ORDER BY p.id DESC LIMIT $2
+    `, params);
+
+    if (rows.length > 0) {
+      const ids = rows.map(r => r.id);
+      const { rows: liked } = await pool.query(
+        'SELECT post_id FROM post_likes WHERE user_id=$1 AND post_id=ANY($2)',
+        [req.user.id, ids]
+      );
+      const likedSet = new Set(liked.map(r => r.post_id));
+      const { rows: unlocked } = await pool.query(
+        'SELECT post_id FROM post_unlocks WHERE user_id=$1 AND post_id=ANY($2)',
+        [req.user.id, ids]
+      );
+      const unlockedSet = new Set(unlocked.map(r => r.post_id));
+      rows = rows.map(r => gatePost({ ...r, liked_by_me: likedSet.has(r.id) }, req.user.id, unlockedSet.has(r.id)));
+    }
+    res.json({ posts: rows, nextCursor: rows.length === lim ? rows[rows.length - 1].id : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Social Feed ───────────────────────────────────────────────────────────────
 
 // Premium "locked" posts: redact body server-side unless the viewer authored it

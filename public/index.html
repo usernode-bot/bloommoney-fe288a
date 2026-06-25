@@ -751,6 +751,11 @@ function navigate(view, opts) {
   clearInterval(_activeInterval); _activeInterval = null;
   // Release the Portfolio camera scanner if it's running when leaving the view.
   if (typeof window._pfStopScanner === 'function') { try { window._pfStopScanner(); } catch (_) {} }
+  // Reset the "viewed profile" target on every profile navigation that doesn't
+  // explicitly name a user, so the self entry points (header identity, sidebar,
+  // bottom-nav) always land on the signed-in user instead of sticking on the
+  // last other-user profile that was opened. Other-user links pass profileUser.
+  if (view === 'profile' && !(opts && 'profileUser' in opts)) S.profileUser = null;
   if (opts) Object.assign(S, opts);
   S.view = view;
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
@@ -1633,9 +1638,12 @@ async function renderProfile(sec) {
   }
 
   async function renderPostTab(parent = null) {
-    const filter = parent !== null ? `parent_id IS${parent === 'IS NULL' ? ' NULL' : ' NOT NULL'}` : null;
-    const d = await api('GET', `/api/feed?tab=global&limit=50`);
-    const userPosts = d.posts.filter(p => p.username === username && (parent === null ? p.parent_id === null : p.parent_id !== null));
+    // Pull this user's own posts/replies directly (cursor-paginated, viewer-aware
+    // gating) instead of filtering the newest-50 global feed, so older posts and
+    // replies actually show and the list matches the profile's post-count stat.
+    const type = parent === null ? 'posts' : 'replies';
+    const d = await api('GET', `/api/users/${encodeURIComponent(username)}/posts?type=${type}&limit=50`);
+    const userPosts = d.posts;
     return userPosts.length
       ? userPosts.map(p => `<div class="card space-y-1">
           <span class="text-xs text-[#4e5872]">${p.locked ? '🔒 ' : ''}${tsAgo(p.created_at)}</span>
@@ -1941,8 +1949,8 @@ async function renderProfile(sec) {
   }
 
   async function renderMediaTab() {
-    const d = await api('GET', `/api/feed?tab=global&limit=50`);
-    const mediaPosts = d.posts.filter(p => p.username === username && (p.nft_id != null || p.image_url != null));
+    const d = await api('GET', `/api/users/${encodeURIComponent(username)}/posts?type=media&limit=50`);
+    const mediaPosts = d.posts.filter(p => p.nft_id != null || p.image_url != null);
     if (!mediaPosts.length) return '<p class="text-[#4e5872] text-sm px-4 py-6">No media yet</p>';
     return `<div class="grid grid-cols-3 gap-1 px-1">${mediaPosts.map(p =>
       `<div class="aspect-square rounded overflow-hidden bg-[var(--bg-card)] flex items-center justify-center">
