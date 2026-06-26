@@ -158,7 +158,6 @@
       </button>
       <!-- Theme toggle: always visible -->
       <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
-      <span id="hdr-wallet" class="text-[#4e5872] font-mono hidden sm:block text-xs"></span>
       <!-- Connect wallet CTA shown when no wallet linked -->
       <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
       <!-- Log out -->
@@ -177,6 +176,7 @@
       <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-[rgba(255,255,255,0.06)] hidden">
         <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0] flex items-center gap-2"></div>
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
+        <button id="drawer-connect-wallet" class="hidden mt-2 w-full text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="market">📊 Market</button>
@@ -281,9 +281,9 @@
     <button data-tab="home" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('home')">🏠<span>Home</span></button>
     <button data-tab="market" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('market')">📊<span>Market</span></button>
     <button data-tab="trade" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('trade')">↔<span>Trade</span></button>
+    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
     <button data-tab="predict" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('predict')">📊<span>Predict</span></button>
     <button data-tab="profile" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('profile')">👤<span>Profile</span></button>
-    <button data-tab="portfolio" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-[#8b95ab] transition-colors" onclick="navigate('portfolio')">💼<span>Portfolio</span></button>
     <a id="admin-bottom-nav" class="bottom-tab flex-1 py-3 flex flex-col items-center text-xs gap-0.5 text-amber-400 hidden" target="_blank" rel="noopener">⚙️<span>Admin</span></a>
   </nav>
   <!-- Toast container for new-message notifications -->
@@ -1082,9 +1082,6 @@ function showMsgToast(conv) {
 function updateHeader() {
   if (!S.user) return;
   const hasWallet = !!S.user.usernode_pubkey;
-  const walletEl = document.getElementById('hdr-wallet');
-  walletEl.textContent = hasWallet ? shortAddr(S.user.usernode_pubkey) : '';
-  walletEl.style.display = hasWallet ? '' : 'none';
 
   const connectBtn = document.getElementById('hdr-connect-wallet');
   if (connectBtn) connectBtn.classList.toggle('hidden', hasWallet);
@@ -1102,7 +1099,9 @@ function updateHeader() {
   }
 
   document.getElementById('drawer-username').innerHTML = avatarImg(S.user.username, 'w-6 h-6', S.user.avatar_url) + '<span class="truncate">@' + esc(S.user.username) + '</span>';
-  document.getElementById('drawer-wallet').textContent = hasWallet ? (shortAddr(S.user.usernode_pubkey) || '') : 'No wallet linked';
+  document.getElementById('drawer-wallet').textContent = hasWallet ? (shortAddr(S.user.usernode_pubkey) || '') : '';
+  const drawerConnectBtn = document.getElementById('drawer-connect-wallet');
+  if (drawerConnectBtn) drawerConnectBtn.classList.toggle('hidden', hasWallet);
   document.getElementById('drawer-user').classList.remove('hidden');
   updatePoints();
 }
