@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&display=swap" rel="stylesheet">
 
   <script>
   // usernode-dev-console@1
@@ -87,19 +90,24 @@
   // light-mode override map over time.
   tailwind.config = {
     darkMode: 'class',
-    theme: { extend: { colors: {
-      deep:           'var(--bg-deep)',
-      surface:        'var(--bg-surface)',
-      card:           'var(--bg-card)',
-      'card-hover':   'var(--bg-card-hover)',
-      input:          'var(--bg-input)',
-      'text-primary':   'var(--text-primary)',
-      'text-secondary': 'var(--text-secondary)',
-      'text-muted':     'var(--text-muted)',
-      'border-subtle':  'var(--border-subtle)',
-      'accent-purple':  'var(--accent-purple)',
-      'accent-blue':    'var(--accent-blue)',
-    } } },
+    theme: { extend: {
+      fontFamily: { sans: ["'Figtree'", 'system-ui', '-apple-system', 'sans-serif'] },
+      colors: {
+        deep:           'var(--bg-deep)',
+        surface:        'var(--bg-surface)',
+        card:           'var(--bg-card)',
+        'card-hover':   'var(--bg-card-hover)',
+        input:          'var(--bg-input)',
+        'text-primary':   'var(--text-primary)',
+        'text-secondary': 'var(--text-secondary)',
+        'text-muted':     'var(--text-muted)',
+        'border-subtle':  'var(--border-subtle)',
+        'accent-purple':  'var(--accent-purple)',
+        'accent-blue':    'var(--accent-blue)',
+        'accent-pink':    'var(--accent-pink)',
+        'accent-green':   'var(--accent-green)',
+      },
+    } },
   };
   </script>
   <script src="https://social-vibecoding.usernodelabs.org/usernode-bridge/v1/bridge.js"></script>
@@ -112,7 +120,7 @@
     <div class="text-4xl">🌸</div>
     <h2 class="text-xl font-bold text-[#e8eaf0]">Wallet Required</h2>
     <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Connect your wallet to continue.</p>
-    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
+    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)); box-shadow: 0 4px 14px rgba(162,93,220,0.3);">Connect Wallet</button>
     <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
     <button onclick="closeWalletPrompt()" class="text-xs text-[#4e5872] hover:text-[#8b95ab] transition-colors">Maybe later</button>
   </div>
@@ -157,9 +165,14 @@
         <span id="hdr-username" class="hidden sm:block text-sm font-semibold text-[#e8eaf0] truncate max-w-[8rem]"></span>
       </button>
       <!-- Theme toggle: always visible -->
-      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">☀️</button>
+      <button id="theme-toggle" onclick="toggleTheme()" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-[#e8eaf0] rounded-lg hover:bg-[#1c2236] transition-colors" title="Toggle theme" aria-label="Toggle theme">
+        <!-- Sun icon: shown in dark mode (click to switch to light) -->
+        <svg id="theme-toggle-sun" xmlns="http://www.w3.org/2000/svg" class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <!-- Moon icon: shown in light mode (click to switch to dark) -->
+        <svg id="theme-toggle-moon" xmlns="http://www.w3.org/2000/svg" class="hidden w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
       <!-- Connect wallet CTA shown when no wallet linked -->
-      <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
+      <button id="hdr-connect-wallet" class="hidden text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));" onclick="connectWallet()">Connect Wallet</button>
       <!-- Log out -->
       <button id="hdr-logout" class="inline-flex items-center justify-center w-8 h-8 text-[#8b95ab] hover:text-red-400 rounded-lg hover:bg-[#1c2236] transition-colors" title="Log out" aria-label="Log out" onclick="S.token='';S.user=null;navigate('home');">🚪</button>
     </div>
@@ -176,7 +189,7 @@
       <div id="drawer-user" class="md:hidden px-2 py-2 mb-1 border-b border-[rgba(255,255,255,0.06)] hidden">
         <div id="drawer-username" class="text-sm font-semibold text-[#e8eaf0] flex items-center gap-2"></div>
         <div id="drawer-wallet" class="text-xs text-[#4e5872] font-mono mt-0.5"></div>
-        <button id="drawer-connect-wallet" class="hidden mt-2 w-full text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);" onclick="connectWallet()">Connect Wallet</button>
+        <button id="drawer-connect-wallet" class="hidden mt-2 w-full text-xs px-3 py-1.5 rounded-lg font-medium text-white transition-colors" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));" onclick="connectWallet()">Connect Wallet</button>
       </div>
       <button class="nav-item" data-view="home">🏠 Home</button>
       <button class="nav-item" data-view="market">📊 Market</button>
@@ -292,19 +305,22 @@
 
 <style>
 :root {
-  --bg-deep:        #f4f5f8;
-  --bg-surface:     #ffffff;
-  --bg-card:        #f0f1f6;
-  --bg-card-hover:  #e6e8f0;
-  --bg-input:       #f8f8fb;
-  --border-subtle:  rgba(0,0,0,0.07);
-  --border-hover:   rgba(124,92,252,0.25);
-  --border-focus:   #7c5cfc;
-  --accent-purple:  #7c5cfc;
-  --accent-blue:    #4e9af1;
-  --text-primary:   #1c1e2d;
-  --text-secondary: #525875;       /* ~7:1 on white — AA body */
-  --text-muted:     #6b7196;       /* darkened from #9499b3 → ~4.6:1 on white (AA body) */
+  --bg-deep:        #F6F7FB;
+  --bg-surface:     #FFFFFF;
+  --bg-card:        #FFFFFF;
+  --bg-card-hover:  #F0F2F8;
+  --bg-input:       #FFFFFF;
+  --border-subtle:  rgba(0,0,0,0.08);
+  --border-hover:   rgba(162,93,220,0.30);
+  --border-focus:   #A25DDC;
+  --accent-purple:  #A25DDC;
+  --accent-blue:    #0085FF;
+  --accent-pink:    #FF158A;
+  --accent-green:   #00C875;
+  --text-primary:   #323338;
+  --text-secondary: #676879;
+  --text-muted:     #9699A6;
+  --shadow-card:    0 1px 4px rgba(0,0,0,0.08);
   /* Mobile-first responsive foundation: adaptive gutter + fluid type scale.
      Same tokens in both themes (layout, not colour). */
   --space-gutter:   clamp(0.85rem, 2.5vw, 1.15rem);
@@ -313,20 +329,25 @@
   --fs-h3:          clamp(1.05rem, 0.95rem + 0.6vw, 1.25rem);
 }
 html.dark {
-  --bg-deep:        #0f1117;
-  --bg-surface:     #131620;
-  --bg-card:        #161b2a;
-  --bg-card-hover:  #1c2236;
-  --bg-input:       #0d1021;
-  --border-subtle:  rgba(255,255,255,0.06);
-  --border-hover:   rgba(124,92,252,0.20);
-  --border-focus:   #7c5cfc;
-  --accent-purple:  #7c5cfc;
-  --accent-blue:    #4e9af1;
-  --text-primary:   #e8eaf0;
-  --text-secondary: #8b95ab;       /* ~5.4:1 on #131620 — AA body */
-  --text-muted:     #7884a3;       /* lightened from #4e5872 → ~4.6:1 on card, 5:1 on deep (AA body) */
+  --bg-deep:        #1F2437;
+  --bg-surface:     #252B40;
+  --bg-card:        #2B3148;
+  --bg-card-hover:  #323A56;
+  --bg-input:       #1B2035;
+  --border-subtle:  rgba(255,255,255,0.07);
+  --border-hover:   rgba(162,93,220,0.25);
+  --border-focus:   #A25DDC;
+  --accent-purple:  #A25DDC;
+  --accent-blue:    #0085FF;
+  --accent-pink:    #FF158A;
+  --accent-green:   #00C875;
+  --text-primary:   #F0F2FF;
+  --text-secondary: #9FA9C0;
+  --text-muted:     #7B8BAD;
+  --shadow-card:    0 2px 8px rgba(0,0,0,0.35);
 }
+/* Global font: Figtree (Monday.com-style modern sans-serif) */
+body, button, input, select, textarea { font-family: 'Figtree', system-ui, -apple-system, sans-serif; }
 /* Fluid heading helpers (additive — use in place of fixed text-* sizes). */
 .fluid-h1 { font-size: var(--fs-h1); line-height: 1.15; }
 .fluid-h2 { font-size: var(--fs-h2); line-height: 1.2; }
@@ -372,6 +393,27 @@ html:not(.dark) [class~="border-[rgba(255,255,255,0.04)]"] { border-color: rgba(
    the custom props is enough. */
 html:not(.dark) [class~="from-[#1a1f33]"] { --tw-gradient-from: var(--bg-card) var(--tw-gradient-from-position) !important; }
 html:not(.dark) [class~="to-[#131620]"]   { --tw-gradient-to: var(--bg-surface) var(--tw-gradient-to-position) !important; }
+/* Dark-mode: remap old hardcoded dark hex classes to the new Monday.com navy palette.
+   Mirrors the light-mode override map above so both themes use CSS-var values. */
+html.dark [class~="bg-[#0f1117]"]   { background-color: var(--bg-deep) !important; }
+html.dark [class~="bg-[#131620]"]   { background-color: var(--bg-surface) !important; }
+html.dark [class~="bg-[#161b2a]"]   { background-color: var(--bg-card) !important; }
+html.dark [class~="bg-[#1c2236]"]   { background-color: var(--bg-card-hover) !important; }
+html.dark [class~="bg-[#0d1021]"]   { background-color: var(--bg-input) !important; }
+html.dark [class~="hover:bg-[#1c2236]"]:hover { background-color: var(--bg-card-hover) !important; }
+html.dark [class~="text-[#e8eaf0]"] { color: var(--text-primary) !important; }
+html.dark [class~="text-[#8b95ab]"] { color: var(--text-secondary) !important; }
+html.dark [class~="text-[#4e5872]"] { color: var(--text-muted) !important; }
+html.dark [class~="border-[rgba(255,255,255,0.06)]"] { border-color: var(--border-subtle) !important; }
+html.dark [class~="border-[rgba(255,255,255,0.08)]"] { border-color: rgba(255,255,255,0.09) !important; }
+html.dark .inp { background: var(--bg-input) !important; border-color: rgba(255,255,255,0.09) !important; }
+/* Futures terminal: always dark — its specific colors are restored below. */
+html.dark .futures-terminal [class~="bg-[#161b2a]"]   { background-color: #161b2a !important; }
+html.dark .futures-terminal [class~="bg-[#0d1021]"]   { background-color: #0d1021 !important; }
+html.dark .futures-terminal [class~="bg-[#1c2236]"]   { background-color: #1c2236 !important; }
+html.dark .futures-terminal [class~="bg-[#131620]"]   { background-color: #131620 !important; }
+html.dark .futures-terminal [class~="hover:bg-[#1c2236]"]:hover { background-color: #1c2236 !important; }
+html.dark .futures-terminal .inp { background: #0d1021 !important; }
 /* Futures terminal: always dark. Higher specificity (.futures-terminal ancestor)
    overrides the global colour overrides above. */
 html:not(.dark) .futures-terminal [class~="text-[#e8eaf0]"] { color: #e8eaf0 !important; }
@@ -388,15 +430,15 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
   width: 100%; text-align: left; padding: 0.5rem 0.75rem; border-radius: 0.5rem;
   font-size: 0.875rem; color: var(--text-secondary); transition: color 0.15s, background 0.15s;
 }
-.nav-item:hover { background: var(--bg-card); color: var(--text-primary); }
-.nav-item.active { background: linear-gradient(90deg, rgba(124,92,252,0.12), transparent); border-left: 2px solid var(--accent-purple); color: var(--text-primary); padding-left: calc(0.75rem - 2px); }
-.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: var(--space-gutter); transition: border-color 0.2s, box-shadow 0.2s; }
-.card:hover { border-color: var(--border-hover); box-shadow: 0 0 16px rgba(124,92,252,0.08); }
+.nav-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.nav-item.active { background: linear-gradient(90deg, rgba(162,93,220,0.12), transparent); border-left: 2px solid var(--accent-purple); color: var(--text-primary); padding-left: calc(0.75rem - 2px); }
+.card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 0.75rem; padding: var(--space-gutter); box-shadow: var(--shadow-card); transition: border-color 0.2s, box-shadow 0.2s; }
+.card:hover { border-color: var(--border-hover); box-shadow: 0 0 20px rgba(162,93,220,0.10); }
 .inp { background: var(--bg-input); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: var(--text-primary); width: 100%; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
-.inp:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(124,92,252,0.15); }
+.inp:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(162,93,220,0.18); }
 .btn { padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; transform: translateY(0); }
 .btn:hover { transform: translateY(-1px); }
-.btn-v { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff; }
+.btn-v { background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)); color: #fff; }
 .btn-v:hover { opacity: 0.9; }
 .btn-z { background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border-subtle); }
 .btn-z:hover { border-color: var(--border-hover); }
@@ -415,9 +457,9 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.pm-category-chip { flex-shrink: 0; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: #1c2236; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; white-space: nowrap; }
-.pm-category-chip:hover { color: #e8eaf0; border-color: rgba(124,92,252,0.3); }
-.pm-category-chip.active { background: #7c5cfc; color: #fff; border-color: #7c5cfc; }
+.pm-category-chip { flex-shrink: 0; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: var(--bg-card-hover); color: var(--text-secondary); border: 1px solid var(--border-subtle); transition: all 0.15s; white-space: nowrap; }
+.pm-category-chip:hover { color: var(--text-primary); border-color: var(--border-hover); }
+.pm-category-chip.active { background: var(--accent-purple); color: #fff; border-color: var(--accent-purple); }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Post-to-Earn points animations */
 .points-pulse { animation: pointsPulse 0.7s ease-out; }
@@ -439,7 +481,7 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
 }
 select.inp option { background: var(--bg-card); }
 /* Pill-style tab buttons */
-.pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1); color: #fff !important; border-radius: 9999px; border: none; }
+.pill-active { background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)); color: #fff !important; border-radius: 9999px; border: none; }
 .pill-inactive { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-subtle); border-radius: 9999px; }
 .pill-inactive:hover { color: var(--text-primary); border-color: var(--border-hover); }
 /* Underline-style tab buttons (Twitter/X style) */
@@ -526,7 +568,7 @@ html:not(.dark) #section-trade tbody tr:nth-child(even) { background: rgba(0,0,0
 .twap-readonly { color: #4e5872; font-size: 0.75rem; }
 .order-type-pill { padding: 0.2rem 0.6rem; font-size: 0.7rem; border-radius: 9999px; background: #161b2a; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; cursor: pointer; }
 .order-type-pill:hover { color: #e8eaf0; }
-.order-type-pill-active { background: linear-gradient(135deg, #7c5cfc, #4e9af1) !important; color: #fff !important; border-color: transparent !important; }
+.order-type-pill-active { background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue)) !important; color: #fff !important; border-color: transparent !important; }
 @media (max-width: 767px) {
   .futures-terminal__main { grid-template-columns: 1fr; }
   .fut-panel-entry { order: 1; min-height: auto; }
@@ -777,8 +819,10 @@ function navigate(view, opts) {
 
 // ── Theme toggle ──────────────────────────────────────────────────────────────
 function applyThemeGlyph(isDark) {
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = isDark ? '☀️' : '🌙';
+  const sun  = document.getElementById('theme-toggle-sun');
+  const moon = document.getElementById('theme-toggle-moon');
+  if (sun)  sun.classList.toggle('hidden', !isDark);
+  if (moon) moon.classList.toggle('hidden',  isDark);
   const notice = document.getElementById('fut-dark-notice');
   if (notice) notice.style.display = isDark ? 'none' : 'flex';
 }
