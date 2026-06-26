@@ -81,7 +81,7 @@ function normalizeCategory(c) {
   return (typeof c === 'string' && MARKET_CATEGORIES.has(c)) ? c : 'General';
 }
 
-const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity', '/api/defi/pool-stats']);
+const PUBLIC_API_PATHS = new Set(['/health', '/favicon.ico', '/oauth/callback', '/api/config', '/api/vault/strategies', '/api/defi/staking-stats', '/api/defi/staking-activity', '/api/defi/pool-stats']);
 const PUBLIC_PREFIXES = ['/explorer-api/'];
 
 app.use(express.json({ limit: '2mb' }));
@@ -186,6 +186,7 @@ function validStr(v, max) {
 const HTTP_URL_RE = /^https?:\/\//i;
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
+app.get('/api/config', (_, res) => res.json({ treasury_pubkey: process.env.BLOOM_TREASURY_PUBKEY || null }));
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function upsertUser(u) {
@@ -874,6 +875,60 @@ app.get('/api/profile/:username', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Viewer-aware list of a single user's posts/replies, mirroring the feed's
+// enrichment (author avatar/display name, is_premium), per-viewer like/unlock
+// state, and gatePost redaction. Used by the profile Posts/Replies tabs so they
+// list ALL of that user's content (cursor-paginated) instead of filtering the
+// newest-50 global feed client-side. `type=media` is accepted for forward
+// compatibility but returns empty: the posts table has no image/nft columns yet.
+app.get('/api/users/:username/posts', async (req, res) => {
+  try {
+    const type = req.query.type === 'replies' ? 'replies'
+               : req.query.type === 'media' ? 'media' : 'posts';
+    const cursor = req.query.cursor ? parseInt(req.query.cursor) : null;
+    const lim = Math.min(parseInt(req.query.limit) || 50, 50);
+
+    const { rows: [target] } = await pool.query(
+      'SELECT user_id FROM users WHERE username=$1', [req.params.username]
+    );
+    if (!target) return res.status(404).json({ error: 'Not found' });
+
+    // Media has no backing columns on posts (no image_url / nft_id), so it is
+    // always empty. Short-circuit to avoid referencing nonexistent columns.
+    if (type === 'media') return res.json({ posts: [], nextCursor: null });
+
+    const params = [target.user_id, lim];
+    const typeClause = type === 'replies' ? 'AND p.parent_id IS NOT NULL'
+                                          : 'AND p.parent_id IS NULL';
+    const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
+    let { rows } = await pool.query(`
+      SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
+             u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+      FROM posts p
+      LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
+      LEFT JOIN users u ON u.user_id = p.user_id
+      WHERE p.user_id = $1 AND p.deleted = false ${typeClause} ${cursorClause}
+      ORDER BY p.id DESC LIMIT $2
+    `, params);
+
+    if (rows.length > 0) {
+      const ids = rows.map(r => r.id);
+      const { rows: liked } = await pool.query(
+        'SELECT post_id FROM post_likes WHERE user_id=$1 AND post_id=ANY($2)',
+        [req.user.id, ids]
+      );
+      const likedSet = new Set(liked.map(r => r.post_id));
+      const { rows: unlocked } = await pool.query(
+        'SELECT post_id FROM post_unlocks WHERE user_id=$1 AND post_id=ANY($2)',
+        [req.user.id, ids]
+      );
+      const unlockedSet = new Set(unlocked.map(r => r.post_id));
+      rows = rows.map(r => gatePost({ ...r, liked_by_me: likedSet.has(r.id) }, req.user.id, unlockedSet.has(r.id)));
+    }
+    res.json({ posts: rows, nextCursor: rows.length === lim ? rows[rows.length - 1].id : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Social Feed ───────────────────────────────────────────────────────────────
 
 // Premium "locked" posts: redact body server-side unless the viewer authored it
@@ -899,7 +954,8 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name,
+               u.usernode_pubkey AS author_pubkey
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
@@ -913,7 +969,8 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name,
+               u.usernode_pubkey AS author_pubkey
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
@@ -933,7 +990,8 @@ app.get('/api/feed', async (req, res) => {
       const cursorClause = cursor ? `AND p.id < $${params.push(cursor)}` : '';
       ({ rows } = await pool.query(`
         SELECT p.*, (pkv.level = 'premium' AND pkv.status = 'approved') AS is_premium,
-               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name
+               u.avatar_url AS author_avatar_url, u.display_name AS author_display_name,
+               u.usernode_pubkey AS author_pubkey
         FROM posts p
         LEFT JOIN kyc_verifications pkv ON pkv.user_id = p.user_id
         LEFT JOIN users u ON u.user_id = p.user_id
@@ -1067,7 +1125,7 @@ app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const postId = parseInt(req.params.id);
-    const { amount: amountStr } = req.body;
+    const { amount: amountStr, tx_hash } = req.body;
 
     const amount = toUnits(amountStr);
     if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
@@ -1093,8 +1151,8 @@ app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
       [post.user_id, amount]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'tip','BLOOM',$2,$3)",
-      [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`]
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'tip','BLOOM',$2,$3,$4)",
+      [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`, tx_hash || null]
     );
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -1538,7 +1596,7 @@ app.get('/api/zk/status/:sessionId', async (req, res) => {
 app.post('/api/defi/swap', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { from_token, to_token, from_amount } = req.body;
+    const { from_token, to_token, from_amount, tx_hash } = req.body;
     const supported = ['USDC', 'USDT', 'BLOOM', 'ETH', 'BTC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TON'];
     if (!supported.includes(from_token) || !supported.includes(to_token) || from_token === to_token)
       return res.status(400).json({ error: 'Invalid tokens' });
@@ -1598,8 +1656,8 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
       [req.user.id, from_token, to_token, fromUnitsAmt, toUnitsAmt, rate]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap',$2,$3,$4)",
-      [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`]
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'swap',$2,$3,$4,$5)",
+      [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`, tx_hash || null]
     );
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap_gas','BLOOM',$2,'Swap gas fee')",
@@ -1637,6 +1695,7 @@ app.post('/api/defi/stake', requireWallet, async (req, res) => {
     const token = (req.body.token || 'BLOOM').toUpperCase();
     if (!STAKEABLE_TOKENS[token]) return res.status(400).json({ error: 'Unsupported token' });
     const amount = toUnits(req.body.amount);
+    const tx_hash = req.body.tx_hash || null;
     if (amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
     const apy_bps = STAKEABLE_TOKENS[token].apy_bps;
     await client.query('BEGIN');
@@ -1653,6 +1712,10 @@ app.post('/api/defi/stake', requireWallet, async (req, res) => {
       'INSERT INTO defi_stakes(user_id,token,amount,apy_bps) VALUES($1,$2,$3,$4) RETURNING *',
       [req.user.id, token, amount, apy_bps]
     );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'stake',$2,$3,$4,$5)",
+      [req.user.id, token, -amount, `Stake ${token}`, tx_hash]
+    );
     await client.query('COMMIT');
     res.json({ stake });
   } catch (e) {
@@ -1661,7 +1724,7 @@ app.post('/api/defi/stake', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.delete('/api/defi/stakes/:id', async (req, res) => {
+app.delete('/api/defi/stakes/:id', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1677,6 +1740,10 @@ app.delete('/api/defi/stakes/:id', async (req, res) => {
     await client.query(
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [total, req.user.id, stake.token]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'unstake',$2,$3,$4)",
+      [req.user.id, stake.token, total, `Unstake ${stake.token}`]
     );
     await client.query('COMMIT');
     res.json({ ok: true, returned: fromUnits(total), reward: fromUnits(reward), token: stake.token });
@@ -1800,7 +1867,7 @@ app.get('/api/defi/liquidity', async (req, res) => {
 app.post('/api/defi/liquidity', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { pool_id, token_a_amount, token_b_amount } = req.body;
+    const { pool_id, token_a_amount, token_b_amount, tx_hash } = req.body;
     if (!VALID_POOLS[pool_id]) return res.status(400).json({ error: 'Invalid pool' });
     const [tokenA, tokenB] = VALID_POOLS[pool_id];
     const amtA = toUnits(token_a_amount);
@@ -1823,6 +1890,10 @@ app.post('/api/defi/liquidity', requireWallet, async (req, res) => {
       'INSERT INTO defi_liquidity_positions(user_id,pool_id,token_a_amount,token_b_amount,shares) VALUES($1,$2,$3,$4,$5) RETURNING *',
       [req.user.id, pool_id, amtA, amtB, shares]
     );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'liquidity_add',$2,$3,$4,$5)",
+      [req.user.id, tokenA, -amtA, `Add liquidity ${pool_id}`, tx_hash || null]
+    );
     await client.query('COMMIT');
     res.json({ position: pos });
   } catch (e) {
@@ -1831,7 +1902,7 @@ app.post('/api/defi/liquidity', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.delete('/api/defi/liquidity/:id', async (req, res) => {
+app.delete('/api/defi/liquidity/:id', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1852,6 +1923,10 @@ app.delete('/api/defi/liquidity/:id', async (req, res) => {
     await client.query(
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [Number(pos.token_b_amount) + Math.floor(fees / 2), req.user.id, tokenB]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'liquidity_remove',$2,$3,$4)",
+      [req.user.id, tokenA, Number(pos.token_a_amount) + Math.floor(fees / 2), `Remove liquidity ${pos.pool_id}`]
     );
     await client.query('COMMIT');
     res.json({ ok: true, fees_earned: fromUnits(fees) });
@@ -1924,7 +1999,7 @@ app.get('/api/ico', async (req, res) => {
 app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { usdc_amount } = req.body;
+    const { usdc_amount, tx_hash } = req.body;
     if (parseAmount(usdc_amount) == null) return res.status(400).json({ error: 'Invalid amount' });
     const usdcUnits = toUnits(usdc_amount);
     if (usdcUnits <= 0) return res.status(400).json({ error: 'Invalid amount' });
@@ -1952,8 +2027,8 @@ app.post('/api/ico/:id/invest', requireWallet, async (req, res) => {
     await client.query('UPDATE ico_offerings SET raised=raised+$1, tokens_sold=tokens_sold+$2, status=CASE WHEN raised+$1>=hard_cap THEN \'sold_out\' ELSE status END WHERE id=$3', [actual, tokens, ico.id]);
     await client.query('INSERT INTO ico_investments(user_id,ico_id,tokens_purchased,usdc_paid) VALUES($1,$2,$3,$4)', [req.user.id, ico.id, tokens, actual]);
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'ico_invest','USDC',$2,$3)",
-      [req.user.id, -actual, `Invest ${ico.token_symbol} ICO`]
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'ico_invest','USDC',$2,$3,$4)",
+      [req.user.id, -actual, `Invest ${ico.token_symbol} ICO`, tx_hash || null]
     );
     await client.query('COMMIT');
     res.json({ ok: true, tokens_received: fromUnits(tokens), symbol: ico.token_symbol });
@@ -1989,7 +2064,7 @@ app.get('/api/vault/positions', async (req, res) => {
 app.post('/api/vault/deposit', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { strategy_id, token, amount } = req.body;
+    const { strategy_id, token, amount, tx_hash } = req.body;
     const amtUnits = toUnits(amount);
     if (!strategy_id || !token || amtUnits <= 0) return res.status(400).json({ error: 'Invalid parameters' });
     const sym = String(token).toUpperCase().slice(0, 20);
@@ -2012,6 +2087,10 @@ app.post('/api/vault/deposit', requireWallet, async (req, res) => {
       'INSERT INTO vault_positions(user_id,username,strategy_id,token,amount) VALUES($1,$2,$3,$4,$5) RETURNING *',
       [req.user.id, req.user.username, strategy_id, sym, amtUnits]
     );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'vault_deposit',$2,$3,$4,$5)",
+      [req.user.id, sym, -amtUnits, `Vault deposit: ${strategy.name}`, tx_hash || null]
+    );
     await client.query('COMMIT');
     res.json({ position: pos });
   } catch (e) {
@@ -2020,7 +2099,7 @@ app.post('/api/vault/deposit', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.delete('/api/vault/positions/:id', async (req, res) => {
+app.delete('/api/vault/positions/:id', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2038,6 +2117,10 @@ app.delete('/api/vault/positions/:id', async (req, res) => {
     await client.query(
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [total, pos.user_id, pos.token]
+    );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'vault_withdraw',$2,$3,$4)",
+      [req.user.id, pos.token, total, `Vault withdraw: ${fromUnits(pos.amount)} ${pos.token}`]
     );
     await client.query('COMMIT');
     res.json({ ok: true, returned: fromUnits(total), yield: fromUnits(accruedYield) });
@@ -2095,7 +2178,7 @@ app.post('/api/markets', requireWallet, async (req, res) => {
 app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { outcome, usdc_amount } = req.body;
+    const { outcome, usdc_amount, tx_hash } = req.body;
     if (!['YES', 'NO'].includes(outcome)) return res.status(400).json({ error: 'Invalid outcome' });
     if (parseAmount(usdc_amount) == null) return res.status(400).json({ error: 'Invalid amount' });
     const usdcUnits = toUnits(usdc_amount);
@@ -2130,8 +2213,8 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
       [req.user.id, market.id, outcome, shares, usdcUnits]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'market_trade','USDC',$2,$3)",
-      [req.user.id, -usdcUnits, `Buy ${outcome}`]
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'market_trade','USDC',$2,$3,$4)",
+      [req.user.id, -usdcUnits, `Buy ${outcome}`, tx_hash || null]
     );
     await client.query('COMMIT');
     try {
@@ -2149,7 +2232,7 @@ app.post('/api/markets/:id/trade', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.post('/api/markets/:id/claim', async (req, res) => {
+app.post('/api/markets/:id/claim', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2175,6 +2258,10 @@ app.post('/api/markets/:id/claim', async (req, res) => {
       await client.query('UPDATE opinion_positions SET claimed=true WHERE id=$1', [pos.id]);
     }
     await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [totalPayout, req.user.id]);
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'market_claim','USDC',$2,$3)",
+      [req.user.id, totalPayout, `Claim winnings: market #${req.params.id}`]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, payout: fromUnits(totalPayout) });
   } catch (e) {
@@ -2259,7 +2346,7 @@ app.get('/api/futures/positions', async (req, res) => {
 app.post('/api/futures/positions', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { market_id, side, leverage, quantity, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts } = req.body;
+    const { market_id, side, leverage, quantity, idempotency_key, order_type, limit_price, slippage_bps, twap_duration_minutes, twap_parts, tx_hash } = req.body;
     const lev = Math.max(1, Math.min(ZK_MAX_LEVERAGE, parseInt(leverage) || 1));
     const qty = parseAmount(quantity, { max: 1e9 });
     if (!qty) return res.status(400).json({ error: 'Invalid quantity' });
@@ -2331,8 +2418,8 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     `, [req.user.id, market_id, mode, side, lev, markPrice, qty, marginUnits, liqPrice, validOrderType, validLimitPrice, validSlippageBps, validTwapMinutes, validTwapParts]);
     await client.query('UPDATE futures_markets SET open_interest=open_interest+$1 WHERE id=$2', [marginUnits, market_id]);
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_open','USDC',$2,$3)",
-      [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`]
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'futures_open','USDC',$2,$3,$4)",
+      [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`, tx_hash || null]
     );
     await client.query(
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures open gas fee')",
@@ -2346,7 +2433,7 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
   } finally { client.release(); }
 });
 
-app.delete('/api/futures/positions/:id', async (req, res) => {
+app.delete('/api/futures/positions/:id', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2376,6 +2463,10 @@ app.delete('/api/futures/positions/:id', async (req, res) => {
       "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
       [req.user.id, -FUTURES_GAS]
     );
+    await client.query(
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_close','USDC',$2,$3)",
+      [req.user.id, returnAmt, `Close ${pos.side} position PnL: ${fromUnits(pnl).toFixed(2)} USDC`]
+    );
     await client.query('COMMIT');
     res.json({ ok: true, pnl: fromUnits(pnl), returned: fromUnits(returnAmt) });
   } catch (e) {
@@ -2393,7 +2484,7 @@ app.get('/api/activity', async (req, res) => {
     const params = [req.user.id, limit + 1];
     const cursorClause = cursor ? `AND id < $${params.push(cursor)}` : '';
     const { rows } = await pool.query(
-      `SELECT id, type, token_symbol, amount::text AS amount, description, created_at
+      `SELECT id, type, token_symbol, amount::text AS amount, description, tx_hash, created_at
        FROM transactions WHERE user_id=$1 ${cursorClause} ORDER BY id DESC LIMIT $2`,
       params
     );
@@ -2409,7 +2500,7 @@ app.get('/api/activity', async (req, res) => {
 app.post('/api/wallet/send', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { to_address, token_symbol, amount } = req.body;
+    const { to_address, token_symbol, amount, tx_hash } = req.body;
     const sym = (token_symbol || '').toUpperCase().trim();
     const qty = parseAmount(amount);
     if (!sym) return res.status(400).json({ error: 'token_symbol required' });
@@ -2435,9 +2526,9 @@ app.post('/api/wallet/send', requireWallet, async (req, res) => {
       [req.user.id, sym, newBalUnits]
     );
     await client.query(
-      `INSERT INTO transactions (user_id, type, token_symbol, amount, description)
-       VALUES ($1, 'send', $2, $3, $4)`,
-      [req.user.id, sym, Math.round(qty * 1e6), `Sent ${qty} ${sym} to ${shortAddr(to_address.trim())}`]
+      `INSERT INTO transactions (user_id, type, token_symbol, amount, description, tx_hash)
+       VALUES ($1, 'send', $2, $3, $4, $5)`,
+      [req.user.id, sym, Math.round(qty * 1e6), `Sent ${qty} ${sym} to ${shortAddr(to_address.trim())}`, tx_hash || null]
     );
     await client.query('COMMIT');
     res.json({ ok: true, remaining: newBalUnits / 1e6 });
@@ -2612,7 +2703,7 @@ app.get('/api/nft-activity', async (req, res) => {
 app.post('/api/nfts/mint', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { name, description, image_url, royalty_bps, rarity, properties, collection } = req.body;
+    const { name, description, image_url, royalty_bps, rarity, properties, collection, tx_hash } = req.body;
     if (!validStr(name, 100)) return res.status(400).json({ error: 'Invalid name' });
     if (!validStr(image_url, 1000) || !HTTP_URL_RE.test(image_url))
       return res.status(400).json({ error: 'image_url must be an http(s) URL' });
@@ -2639,14 +2730,15 @@ app.post('/api/nfts/mint', requireWallet, async (req, res) => {
     );
     const tokenId = 'BLOOM-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
     await client.query('UPDATE nfts SET token_id=$1 WHERE id=$2', [tokenId, nft.id]);
+    const mintTxHash = tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase());
     await client.query(
       `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
-       VALUES($1,NULL,NULL,$2,$3,'mint','BLOOM-TX-' || LPAD(TO_HEX($1),8,'0'))`,
-      [nft.id, req.user.id, req.user.username]
+       VALUES($1,NULL,NULL,$2,$3,'mint',$4)`,
+      [nft.id, req.user.id, req.user.username, mintTxHash]
     );
     await client.query(
-      `INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_gas','BLOOM',$2,$3)`,
-      [req.user.id, -MINT_COST, `Mint NFT: ${name}`]
+      `INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_gas','BLOOM',$2,$3,$4)`,
+      [req.user.id, -MINT_COST, `Mint NFT: ${name}`, tx_hash || null]
     );
     await client.query('COMMIT');
     res.json({ ok: true, token_id: tokenId, nft_id: nft.id });
@@ -2730,7 +2822,7 @@ app.post('/api/nfts/:id/buy', requireWallet, async (req, res) => {
       await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name} sold to @${req.user.username}`]);
     }
 
-    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
+    const txHash = req.body.tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase());
     // Transfer ownership
     await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [req.user.id, req.user.username, nft.id]);
     await client.query("UPDATE nft_listings SET status='sold' WHERE id=$1", [listing.id]);
@@ -2740,7 +2832,7 @@ app.post('/api/nfts/:id/buy', requireWallet, async (req, res) => {
       [nft.id, nft.owner_user_id, nft.owner_username, req.user.id, req.user.username, price, txHash]
     );
     // Transactions
-    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_buy','USDC',$2,$3)", [req.user.id, -price, `Buy NFT: ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_buy','USDC',$2,$3,$4)", [req.user.id, -price, `Buy NFT: ${nft.name}`, req.body.tx_hash || null]);
     await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_sale','USDC',$2,$3)", [nft.owner_user_id, sellerReceives, `Sale NFT: ${nft.name}`]);
     await client.query('COMMIT');
     res.json({ ok: true, tx_hash: txHash });
@@ -2857,13 +2949,13 @@ app.post('/api/nfts/:id/transfer', requireWallet, async (req, res) => {
     await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [GAS, req.user.id]);
     await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [recipient.user_id, recipient.username, nft.id]);
     await client.query("UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND status='active'", [nft.id]);
-    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T';
+    const txHash = req.body.tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T');
     await client.query(
       `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
        VALUES($1,$2,$3,$4,$5,'transfer',$6)`,
       [nft.id, req.user.id, req.user.username, recipient.user_id, recipient.username, txHash]
     );
-    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_transfer_gas','BLOOM',$2,$3)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_transfer_gas','BLOOM',$2,$3,$4)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`, req.body.tx_hash || null]);
     await client.query('COMMIT');
     res.json({ ok: true, tx_hash: txHash });
   } catch (e) {
@@ -4857,6 +4949,15 @@ async function start() {
     );
   `);
 
+  // ── Boot-time schema migrations (idempotent) ─────────────────────────────────
+  // Add tx_hash column to transactions for on-chain proof storage
+  await pool.query(`
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS tx_hash VARCHAR(128);
+    CREATE INDEX IF NOT EXISTS transactions_tx_hash_idx ON transactions (tx_hash) WHERE tx_hash IS NOT NULL;
+  `);
+  // Widen nft_transfers.tx_hash from VARCHAR(64) to VARCHAR(128) to fit real tx hashes
+  await pool.query(`ALTER TABLE nft_transfers ALTER COLUMN tx_hash TYPE VARCHAR(128)`).catch(() => {});
+
   // Ensure bot user exists (all environments)
   await pool.query(`
     INSERT INTO users (user_id, username, display_name)
@@ -4924,7 +5025,9 @@ async function start() {
         (9003,'staging-carol','0xSTAGING0000000000000000000000000000000003','Carol (Staging)','Prediction market oracle',false),
         (9004,'staging-dave','0xSTAGING0000000000000000000000000000000004','Dave (Staging)','Futures trading enthusiast',false),
         (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','BLOOM staker since day one',false),
-        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true)
+        (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true),
+        (9007,'staging-zara','0xSTAGING0000000000000000000000000000000007','Zara (Staging)','Liquidity provider and yield farmer',false),
+        (9008,'staging-max','0xSTAGING0000000000000000000000000000000008','Max (Staging)','Launchpad degen, no uploaded avatar',false)
       ON CONFLICT(user_id) DO NOTHING
     `);
     // Seed staging-alice with an uploaded avatar to exercise the avatar-display code path.
@@ -5572,6 +5675,30 @@ async function start() {
           (9003,'ETH', 'BTC',    300000,    4600, 0.01533,    NOW() - interval '10 hours')
       `);
     }
+
+    // Staging transaction seeds (id=9101-9117) — covers new activity types so the
+    // portfolio activity feed is non-empty with diverse tx types.
+    await pool.query(`
+      INSERT INTO transactions(id,user_id,type,token_symbol,amount,description,tx_hash) VALUES
+        (9101,9001,'send','BLOOM',-500000000,'Sent 500 BLOOM to ut1abc123','ut1txSend9001a'),
+        (9102,9001,'tip','BLOOM',-10000000,'Tip to @staging-bob for post #1',NULL),
+        (9103,9001,'stake','BLOOM',-300000000,'Stake BLOOM','ut1txStake9001a'),
+        (9104,9001,'unstake','BLOOM',305000000,'Unstake BLOOM',NULL),
+        (9105,9001,'liquidity_add','BLOOM',-200000000,'Add liquidity BLOOM_USDC','ut1txLiq9001a'),
+        (9106,9001,'liquidity_remove','BLOOM',202000000,'Remove liquidity BLOOM_USDC',NULL),
+        (9107,9001,'vault_deposit','USDC',-1000000000,'Vault deposit: Conservative Yield','ut1txVault9001a'),
+        (9108,9001,'vault_withdraw','USDC',1010000000,'Vault withdraw: 1000.00 USDC',NULL),
+        (9109,9002,'stake','ETH',-500000,'Stake ETH','ut1txStake9002a'),
+        (9110,9002,'unstake','ETH',502000,'Unstake ETH',NULL),
+        (9111,9002,'market_trade','USDC',-50000000,'Buy YES','ut1txMkt9002a'),
+        (9112,9002,'market_claim','USDC',95000000,'Claim winnings: market #9001',NULL),
+        (9113,9003,'futures_open','USDC',-500000000,'Open long 5x (live)','ut1txFut9003a'),
+        (9114,9003,'futures_close','USDC',525000000,'Close long position PnL: 25.00 USDC',NULL),
+        (9115,9004,'vault_deposit','ETH',-100000,'Vault deposit: Balanced Growth','ut1txVault9004a'),
+        (9116,9004,'vault_withdraw','ETH',104000,'Vault withdraw: 0.10 ETH',NULL),
+        (9117,9005,'liquidity_add','USDC',-500000000,'Add liquidity ETH_USDC','ut1txLiq9005a')
+      ON CONFLICT(id) DO NOTHING
+    `).catch(() => {});
   }
 
   // ── Boot-time daily market creation (all environments) ──────────────────────
