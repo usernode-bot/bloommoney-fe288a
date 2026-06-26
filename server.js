@@ -256,9 +256,14 @@ async function logAdmin(adminUserId, actionType, opts = {}) {
 
 // Verification tier vocabulary + gating. Single source of truth (Phase 1).
 const TIER_RANK = { basic: 0, social: 1, premium: 2 };
-// Leverage ceilings. Premium (incl. admin-granted) tops out at 20×; the
-// extreme 50×/100× band is unlocked only by an actual zkPassport proof.
-const PREMIUM_MAX_LEVERAGE = 20;
+// Subscription leverage ceilings (two-tier model): the Free plan (the
+// auto-granted `basic` tier) trades live up to 10×; the Pro plan (any
+// verified tier — social / premium) trades up to 20×. The extreme
+// 50×/100× zkPassport band is retained server-side for existing proofs
+// but is no longer surfaced as a headline plan option.
+const FREE_MAX_LEVERAGE = 10;
+const PRO_MAX_LEVERAGE = 20;
+const PREMIUM_MAX_LEVERAGE = PRO_MAX_LEVERAGE; // legacy alias
 const ZK_MAX_LEVERAGE = 100;
 function effectiveTier(kyc) {
   if (kyc && kyc.status === 'approved' && TIER_RANK[kyc.level] != null) return kyc.level;
@@ -266,16 +271,19 @@ function effectiveTier(kyc) {
 }
 function tierAllows(level, action) {
   const r = TIER_RANK[level] ?? 0;
-  if (action === 'live_futures') return r >= TIER_RANK.social;
-  if (action === 'high_leverage') return r >= TIER_RANK.premium;
+  // Free (basic) may now open live futures (capped at FREE_MAX_LEVERAGE).
+  if (action === 'live_futures') return true;
+  // Leverage above the Free ceiling requires the Pro plan (any verified tier).
+  if (action === 'high_leverage') return r >= TIER_RANK.social;
   return true;
 }
 function maxLeverageFor(level) {
-  if (TIER_RANK[level] >= TIER_RANK.premium) return PREMIUM_MAX_LEVERAGE;
-  if (TIER_RANK[level] >= TIER_RANK.social) return 5;
-  return 1;
+  // Any verified tier is "Pro"; unverified basic is "Free".
+  if (TIER_RANK[level] >= TIER_RANK.social) return PRO_MAX_LEVERAGE;
+  return FREE_MAX_LEVERAGE;
 }
-// Per-user ceiling that accounts for zkPassport verification (extreme band).
+// Per-user ceiling that accounts for zkPassport verification (extreme band,
+// retained for existing proofs but not advertised as a plan).
 function maxLeverageForUser(level, zkVerified) {
   if (zkVerified) return ZK_MAX_LEVERAGE;
   return maxLeverageFor(level);
@@ -2260,14 +2268,14 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
 
     const tier = await userTier(req.user.id);
     if (mode === 'live') {
-      if (!tierAllows(tier, 'live_futures'))
-        return res.status(403).json({ error: 'verify_required', tier_needed: 'social' });
-      if (lev > 5 && !tierAllows(tier, 'high_leverage'))
-        return res.status(403).json({ error: 'verify_required', tier_needed: 'premium' });
+      // Free (basic) trades live up to FREE_MAX_LEVERAGE (10×); going beyond
+      // that requires the Pro plan (any verified tier).
+      if (lev > FREE_MAX_LEVERAGE && !tierAllows(tier, 'high_leverage'))
+        return res.status(403).json({ error: 'verify_required', tier_needed: 'pro' });
     }
     // Extreme leverage (>20×) is unlocked only by a real zkPassport proof,
-    // in BOTH paper and live modes — distinct from merely holding Premium.
-    if (lev > PREMIUM_MAX_LEVERAGE && !(await isZkVerified(req.user.id)))
+    // in BOTH paper and live modes — distinct from merely holding Pro.
+    if (lev > PRO_MAX_LEVERAGE && !(await isZkVerified(req.user.id)))
       return res.status(403).json({ error: 'verify_required', tier_needed: 'zkpassport' });
     if (!(await withinBasicDailyCap(req.user.id, tier)))
       return res.status(429).json({ error: 'daily_limit', detail: 'Daily trade limit reached.' });
