@@ -555,6 +555,7 @@ const S = {
   points: 0,
   msgOpenConv: null,
   totalUnread: 0,
+  config: { treasury_pubkey: null },
 };
 
 // ── Token refresh via bridge postMessage ───────────────────────────────────────
@@ -1306,7 +1307,7 @@ async function renderFeed(sec) {
       ? `<details class="relative ml-auto">
           <summary class="list-none cursor-pointer text-[#4e5872] hover:text-[#8b95ab] transition-colors text-base leading-none px-1" onclick="event.stopPropagation()">···</summary>
           <div class="absolute right-0 bottom-6 z-10 bg-[#1c2236] border border-[var(--border-subtle)] rounded-lg shadow-lg py-1 min-w-[9rem]" onclick="this.closest('details').removeAttribute('open')">
-            <button class="w-full text-left px-3 py-2 text-sm text-[#e8eaf0] hover:bg-[var(--bg-card)] transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}')">💰 Tip</button>
+            <button class="w-full text-left px-3 py-2 text-sm text-[#e8eaf0] hover:bg-[var(--bg-card)] transition-colors" onclick="openTipModal(${p.id}, '${esc(p.username)}', '${esc(p.author_pubkey||'')}')">💰 Tip</button>
             <button class="w-full text-left px-3 py-2 text-sm text-[#e8eaf0] hover:bg-[var(--bg-card)] transition-colors" onclick="toggleFollow('${esc(p.username)}')">+ Follow @${esc(p.username)}</button>
           </div>
         </details>`
@@ -1538,10 +1539,11 @@ async function renderFeed(sec) {
 // ── Tip Modal ──────────────────────────────────────────────────────────────────
 let tipState = { postId: null, creatorUsername: null };
 
-window.openTipModal = (postId, creatorUsername) => {
+window.openTipModal = (postId, creatorUsername, authorPubkey) => {
   if (!requireWalletThen(null, 'send a tip')) return;
   tipState.postId = postId;
   tipState.creatorUsername = creatorUsername;
+  tipState.authorPubkey = authorPubkey || null;
   const modal = document.getElementById('tip-modal');
   const title = document.getElementById('tip-modal-title');
   const balance = document.getElementById('tip-balance');
@@ -1592,7 +1594,13 @@ window.submitTip = async () => {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Sending…';
 
-    await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString() });
+    let txHash = null;
+    const recipientPubkey = tipState.authorPubkey;
+    if (recipientPubkey && S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+      const result = await window.usernode.sendTransaction({ to: recipientPubkey, token: 'BLOOM', amount });
+      txHash = result?.tx_hash ?? result?.hash ?? null;
+    }
+    await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString(), tx_hash: txHash });
 
     closeTipModal();
     await refreshBalances();
@@ -1879,6 +1887,7 @@ async function renderProfile(sec) {
       swap:              { label: 'Swap',              color: 'text-[#4e9af1]',  bg: 'bg-blue-900/30' },
       market_trade:      { label: 'Prediction Market', color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
       futures_open:      { label: 'Futures Open',      color: 'text-orange-400', bg: 'bg-orange-900/30' },
+      futures_close:     { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
       futures_pnl:       { label: 'Futures Close',     color: 'text-orange-400', bg: 'bg-orange-900/30' },
       funding:           { label: 'Funding Payment',   color: 'text-amber-400',  bg: 'bg-amber-900/30' },
       ico_invest:        { label: 'ICO Investment',    color: 'text-green-400',  bg: 'bg-green-900/30' },
@@ -1887,9 +1896,17 @@ async function renderProfile(sec) {
       nft_royalty:       { label: 'NFT Royalty',       color: 'text-amber-400',  bg: 'bg-amber-900/30' },
       nft_gas:           { label: 'Mint Gas',          color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
       nft_transfer_gas:  { label: 'Transfer Gas',      color: 'text-[#8b95ab]',  bg: 'bg-slate-900/30' },
-      swap_gas:          { label: 'Swap Gas',           color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
-      futures_gas:       { label: 'Futures Gas',        color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
-      tip:               { label: 'Tip',                color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
+      swap_gas:          { label: 'Swap Gas',          color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
+      futures_gas:       { label: 'Futures Gas',       color: 'text-[#a78bfa]',  bg: 'bg-purple-900/30' },
+      tip:               { label: 'Tip',               color: 'text-[#7c5cfc]',  bg: 'bg-violet-900/30' },
+      send:              { label: 'Send',              color: 'text-[#22d3ee]',  bg: 'bg-cyan-900/30' },
+      stake:             { label: 'Stake',             color: 'text-violet-400', bg: 'bg-violet-900/30' },
+      unstake:           { label: 'Unstake',           color: 'text-violet-400', bg: 'bg-violet-900/30' },
+      liquidity_add:     { label: 'Add Liquidity',     color: 'text-emerald-400',bg: 'bg-emerald-900/30' },
+      liquidity_remove:  { label: 'Remove Liquidity',  color: 'text-emerald-400',bg: 'bg-emerald-900/30' },
+      vault_deposit:     { label: 'Vault Deposit',     color: 'text-teal-400',   bg: 'bg-teal-900/30' },
+      vault_withdraw:    { label: 'Vault Withdraw',    color: 'text-teal-400',   bg: 'bg-teal-900/30' },
+      market_claim:      { label: 'Market Claim',      color: 'text-green-400',  bg: 'bg-green-900/30' },
     };
 
     function activityRows(items) {
@@ -1899,11 +1916,17 @@ async function renderProfile(sec) {
         const formatted = fmtAmt(a.token_symbol || 'USDC', Math.abs(rawAmt));
         const sign = rawAmt >= 0 ? '+' : '-';
         const amtColor = rawAmt >= 0 ? 'text-emerald-400' : 'text-red-400';
+        const explorerLink = a.tx_hash && !a.tx_hash.startsWith('BLOOM-TX-')
+          ? `<a href="https://explorer.usernodelabs.org/tx/${esc(a.tx_hash)}" target="_blank" rel="noopener" class="text-xs text-[#22d3ee] hover:underline mt-0.5 block">View on chain ↗</a>`
+          : '';
         return `
           <div class="card flex items-start justify-between gap-3">
             <div class="flex items-start gap-2 min-w-0 flex-1">
               <span class="text-xs font-semibold px-2 py-0.5 rounded shrink-0 ${cfg.color} ${cfg.bg}">${cfg.label}</span>
-              <span class="text-sm text-[#e8eaf0] leading-tight">${esc(a.description)}</span>
+              <div class="min-w-0">
+                <span class="text-sm text-[#e8eaf0] leading-tight">${esc(a.description)}</span>
+                ${explorerLink}
+              </div>
             </div>
             <div class="shrink-0 text-right">
               <div class="text-sm font-mono ${amtColor}">${sign}${formatted} ${esc(a.token_symbol || '')}</div>
@@ -2412,14 +2435,17 @@ async function renderPortfolio(sec) {
       ? `<div class="text-[#4e5872] text-sm text-center py-4">No transactions yet</div>`
       : allActivities.map(a=>{
           const amt=Number(a.amount)/1e6, isPos=amt>=0;
-          const icons={swap:'↔',swap_gas:'⛽',stake:'🔒',unstake:'🔓',vault_deposit:'🏦',vault_withdraw:'🏦',ico_invest:'🚀',futures_open:'📈',futures_close:'📉',futures_pnl:'💰',futures_gas:'⛽',nft_buy:'🎨',nft_sale:'💎',nft_gas:'⛽',nft_royalty:'👑',nft_transfer_gas:'🎨',post_unlock:'🔓',tip:'💰',market_trade:'🎲',funding:'💸',send:'📤'};
+          const icons={swap:'↔',swap_gas:'⛽',stake:'🔒',unstake:'🔓',vault_deposit:'🏦',vault_withdraw:'🏦',ico_invest:'🚀',futures_open:'📈',futures_close:'📉',futures_pnl:'💰',futures_gas:'⛽',nft_buy:'🎨',nft_sale:'💎',nft_gas:'⛽',nft_royalty:'👑',nft_transfer_gas:'🎨',post_unlock:'🔓',tip:'💰',market_trade:'🎲',market_claim:'🏆',funding:'💸',send:'📤',liquidity_add:'💧',liquidity_remove:'💧'};
           const icon=icons[a.type]||'📋';
           const fmtAmt2=v=>{const n=Math.abs(v);return n<0.01?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2);};
+          const pfExplorerLink = a.tx_hash && !a.tx_hash.startsWith('BLOOM-TX-')
+            ? `<a href="https://explorer.usernodelabs.org/tx/${esc(a.tx_hash)}" target="_blank" rel="noopener" class="text-xs text-[#22d3ee] hover:underline">View on chain ↗</a>`
+            : '';
           return `<div class="flex items-center gap-3 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0" style="background:rgba(34,211,238,0.08)">${icon}</div>
             <div class="flex-1 min-w-0">
               <div class="text-sm text-[#e8eaf0] truncate">${esc(a.description||a.type)}</div>
-              <div class="text-xs text-[#4e5872]">${tsAgo(a.created_at)} ago</div>
+              <div class="text-xs text-[#4e5872]">${tsAgo(a.created_at)} ago${pfExplorerLink ? ' · ' : ''}${pfExplorerLink}</div>
             </div>
             <div class="text-right shrink-0">
               <div class="text-sm font-mono font-semibold ${isPos?'text-emerald-400':'text-red-400'}">${isPos?'+':''}${fmtAmt2(amt)} ${esc(a.token_symbol||'')}</div>
@@ -2672,8 +2698,9 @@ async function renderPortfolio(sec) {
       }
       sendStatus='pending';render();
       try {
-        await window.usernode.sendTransaction({to:sendRecipient,token:sendToken,amount:pa});
-        await api('POST','/api/wallet/send',{to_address:sendRecipient,token_symbol:sendToken,amount:sendAmount});
+        const sendResult = await window.usernode.sendTransaction({to:sendRecipient,token:sendToken,amount:pa});
+        const sendTxHash = sendResult?.tx_hash ?? sendResult?.hash ?? null;
+        await api('POST','/api/wallet/send',{to_address:sendRecipient,token_symbol:sendToken,amount:sendAmount,tx_hash:sendTxHash});
         await refreshBalances();
         sendStatus='ok';render();
       } catch(e){sendStatus='error';sendError=e.message||'Transaction failed.';render();}
@@ -3069,7 +3096,13 @@ function renderSwapCard(containerEl, prefilledFrom) {
     const msg = document.getElementById('swap-msg');
     if (!msg) return;
     try {
-      const d = await api('POST', '/api/defi/swap', { from_token: swapState.from, to_token: swapState.to, from_amount: swapState.fromAmt });
+      let swapTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const fromAmt = parseFloat(swapState.fromAmt) || 0;
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: swapState.from, amount: fromAmt });
+        swapTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      const d = await api('POST', '/api/defi/swap', { from_token: swapState.from, to_token: swapState.to, from_amount: swapState.fromAmt, tx_hash: swapTxHash });
       msg.style.color = '#34d399';
       msg.textContent = `✓ Received ${d.to_amount.toFixed(6)} ${d.to_token}`;
       await refreshBalances();
@@ -3699,7 +3732,12 @@ async function renderStake(sec) {
     if (!input || !msg) return;
     try {
       msg.className = 'text-xs text-[#8b95ab]'; msg.textContent = 'Staking…';
-      await api('POST', '/api/defi/stake', { token, amount: input.value });
+      let stakeTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token, amount: parseFloat(input.value) || 0 });
+        stakeTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      await api('POST', '/api/defi/stake', { token, amount: input.value, tx_hash: stakeTxHash });
       msg.className = 'text-xs text-emerald-400'; msg.textContent = 'Staked successfully!';
       input.value = '';
       setTimeout(load, 800);
@@ -3939,7 +3977,13 @@ async function renderLiquidity(sec) {
     if (!a || !b || !selPool) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
     try {
-      await api('POST', '/api/defi/liquidity', { pool_id: selPool, token_a_amount: a, token_b_amount: b });
+      let liqTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const liqTokenA = POOL_META[selPool]?.tokens[0] || 'USDC';
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: liqTokenA, amount: parseFloat(a) || 0 });
+        liqTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      await api('POST', '/api/defi/liquidity', { pool_id: selPool, token_a_amount: a, token_b_amount: b, tx_hash: liqTxHash });
       if (msg) { msg.className = 'text-emerald-400 text-sm mt-2'; msg.textContent = 'Liquidity added!'; }
       selTab = 'withdraw';
       await load();
@@ -4166,7 +4210,12 @@ async function renderICO(sec) {
     const amt = document.getElementById(`ico-amt-${id}`)?.value;
     const msg = document.getElementById(`ico-msg-${id}`);
     try {
-      const d = await api('POST', `/api/ico/${id}/invest`, { usdc_amount: amt });
+      let icoTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'USDC', amount: parseFloat(amt) || 0 });
+        icoTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      const d = await api('POST', `/api/ico/${id}/invest`, { usdc_amount: amt, tx_hash: icoTxHash });
       if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = `Received ${d.tokens_received.toFixed(4)} ${d.symbol}`; }
       await refreshBalances();
     } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
@@ -4310,7 +4359,12 @@ async function renderVault(sec) {
     const amount  = document.getElementById('vault-amount')?.value;
     const msg     = document.getElementById('vault-msg');
     try {
-      await api('POST', '/api/vault/deposit', { strategy_id: stratId, token, amount });
+      let vaultTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: token || 'USDC', amount: parseFloat(amount) || 0 });
+        vaultTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      await api('POST', '/api/vault/deposit', { strategy_id: stratId, token, amount, tx_hash: vaultTxHash });
       if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = 'Deposited!'; }
       await load();
     } catch (e) { if (msg) { msg.className = 'text-red-400 text-sm'; msg.textContent = e.message; } }
@@ -4747,7 +4801,12 @@ async function renderMarketDetail(sec) {
       const amt = document.getElementById('trade-amt')?.value;
       const msg = document.getElementById('trade-msg');
       try {
-        await api('POST', `/api/markets/${S.marketId}/trade`, { outcome, usdc_amount: amt });
+        let marketTxHash = null;
+        if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+          const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'USDC', amount: parseFloat(amt) || 0 });
+          marketTxHash = result?.tx_hash ?? result?.hash ?? null;
+        }
+        await api('POST', `/api/markets/${S.marketId}/trade`, { outcome, usdc_amount: amt, tx_hash: marketTxHash });
         if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent=`✓ Bought ${outcome} shares`; }
         await refreshBalances();
         await load();
@@ -6291,6 +6350,12 @@ async function renderFutures(sec) {
     }
     const calcQty = pa * leverage / mp;
     try {
+      let futTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const marginAmt = pa / leverage;
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'USDC', amount: marginAmt });
+        futTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
       await api('POST', '/api/futures/positions', {
         market_id: S.futuresMarket.id, side, leverage,
         quantity: calcQty,
@@ -6300,6 +6365,7 @@ async function renderFutures(sec) {
         slippage_bps: Math.round(slippage * 100),
         twap_duration_minutes: orderType === 'twap' ? twapHours * 60 + twapMinutes : null,
         twap_parts: orderType === 'twap' ? twapParts : null,
+        tx_hash: futTxHash,
       });
       if (msg) { msg.className = 'text-xs text-center min-h-[1rem] fut-bid'; msg.textContent = '✓ Order placed'; }
       const payEl = document.getElementById('fut-pay-amt');
@@ -6608,7 +6674,7 @@ async function renderNFTDetail(sec, nftId) {
               <span class="text-[#8b95ab] text-sm">Listed for</span>
               <span class="text-emerald-400 font-bold text-lg">${(Number(nft.price_usdc)/1e6).toFixed(2)} USDC</span>
             </div>
-            ${!isOwner ? `<button class="btn-v w-full" onclick="nftBuy(${nft.id})">Buy Now</button>` : `<button class="btn-z w-full text-sm" onclick="nftDelist(${nft.id})">Cancel Listing</button>`}
+            ${!isOwner ? `<button class="btn-v w-full" onclick="nftBuy(${nft.id}, ${nft.price_usdc || 0})">Buy Now</button>` : `<button class="btn-z w-full text-sm" onclick="nftDelist(${nft.id})">Cancel Listing</button>`}
           ` : isOwner ? `
             <p class="text-sm text-[#8b95ab]">Not listed</p>
             <div class="flex gap-2">
@@ -6639,10 +6705,12 @@ async function renderNFTDetail(sec, nftId) {
           <h4 class="font-semibold text-sm mb-2">History</h4>
           ${transfers.map(t => {
             const el = { mint:'✦ Minted', sale:'⇄ Sale', transfer:'→ Transfer' }[t.event_type] || t.event_type;
+            const isRealTx = t.tx_hash && !t.tx_hash.startsWith('BLOOM-TX-');
             return `<div class="flex items-center gap-2 text-xs text-[#8b95ab]">
               <span class="text-[#e8eaf0]">${el}</span>
               <span class="inline-flex items-center gap-1">${t.to_username ? `to ${userTag(t.to_username, { size: 'w-4 h-4' })}` : ''}</span>
               ${t.price_usdc ? `<span class="text-emerald-400">${(Number(t.price_usdc)/1e6).toFixed(2)} USDC</span>` : ''}
+              ${isRealTx ? `<a href="https://explorer.usernodelabs.org/tx/${esc(t.tx_hash)}" target="_blank" rel="noopener" class="text-[#22d3ee] hover:underline">↗</a>` : ''}
               <span class="ml-auto">${tsAgo(t.created_at)}</span>
             </div>`;
           }).join('')}
@@ -6696,11 +6764,19 @@ async function renderNFTDetail(sec, nftId) {
       if (btn) btn.textContent = d.favorited ? '♥ Unfavorite' : '♡ Favorite';
     } catch (e) { alert(e.message); }
   };
-  window.nftBuy = async (id) => {
+  window.nftBuy = async (id, priceUnits) => {
     if (!requireWalletThen(null, 'buy an NFT')) return;
     if (!confirm('Buy this NFT?')) return;
-    try { await api('POST', `/api/nfts/${id}/buy`); await refreshBalances(); window._nftNav('detail', id); }
-    catch (e) { alert(e.message); }
+    try {
+      let nftBuyTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction && priceUnits) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'USDC', amount: priceUnits / 1e6 });
+        nftBuyTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      await api('POST', `/api/nfts/${id}/buy`, { tx_hash: nftBuyTxHash });
+      await refreshBalances();
+      window._nftNav('detail', id);
+    } catch (e) { alert(e.message); }
   };
   window.nftList = async (id) => {
     if (!requireWalletThen(null, 'list an NFT')) return;
@@ -6744,7 +6820,12 @@ async function renderNFTDetail(sec, nftId) {
     const msg = document.getElementById('nft-transfer-msg');
     if (!to) return;
     try {
-      await api('POST', `/api/nfts/${id}/transfer`, { to_username: to });
+      let transferTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'BLOOM', amount: 0.5 });
+        transferTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
+      await api('POST', `/api/nfts/${id}/transfer`, { to_username: to, tx_hash: transferTxHash });
       document.getElementById('nft-transfer-modal')?.classList.add('hidden');
       if (msg) { msg.className='text-emerald-400 text-sm'; msg.textContent='Transferred!'; }
       setTimeout(() => window._nftNav('portfolio'), 1200);
@@ -6860,10 +6941,15 @@ async function renderNFTMint(sec) {
     const msg = document.getElementById('mint-msg');
     if (btn) { btn.disabled = true; btn.textContent = 'Minting…'; }
     try {
+      let mintTxHash = null;
+      if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'BLOOM', amount: 10.5 });
+        mintTxHash = result?.tx_hash ?? result?.hash ?? null;
+      }
       const d = await api('POST', '/api/nfts/mint', {
         name: form.name, description: form.description, image_url: form.image_url,
         collection: form.collection, rarity: form.rarity, royalty_bps: form.royalty_bps,
-        properties: form.properties || undefined
+        properties: form.properties || undefined, tx_hash: mintTxHash
       });
       if (msg) { msg.className = 'text-emerald-400 text-sm'; msg.textContent = `✓ Minted ${d.token_id}`; }
       await refreshBalances();
@@ -7690,6 +7776,8 @@ async function renderJournal(sec) {
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// Fetch app config (treasury pubkey) early — non-blocking; available before any user action.
+fetch('/api/config').then(r => r.json()).then(d => { if (d) S.config = d; }).catch(() => {});
 init();
 </script>
 

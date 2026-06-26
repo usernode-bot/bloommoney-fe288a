@@ -9,6 +9,13 @@
       "default": ""
     },
     {
+      "key": "BLOOM_TREASURY_PUBKEY",
+      "description": "App treasury wallet address (ut1…) that receives all inbound on-chain payments; leave blank to run in off-chain mode",
+      "required": false,
+      "private": false,
+      "default": ""
+    },
+    {
       "key": "X_OAUTH_CLIENT_ID",
       "description": "X (Twitter) OAuth2 client id for Social-tier verification and Twitter account linking",
       "required": false,
@@ -219,6 +226,8 @@
     { "name": "Wallet send API requires auth", "path": "/api/wallet/send", "expectSelector": "body" },
     { "name": "Portfolio token modal handler registered", "path": "/?demo=1", "expectSelector": "#section-portfolio" },
     { "name": "Portfolio global header hidden when portfolio active", "path": "/?demo=1", "expectSelector": "#global-header" },
-    { "name": "Pool dashboard renders", "path": "/liquidity?demo=1", "expectSelector": ".pool-stats-bar" }
+    { "name": "Pool dashboard renders", "path": "/liquidity?demo=1", "expectSelector": ".pool-stats-bar" },
+    { "name": "Activity API returns tx_hash field", "path": "/api/activity", "expectText": "tx_hash" },
+    { "name": "Config API returns treasury_pubkey field", "path": "/api/config", "expectText": "treasury_pubkey" }
   ]
 }
