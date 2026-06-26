@@ -214,16 +214,16 @@
     <main id="main-scroll" class="flex-1 overflow-y-auto pb-16 md:pb-0">
 
       <!-- Feed -->
-      <section id="app-feed" class="view max-w-2xl mx-auto py-4 px-4 space-y-4"></section>
+      <section id="app-feed" class="view max-w-4xl mx-auto py-4 px-4 space-y-4"></section>
 
       <!-- Profile -->
-      <section id="section-profile" class="view hidden max-w-2xl mx-auto overflow-hidden">
+      <section id="section-profile" class="view hidden max-w-4xl mx-auto overflow-hidden">
         <!-- CI test anchor populated by renderProfile() -->
         <div id="linked-accounts-section" class="hidden"></div>
       </section>
 
       <!-- Market -->
-      <section id="section-market" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-market" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Stake -->
       <section id="section-stake" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
@@ -235,10 +235,10 @@
       <section id="section-ico" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Earn (composite: stake / liquidity / launchpad) -->
-      <section id="section-earn" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-earn" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Vault -->
-      <section id="section-vault" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-vault" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Opinion / Prediction Markets -->
       <section id="section-markets" class="view hidden w-full"></section>
@@ -247,25 +247,25 @@
       <section id="section-trade" class="view hidden"></section>
 
       <!-- Trade Journal -->
-      <section id="section-journal" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-journal" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- NFTs -->
-      <section id="section-nfts" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-nfts" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Explore -->
-      <section id="section-explore" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-explore" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Verify -->
-      <section id="section-verify" class="view hidden max-w-2xl mx-auto py-4 px-4">
+      <section id="section-verify" class="view hidden max-w-4xl mx-auto py-4 px-4">
         <!-- CI test anchor populated by renderVerify() -->
         <span class="tag-zk-verified hidden"></span>
       </section>
 
       <!-- KYC -->
-      <section id="section-kyc" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-kyc" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Admin -->
-      <section id="section-admin" class="view hidden max-w-2xl mx-auto py-4 px-4"></section>
+      <section id="section-admin" class="view hidden max-w-4xl mx-auto py-4 px-4"></section>
 
       <!-- Messages -->
       <section id="section-messages" class="view hidden h-full overflow-hidden"></section>
@@ -900,7 +900,7 @@ async function init() {
     const poolEarnSec = document.getElementById('section-earn');
     if (poolEarnSec && !poolEarnSec.querySelector('.pool-stats-bar')) {
       const poolPreview = document.createElement('div');
-      poolPreview.className = 'pool-stats-bar max-w-2xl mx-auto py-4 px-4';
+      poolPreview.className = 'pool-stats-bar max-w-4xl mx-auto py-4 px-4';
       poolPreview.innerHTML = '<div class="rounded-2xl p-5" style="background:#131620;border:1px solid rgba(52,211,153,0.2)"><h2 class="text-xl font-bold text-white mb-1">Liquidity Pools</h2><p class="text-[#8b95ab] text-sm mb-4">Provide liquidity and earn trading fees.</p><div class="grid grid-cols-3 gap-2"><div class="text-center"><div class="text-lg font-bold text-emerald-400">$24.8K</div><div class="text-xs text-[#8b95ab] mt-1">Total Liquidity</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">$2.48</div><div class="text-xs text-[#8b95ab] mt-1">Est. 24h Fees</div></div><div class="text-center"><div class="text-lg font-bold text-emerald-400">5</div><div class="text-xs text-[#8b95ab] mt-1">Positions</div></div></div></div>';
       poolEarnSec.appendChild(poolPreview);
     }
