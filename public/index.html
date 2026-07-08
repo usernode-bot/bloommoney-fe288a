@@ -106,29 +106,28 @@
 </head>
 <body class="bg-[#0f1117] text-[#e8eaf0] h-screen overflow-hidden flex flex-col">
 
-<!-- ───── Wallet Prompt Modal ───── -->
-<div id="wallet-prompt" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='wallet-prompt') closeWalletPrompt()">
-  <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-xs text-center space-y-4" onclick="event.stopPropagation()">
-    <div class="text-4xl">🌸</div>
-    <h2 class="text-xl font-bold text-[#e8eaf0]">Wallet Required</h2>
-    <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Connect your wallet to continue.</p>
-    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
+<!-- ───── Wallet Required Gate (full-screen, non-dismissible) ───── -->
+<div id="wallet-prompt" class="hidden fixed inset-0 z-[100] bg-[#0f1117] flex items-center justify-center p-4">
+  <div class="w-full max-w-sm text-center space-y-4">
+    <div class="text-5xl">🌸</div>
+    <h2 class="text-2xl font-bold text-[#e8eaf0]">Wallet Required</h2>
+    <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Link your Usernode wallet to use BloomMoney.</p>
+    <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-3 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Link Wallet</button>
     <p id="wallet-status" class="text-[#4e5872] text-sm"></p>
-    <button onclick="closeWalletPrompt()" class="text-xs text-[#4e5872] hover:text-[#8b95ab] transition-colors">Maybe later</button>
   </div>
 </div>
 
 <!-- ───── Tip Modal ───── -->
 <div id="tip-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4" onclick="if(event.target.id==='tip-modal') closeTipModal()">
   <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
-    <h2 class="text-xl font-bold mb-4" id="tip-modal-title">Send BLOOM</h2>
+    <h2 class="text-xl font-bold mb-4" id="tip-modal-title">Send UNODE</h2>
     <div class="space-y-4">
       <div>
-        <label class="text-sm text-[#8b95ab] block mb-2">Amount (BLOOM)</label>
+        <label class="text-sm text-[#8b95ab] block mb-2">Amount (UNODE)</label>
         <input id="tip-amount" type="number" placeholder="0.00" step="0.01" min="0" class="inp w-full" />
       </div>
       <div class="text-sm text-[#8b95ab]">
-        Your balance: <span id="tip-balance" class="text-[#7c5cfc] font-semibold">0 BLOOM</span>
+        Your balance: <span id="tip-balance" class="text-[#7c5cfc] font-semibold">0 UNODE</span>
       </div>
       <div id="tip-error" class="text-red-400 text-sm hidden"></div>
       <div class="flex gap-2 justify-end">
@@ -536,6 +535,11 @@ html:not(.dark) #section-trade tbody tr:nth-child(even) { background: rgba(0,0,0
 </style>
 
 <script>
+// ── Native token (single source of truth) ───────────────────────────────────────
+// The app's native/gas currency is the Usernode token. Change the ticker here; it
+// propagates to dynamically-built labels and bridge sendTransaction calls. Literal
+// 'UNODE' strings elsewhere are kept in sync with this constant.
+const NATIVE_TOKEN = 'UNODE';
 // ── State ──────────────────────────────────────────────────────────────────────
 let _activeInterval = null;
 const S = {
@@ -886,7 +890,7 @@ async function init() {
           <div id="market-coin-rows" class="space-y-2">
             <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(251,191,36,0.15);color:#fbbf24;">BTC</div><div class="flex-1"><div class="text-sm font-semibold">BTC</div><div class="text-xs text-[#8b95ab]">Bitcoin</div></div></div>
             <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(56,189,248,0.15);color:#38bdf8;">ETH</div><div class="flex-1"><div class="text-sm font-semibold">ETH</div><div class="text-xs text-[#8b95ab]">Ethereum</div></div></div>
-            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(167,139,250,0.15);color:#a78bfa;">BLOOM</div><div class="flex-1"><div class="text-sm font-semibold">BLOOM</div><div class="text-xs text-[#8b95ab]">BloomMoney</div></div></div>
+            <div class="token-market-row card flex items-center gap-3 py-3"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold" style="background:rgba(167,139,250,0.15);color:#a78bfa;">UNODE</div><div class="flex-1"><div class="text-sm font-semibold">UNODE</div><div class="text-xs text-[#8b95ab]">BloomMoney</div></div></div>
           </div>
         </div>`;
     }
@@ -915,7 +919,7 @@ async function init() {
     <div class="flex gap-1 flex-wrap" id="fut-mkt-tabs">
       <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm fut-mkt-tab-active">ETH-PERP</button>
       <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm">BTC-PERP</button>
-      <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm">BLOOM-PERP</button>
+      <button class="fut-mkt-tab px-3 py-1 text-xs font-mono rounded-sm">UNODE-PERP</button>
     </div>
     <span class="text-lg font-mono font-bold text-[#e8eaf0]">$2500.00</span>
   </div>
@@ -950,6 +954,17 @@ async function init() {
     if (data.balances) {
       S.balances = {};
       data.balances.forEach(b => { S.balances[b.token_symbol] = b.balance; });
+    }
+    // Hard wallet gate: the app must not render for a signed-in user without a
+    // linked Usernode wallet. Show the full-screen "Link Wallet" prompt and stop
+    // before showApp(). Linking re-mints the JWT; the postMessage handler re-runs
+    // init() and this check passes once usernode_pubkey is present.
+    if (!S.user?.usernode_pubkey) {
+      const el = document.getElementById('wallet-prompt-msg');
+      if (el) el.textContent = 'Link your Usernode wallet to use BloomMoney.';
+      document.getElementById('app').classList.add('hidden');
+      document.getElementById('wallet-prompt').classList.remove('hidden');
+      return;
     }
     // Deep-link: if URL path matches a known view (e.g. /liquidity), navigate there on load
     const _urlPath = location.pathname.replace(/^\//, '').split('?')[0];
@@ -1172,7 +1187,7 @@ async function connectWallet() {
     status.textContent = e.message || 'Failed to connect wallet.';
   }
   btn.disabled = false;
-  btn.textContent = 'Connect Wallet';
+  btn.textContent = 'Link Wallet';
 }
 document.getElementById('connect-wallet-btn').addEventListener('click', connectWallet);
 
@@ -1554,9 +1569,9 @@ window.openTipModal = (postId, creatorUsername, authorPubkey) => {
   const amountInput = document.getElementById('tip-amount');
   const errorDiv = document.getElementById('tip-error');
 
-  title.innerHTML = `<span class="inline-flex items-center gap-1.5 flex-wrap">Send BLOOM to ${userTag(creatorUsername, { size: 'w-6 h-6' })}</span>`;
-  const bloomTipBal = S.balances['BLOOM'] || 0;
-  balance.textContent = `${fmtAmt('BLOOM', bloomTipBal)} BLOOM`;
+  title.innerHTML = `<span class="inline-flex items-center gap-1.5 flex-wrap">Send UNODE to ${userTag(creatorUsername, { size: 'w-6 h-6' })}</span>`;
+  const bloomTipBal = S.balances['UNODE'] || 0;
+  balance.textContent = `${fmtAmt('UNODE', bloomTipBal)} UNODE`;
   amountInput.value = '';
   errorDiv.classList.add('hidden');
   errorDiv.textContent = '';
@@ -1585,10 +1600,10 @@ window.submitTip = async () => {
     return;
   }
 
-  const bloomTipBal = S.balances['BLOOM'] || 0;
+  const bloomTipBal = S.balances['UNODE'] || 0;
   const amountUnits = toUnits(amount.toString());
   if (amountUnits > bloomTipBal) {
-    errorDiv.textContent = 'Insufficient BLOOM balance';
+    errorDiv.textContent = 'Insufficient UNODE balance';
     errorDiv.classList.remove('hidden');
     return;
   }
@@ -1601,7 +1616,7 @@ window.submitTip = async () => {
     let txHash = null;
     const recipientPubkey = tipState.authorPubkey;
     if (recipientPubkey && S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
-      const result = await window.usernode.sendTransaction({ to: recipientPubkey, token: 'BLOOM', amount });
+      const result = await window.usernode.sendTransaction({ to: recipientPubkey, token: NATIVE_TOKEN, amount });
       txHash = result?.tx_hash ?? result?.hash ?? null;
     }
     await api('POST', `/api/posts/${tipState.postId}/tip`, { amount: amount.toString(), tx_hash: txHash });
@@ -1670,7 +1685,7 @@ async function renderProfile(sec) {
       LINK:  { color: '#60a5fa', bg: 'bg-blue-300/10',     text: 'text-blue-300'    },
       DOT:   { color: '#ec4899', bg: 'bg-pink-500/10',     text: 'text-pink-400'    },
       AVAX:  { color: '#ef4444', bg: 'bg-red-500/10',      text: 'text-red-400'     },
-      BLOOM: { color: '#7c5cfc', bg: 'bg-[#7c5cfc]/10',   text: 'text-[#7c5cfc]'  },
+      UNODE: { color: '#7c5cfc', bg: 'bg-[#7c5cfc]/10',   text: 'text-[#7c5cfc]'  },
       USDC:  { color: '#10b981', bg: 'bg-emerald-400/10',  text: 'text-emerald-400' },
     };
 
@@ -1806,7 +1821,7 @@ async function renderProfile(sec) {
       const ch24 = hist.length >= 2
         ? ((parseFloat(hist[hist.length-1].price_usd) - parseFloat(hist[0].price_usd)) / parseFloat(hist[0].price_usd) * 100)
         : null;
-      const tradeable = ['ETH','BTC','BLOOM','USDC'].includes(sym);
+      const tradeable = ['ETH','BTC','UNODE','USDC'].includes(sym);
       return `<div class="flex items-center gap-3 py-3 px-1 border-b border-[rgba(255,255,255,0.04)] last:border-0 ${tradeable ? 'cursor-pointer hover:bg-[#1c2236]/40 rounded transition-colors' : ''}"
                ${tradeable ? `onclick="window.openTokenDetail('${sym}')"` : ''}>
         <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${meta.bg} ${meta.text}">${sym || '?'}</div>
@@ -1923,7 +1938,7 @@ async function renderProfile(sec) {
         const formatted = fmtAmt(a.token_symbol || 'USDC', Math.abs(rawAmt));
         const sign = rawAmt >= 0 ? '+' : '-';
         const amtColor = rawAmt >= 0 ? 'text-emerald-400' : 'text-red-400';
-        const explorerLink = a.tx_hash && !a.tx_hash.startsWith('BLOOM-TX-')
+        const explorerLink = a.tx_hash && !a.tx_hash.startsWith('UNODE-TX-')
           ? `<a href="https://explorer.usernodelabs.org/tx/${esc(a.tx_hash)}" target="_blank" rel="noopener" class="text-xs text-[#22d3ee] hover:underline mt-0.5 block">View on chain ↗</a>`
           : '';
         return `
@@ -2302,11 +2317,11 @@ async function renderPortfolio(sec) {
     LINK: { color:'#60a5fa', bg:'rgba(96,165,250,0.15)',  symbol:'⬡' },
     DOT:  { color:'#ec4899', bg:'rgba(236,72,153,0.15)',  symbol:'●' },
     TON:  { color:'#0088cc', bg:'rgba(0,136,204,0.15)',   symbol:'◆' },
-    BLOOM:{ color:'#7c5cfc', bg:'rgba(124,92,252,0.15)',  symbol:'✿' },
+    UNODE:{ color:'#7c5cfc', bg:'rgba(124,92,252,0.15)',  symbol:'✿' },
     USDC: { color:'#10b981', bg:'rgba(16,185,129,0.15)',  symbol:'$' },
     USDT: { color:'#26a17b', bg:'rgba(38,161,123,0.15)',  symbol:'₮' },
   };
-  const STAKING_APY = { BLOOM:12, ETH:6, SOL:8, BTC:4 };
+  const STAKING_APY = { UNODE:12, ETH:6, SOL:8, BTC:4 };
   const WATCHLIST = ['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX'];
   const ACCENT = '#22d3ee';
   const GLASS = 'bg-[#161b2a] border border-[rgba(34,211,238,0.10)] rounded-2xl p-4';
@@ -2388,7 +2403,7 @@ async function renderPortfolio(sec) {
     const filtW = sq ? WATCHLIST.filter(s=>s.toLowerCase().includes(sq)||((topCoins.find(c=>c.symbol===s)||{}).name||'').toLowerCase().includes(sq)) : WATCHLIST;
 
     const heldTickers = holdings.map(h=>(h.ticker||'').toUpperCase()).filter(Boolean);
-    const activeSendToken = sendToken || heldTickers[0] || 'BLOOM';
+    const activeSendToken = sendToken || heldTickers[0] || 'UNODE';
     const sendBal = (S.balances && S.balances[activeSendToken]) ? (Number(S.balances[activeSendToken])/1e6).toFixed(4) : '—';
     const bridgeAvail = !!(window.usernode && typeof window.usernode.sendTransaction==='function');
 
@@ -2445,7 +2460,7 @@ async function renderPortfolio(sec) {
           const icons={swap:'↔',swap_gas:'⛽',stake:'🔒',unstake:'🔓',vault_deposit:'🏦',vault_withdraw:'🏦',ico_invest:'🚀',futures_open:'📈',futures_close:'📉',futures_pnl:'💰',futures_gas:'⛽',nft_buy:'🎨',nft_sale:'💎',nft_gas:'⛽',nft_royalty:'👑',nft_transfer_gas:'🎨',post_unlock:'🔓',tip:'💰',market_trade:'🎲',market_claim:'🏆',funding:'💸',send:'📤',liquidity_add:'💧',liquidity_remove:'💧'};
           const icon=icons[a.type]||'📋';
           const fmtAmt2=v=>{const n=Math.abs(v);return n<0.01?n.toFixed(6):n<10?n.toFixed(4):n.toFixed(2);};
-          const pfExplorerLink = a.tx_hash && !a.tx_hash.startsWith('BLOOM-TX-')
+          const pfExplorerLink = a.tx_hash && !a.tx_hash.startsWith('UNODE-TX-')
             ? `<a href="https://explorer.usernodelabs.org/tx/${esc(a.tx_hash)}" target="_blank" rel="noopener" class="text-xs text-[#22d3ee] hover:underline">View on chain ↗</a>`
             : '';
           return `<div class="flex items-center gap-3 py-2 border-b border-[rgba(34,211,238,0.06)] last:border-0">
@@ -2463,7 +2478,7 @@ async function renderPortfolio(sec) {
 
     // Send pane — scan-first: a camera QR scanner that prefills the recipient,
     // falling back to (and reachable as) the manual entry form.
-    const sendOpts=(heldTickers.length>0?heldTickers:['BLOOM','USDC','ETH']).map(t=>`<option value="${esc(t)}" ${activeSendToken===t?'selected':''}>${esc(t)}</option>`).join('');
+    const sendOpts=(heldTickers.length>0?heldTickers:['UNODE','USDC','ETH']).map(t=>`<option value="${esc(t)}" ${activeSendToken===t?'selected':''}>${esc(t)}</option>`).join('');
     const scannerHtml=`<div class="flex flex-col items-center gap-3">
         <div class="relative w-full max-w-[240px] aspect-square rounded-2xl overflow-hidden bg-[#0d1021] border border-[rgba(34,211,238,0.25)] flex items-center justify-center">
           <video id="pf-scan-video" class="w-full h-full object-cover" playsinline muted autoplay></video>
@@ -2870,14 +2885,14 @@ async function renderPortfolio(sec) {
       const sr=await Promise.all(tickers.map(sym=>api('GET',`/api/price-history?symbol=${sym}&hours=24`).catch(()=>({history:[]}))));
       tickers.forEach((sym,i)=>{sparkData[sym]=sr[i].history||[];});
     }
-    sendToken=holdings[0]?(holdings[0].ticker||'').toUpperCase():'BLOOM';
+    sendToken=holdings[0]?(holdings[0].ticker||'').toUpperCase():'UNODE';
   } catch(e){ sec.innerHTML=err(e.message); return; }
   render();
 }
 
 // ── Swap Card (reusable helper) ────────────────────────────────────────────────
 function renderSwapCard(containerEl, prefilledFrom) {
-  const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM'];
+  const tokens = ['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','UNODE'];
   const initFrom = tokens.includes(prefilledFrom) ? prefilledFrom : 'BTC';
   const initTo   = initFrom === 'BTC' ? 'ETH' : 'BTC';
   const swapState = { from: initFrom, to: initTo, fromAmt: '', slippage: 0.5, flipping: false, showSlippagePopover: false };
@@ -2907,7 +2922,7 @@ function renderSwapCard(containerEl, prefilledFrom) {
     ADA:   { bg: 'rgba(0,140,255,0.15)',    text: '#008cff', symbol: '₳' },
     DOGE:  { bg: 'rgba(203,155,31,0.15)',   text: '#cb9b1f', symbol: 'Ð' },
     TON:   { bg: 'rgba(0,136,204,0.15)',    text: '#0088cc', symbol: '◆' },
-    BLOOM: { bg: 'rgba(167,139,250,0.15)',  text: '#a78bfa', symbol: '✿' },
+    UNODE: { bg: 'rgba(167,139,250,0.15)',  text: '#a78bfa', symbol: '✿' },
   };
 
   function tokenBadge(sym) {
@@ -2933,17 +2948,17 @@ function renderSwapCard(containerEl, prefilledFrom) {
     const svgSwapArrows = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>`;
     const svgInfo = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#52525b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
 
-    const bloomSwapBal = parseFloat(S.balances['BLOOM'] || 0) / 1_000_000;
+    const bloomSwapBal = parseFloat(S.balances['UNODE'] || 0) / 1_000_000;
     const hasBloomGas = bloomSwapBal >= 1;
     const gasLabel = hasBloomGas
-      ? '<span style="color:#a78bfa;font-weight:600;">1 BLOOM</span>'
-      : '<span style="color:#f87171;font-weight:600;">1 BLOOM ⚠ insufficient</span>';
+      ? '<span style="color:#a78bfa;font-weight:600;">1 UNODE</span>'
+      : '<span style="color:#f87171;font-weight:600;">1 UNODE ⚠ insufficient</span>';
     const breakdownRows = [
       { label: 'Slippage tolerance', value: swapState.slippage + '%', info: true },
       { label: 'Price impact',       value: '0.01%',                  info: true },
       { label: 'Network fee',        value: '$0.04',                  info: false },
       { label: 'Exchange fee',       value: 'Free',                   info: false },
-      { label: 'Gas fee (BLOOM)',    value: gasLabel,                  info: false, raw: true },
+      { label: 'Gas fee (UNODE)',    value: gasLabel,                  info: false, raw: true },
       { label: 'Expected output',    value: expectedOut,              info: false },
     ];
 
@@ -3134,13 +3149,13 @@ async function renderMarket(sec) {
   const TOKEN_COLORS = {
     BTC:   '#fbbf24', ETH:   '#38bdf8', BNB:   '#f3ba2f', SOL:   '#9945ff',
     XRP:   '#0095cf', USDC:  '#34d399', USDT:  '#26a17b', ADA:   '#008cff',
-    DOGE:  '#cb9b1f', TON:   '#0088cc', BLOOM: '#a78bfa',
+    DOGE:  '#cb9b1f', TON:   '#0088cc', UNODE: '#a78bfa',
   };
   const TOKEN_BG = {
     BTC:'rgba(251,191,36,0.15)', ETH:'rgba(56,189,248,0.15)',   BNB:'rgba(243,186,47,0.15)',
     SOL:'rgba(153,69,255,0.15)', XRP:'rgba(0,149,207,0.15)',    USDC:'rgba(52,211,153,0.15)',
     USDT:'rgba(38,161,123,0.15)',ADA:'rgba(0,140,255,0.15)',    DOGE:'rgba(203,155,31,0.15)',
-    TON:'rgba(0,136,204,0.15)',  BLOOM:'rgba(167,139,250,0.15)',
+    TON:'rgba(0,136,204,0.15)',  UNODE:'rgba(167,139,250,0.15)',
   };
 
   let topCoins = [];
@@ -3382,7 +3397,7 @@ const TOKEN_META_DETAIL = {
   ADA:   { name: 'Cardano',    color: 'rgb(0,140,255)',   badgeBg: 'bg-blue-500/10',    badgeText: 'text-blue-400',    desc: 'A proof-of-stake blockchain platform built on peer-reviewed research.' },
   DOGE:  { name: 'Dogecoin',   color: 'rgb(203,155,31)',  badgeBg: 'bg-yellow-600/10',  badgeText: 'text-yellow-500',  desc: 'The original meme coin, now widely used for tipping and payments.' },
   TON:   { name: 'Toncoin',    color: 'rgb(0,136,204)',   badgeBg: 'bg-sky-600/10',     badgeText: 'text-sky-400',     desc: 'The fast, scalable blockchain powering the Telegram ecosystem.' },
-  BLOOM: { name: 'BloomMoney', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'BloomMoney\'s native token used for rewards, governance, and platform fees.' },
+  UNODE: { name: 'Usernode', color: 'rgb(167,139,250)', badgeBg: 'bg-[#7c5cfc]/10',  badgeText: 'text-[#7c5cfc]',  desc: 'The Usernode token — the native gas and on-chain currency spent through your linked Usernode wallet.' },
   USDC:  { name: 'USD Coin',   color: 'rgb(52,211,153)',  badgeBg: 'bg-emerald-400/10', badgeText: 'text-emerald-400', desc: 'A dollar-pegged stablecoin issued by Circle, redeemable 1:1 for USD.' },
 };
 const TV_SYMBOLS_MAP = { BTC: 'COINBASE:BTCUSD', ETH: 'COINBASE:ETHUSD', SOL: 'COINBASE:SOLUSD', DOGE: 'BINANCE:DOGEUSDT', ADA: 'BINANCE:ADAUSDT', BNB: 'BINANCE:BNBUSDT', XRP: 'BINANCE:XRPUSDT', TON: 'BINANCE:TONUSDT' };
@@ -3392,7 +3407,7 @@ async function renderTokenDetail(sec) {
   const sym = S.tradeToken;
 
   // Base metadata for all known swappable tokens + fallback for top-25 coins
-  const SWAPPABLE_TOKENS = new Set(['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','BLOOM']);
+  const SWAPPABLE_TOKENS = new Set(['USDC','USDT','BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TON','UNODE']);
 
   // Try to get extended data (market cap, volume, etc.) from cached top-coins list
   let topCoinData = (S.topCoinsData || []).find(c => c.symbol === sym);
@@ -3591,13 +3606,13 @@ async function renderTokenDetail(sec) {
 // ── Stake ─────────────────────────────────────────────────────────────────────
 async function renderStake(sec) {
   const STAKING_OPTIONS = [
-    { token: 'BLOOM', name: 'BloomMoney', apy: 12, minStake: '10 BLOOM',   step: '1'      },
+    { token: 'UNODE', name: 'Usernode', apy: 12, minStake: '10 UNODE',   step: '1'      },
     { token: 'ETH',   name: 'Ethereum',   apy:  6, minStake: '0.01 ETH',   step: '0.01'   },
     { token: 'SOL',   name: 'Solana',     apy:  8, minStake: '1 SOL',      step: '1'      },
     { token: 'BTC',   name: 'Bitcoin',    apy:  4, minStake: '0.001 BTC',  step: '0.0001' },
   ];
   const TC = {
-    BLOOM: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', sym: '✿' },
+    UNODE: { bg: 'rgba(167,139,250,0.15)', text: '#a78bfa', sym: '✿' },
     ETH:   { bg: 'rgba(56,189,248,0.15)',  text: '#38bdf8', sym: 'Ξ'  },
     SOL:   { bg: 'rgba(153,69,255,0.15)',  text: '#9945ff', sym: '◎' },
     BTC:   { bg: 'rgba(251,191,36,0.15)',  text: '#fbbf24', sym: '₿'  },
@@ -3611,7 +3626,7 @@ async function renderStake(sec) {
   }
 
   function tokenBadge(token, size) {
-    const c = TC[token] || TC.BLOOM;
+    const c = TC[token] || TC.UNODE;
     const sz = size === 'sm' ? 'w-7 h-7 text-xs' : 'w-10 h-10 text-sm';
     return '<div class="' + sz + ' rounded-full flex items-center justify-center font-bold shrink-0" style="background:' + c.bg + ';color:' + c.text + ';">' + c.sym + '</div>';
   }
@@ -3645,7 +3660,7 @@ async function renderStake(sec) {
 
     // ── Zone 2: Staking Options Grid ────────────────────────────────
     const cardsHtml = STAKING_OPTIONS.map(function(opt) {
-      const c = TC[opt.token] || TC.BLOOM;
+      const c = TC[opt.token] || TC.UNODE;
       return '<div class="card" id="stake-card-' + opt.token + '">'
         + '<div class="flex items-center gap-3 mb-4">'
         + tokenBadge(opt.token, 'lg')
@@ -3675,7 +3690,7 @@ async function renderStake(sec) {
     let actHtml = '';
     if (activity.length) {
       const rows = activity.map(function(a) {
-        const c = TC[a.token] || TC.BLOOM;
+        const c = TC[a.token] || TC.UNODE;
         const when = tsAgo(a.action === 'unstaked' ? a.unstaked_at : a.staked_at);
         const actionCls = a.action === 'staked' ? 'text-emerald-400' : 'text-amber-400';
         return '<div class="flex items-center justify-between gap-3 py-2 border-b border-[rgba(255,255,255,0.04)] last:border-0">'
@@ -3704,7 +3719,7 @@ async function renderStake(sec) {
     let activeHtml;
     if (stakes.length) {
       const stakeRows = stakes.map(function(s) {
-        const c = TC[s.token] || TC.BLOOM;
+        const c = TC[s.token] || TC.UNODE;
         return '<div class="card flex items-center justify-between gap-3">'
           + '<div class="flex items-center gap-3 min-w-0">'
           + tokenBadge(s.token, 'lg')
@@ -3754,14 +3769,14 @@ async function renderStake(sec) {
   // Legacy alias kept for any external callers
   window.doStake = async function() {
     const amt = document.getElementById('stake-amt')?.value;
-    if (amt) await window.stakeConfirm('BLOOM');
+    if (amt) await window.stakeConfirm('UNODE');
   };
 
   window.doUnstake = async function(id) {
     if (!requireWalletThen(null, 'unstake')) return;
     try {
       const d = await api('DELETE', '/api/defi/stakes/' + id);
-      const tok = d.token || 'BLOOM';
+      const tok = d.token || 'UNODE';
       alert('Unstaked! Received ' + d.returned.toFixed(4) + ' ' + tok + ' (reward: ' + d.reward.toFixed(6) + ' ' + tok + ')');
       await load();
     } catch (e) { alert(e.message); }
@@ -3773,17 +3788,17 @@ async function renderStake(sec) {
 // ── Liquidity (GMX-style pool dashboard) ─────────────────────────────────────
 async function renderLiquidity(sec) {
   const POOL_META = {
-    BLOOM_USDC: { tokens: ['BLOOM', 'USDC'], label: 'BLOOM / USDC' },
+    BLOOM_USDC: { tokens: ['UNODE', 'USDC'], label: 'UNODE / USDC' },
     ETH_USDC:   { tokens: ['ETH',   'USDC'], label: 'ETH / USDC'   },
-    ETH_BLOOM:  { tokens: ['ETH',   'BLOOM'],label: 'ETH / BLOOM'  },
+    ETH_BLOOM:  { tokens: ['ETH',   'UNODE'],label: 'ETH / UNODE'  },
     BTC_USDC:   { tokens: ['BTC',   'USDC'], label: 'BTC / USDC'   },
     SOL_ETH:    { tokens: ['SOL',   'ETH'],  label: 'SOL / ETH'    },
-    BTC_BLOOM:  { tokens: ['BTC',   'BLOOM'],label: 'BTC / BLOOM'  },
+    BTC_BLOOM:  { tokens: ['BTC',   'UNODE'],label: 'BTC / UNODE'  },
     SOL_USDC:   { tokens: ['SOL',   'USDC'], label: 'SOL / USDC'   },
     ETH_BTC:    { tokens: ['ETH',   'BTC'],  label: 'ETH / BTC'    },
   };
   const TC = {
-    BLOOM: { bg: 'rgba(167,139,250,0.25)', text: '#a78bfa', sym: '✿' },
+    UNODE: { bg: 'rgba(167,139,250,0.25)', text: '#a78bfa', sym: '✿' },
     ETH:   { bg: 'rgba(56,189,248,0.25)',  text: '#38bdf8', sym: 'Ξ' },
     USDC:  { bg: 'rgba(59,130,246,0.25)',  text: '#60a5fa', sym: '$' },
     BTC:   { bg: 'rgba(251,191,36,0.25)',  text: '#fbbf24', sym: '₿' },
@@ -4241,11 +4256,11 @@ function defiTabBar(activeView) {
 // ── Earn Hub (EarnPark-style yield marketplace landing) ───────────────────────
 function renderEarnHub(sec) {
   const PRODUCTS = [
-    { id: 'stake',           label: 'BLOOM Staking',       apy: 12,   apyLabel: 'Up to 12% APY',   risk: 'Low',    desc: 'Daily rewards',      iconText: 'BLM', iconBg: 'bg-violet-700',  cats: ['top','altcoins'], nav: 'stake'     },
+    { id: 'stake',           label: 'UNODE Staking',       apy: 12,   apyLabel: 'Up to 12% APY',   risk: 'Low',    desc: 'Daily rewards',      iconText: 'BLM', iconBg: 'bg-violet-700',  cats: ['top','altcoins'], nav: 'stake'     },
     { id: 'vault-cons',      label: 'Vault: Conservative', apy: 6.5,  apyLabel: 'Up to 6.5% APY',  risk: 'Low',    desc: 'Auto-compounding',   iconText: 'CON', iconBg: 'bg-teal-700',    cats: ['top'],            nav: 'vault'     },
     { id: 'vault-bal',       label: 'Vault: Balanced',     apy: 11,   apyLabel: 'Up to 11% APY',   risk: 'Medium', desc: 'Auto-compounding',   iconText: 'BAL', iconBg: 'bg-blue-700',    cats: ['top'],            nav: 'vault'     },
     { id: 'vault-growth',    label: 'Vault: Growth',       apy: 18.5, apyLabel: 'Up to 18.5% APY', risk: 'High',   desc: 'Auto-compounding',   iconText: 'GRW', iconBg: 'bg-indigo-700',  cats: ['top'],            nav: 'vault'     },
-    { id: 'pool-bloom-usdc', label: 'BLOOM/USDC Pool',     apy: null, apyLabel: 'Variable APY',     risk: 'Medium', desc: 'Earn trading fees',  iconText: 'LP',  iconBg: 'bg-emerald-700', cats: ['altcoins'],       nav: 'liquidity' },
+    { id: 'pool-bloom-usdc', label: 'UNODE/USDC Pool',     apy: null, apyLabel: 'Variable APY',     risk: 'Medium', desc: 'Earn trading fees',  iconText: 'LP',  iconBg: 'bg-emerald-700', cats: ['altcoins'],       nav: 'liquidity' },
     { id: 'pool-eth-usdc',   label: 'ETH/USDC Pool',       apy: null, apyLabel: 'Variable APY',     risk: 'Medium', desc: 'Earn trading fees',  iconText: 'LP2', iconBg: 'bg-blue-800',    cats: ['top'],            nav: 'liquidity' },
     { id: 'launchpad',       label: 'Launchpad',           apy: null, apyLabel: 'Token bonuses',    risk: 'High',   desc: 'Early token access', iconText: '🚀',  iconBg: 'bg-amber-700',   cats: ['new'],            nav: 'launchpad' },
   ];
@@ -4336,7 +4351,7 @@ async function renderVault(sec) {
         <div>
           <label class="text-xs text-zinc-500 block mb-1">Token</label>
           <select id="vault-token" class="inp">
-            <option value="BLOOM">BLOOM (Bal: ${getBal('BLOOM')})</option>
+            <option value="UNODE">UNODE (Bal: ${getBal('UNODE')})</option>
             <option value="USDC">USDC (Bal: ${getBal('USDC')})</option>
           </select>
         </div>
@@ -5458,7 +5473,7 @@ window.openNewGroupModal = () => {
       <button class="text-zinc-400 hover:text-white text-xl" onclick="_closeMsgModal()">✕</button>
     </div>
     <label class="text-sm text-zinc-400 block mb-1">Group name</label>
-    <input id="msg-group-name" class="inp w-full mb-3" placeholder="e.g. BLOOM Whales" maxlength="255" autocomplete="off">
+    <input id="msg-group-name" class="inp w-full mb-3" placeholder="e.g. UNODE Whales" maxlength="255" autocomplete="off">
     <label class="text-sm text-zinc-400 block mb-1">Add members</label>
     <div id="msg-selected" class="flex flex-wrap gap-1 mb-2"></div>
     <input id="msg-search" class="inp w-full mb-2" placeholder="Search people…" autocomplete="off" oninput="_msgSearch(this.value, true)">
@@ -5545,7 +5560,7 @@ async function renderFutures(sec) {
   let payAmount = '', limitPrice = '';
   let twapHours = 1, twapMinutes = 0, twapParts = 10;
   let slippage = 0.5, slippageCustom = false;
-  const FUT_TOKENS = ['USDC','BTC','ETH','SOL','BNB','XRP','USDT','ADA','DOGE','TON','BLOOM'];
+  const FUT_TOKENS = ['USDC','BTC','ETH','SOL','BNB','XRP','USDT','ADA','DOGE','TON','UNODE'];
   const FUT_TOKEN_COLORS = {
     BTC:  { bg:'rgba(251,191,36,0.15)',  text:'#fbbf24', symbol:'₿' },
     ETH:  { bg:'rgba(56,189,248,0.15)',  text:'#38bdf8', symbol:'Ξ' },
@@ -5557,7 +5572,7 @@ async function renderFutures(sec) {
     ADA:  { bg:'rgba(0,140,255,0.15)',   text:'#008cff', symbol:'₳' },
     DOGE: { bg:'rgba(203,155,31,0.15)',  text:'#cb9b1f', symbol:'Ð' },
     TON:  { bg:'rgba(0,136,204,0.15)',   text:'#0088cc', symbol:'◆' },
-    BLOOM:{ bg:'rgba(167,139,250,0.15)', text:'#a78bfa', symbol:'✿' },
+    UNODE:{ bg:'rgba(167,139,250,0.15)', text:'#a78bfa', symbol:'✿' },
   };
   let _chart = null, _areaSeries = null;
   let _futuresTab = 'positions';
@@ -5680,7 +5695,7 @@ async function renderFutures(sec) {
     if (S.tradePrefillSymbol) {
       const want = _markets.find(m => m.symbol.split('-')[0] === S.tradePrefillSymbol);
       if (want) {
-        // BTC/ETH/BLOOM have a perp market — select it, keep the default Long side.
+        // BTC/ETH/UNODE have a perp market — select it, keep the default Long side.
         S.futuresMarket = want;
       } else if (FUT_TOKENS.includes(S.tradePrefillSymbol)) {
         // No perp market — open the Swap tab pre-targeted at this token.
@@ -6030,10 +6045,10 @@ async function renderFutures(sec) {
   function updatePreviewDisplay(mkt) {
     const el = document.getElementById('fut-preview');
     if (!el) return;
-    const bloomFutBal = parseFloat(S.balances['BLOOM'] || 0) / 1_000_000;
+    const bloomFutBal = parseFloat(S.balances['UNODE'] || 0) / 1_000_000;
     const gasLine = bloomFutBal >= 1
-      ? `<div>Gas: <span class="text-[#a78bfa] font-mono">1 BLOOM</span></div>`
-      : `<div>Gas: <span class="text-red-400 font-mono">1 BLOOM ⚠ insufficient</span></div>`;
+      ? `<div>Gas: <span class="text-[#a78bfa] font-mono">1 UNODE</span></div>`
+      : `<div>Gas: <span class="text-red-400 font-mono">1 UNODE ⚠ insufficient</span></div>`;
     if (!mkt || side === 'swap') { el.innerHTML = gasLine; return; }
     const mp = parseFloat(mkt.mark_price);
     const prec = pricePrecision(mp);
@@ -6712,7 +6727,7 @@ async function renderNFTDetail(sec, nftId) {
           <h4 class="font-semibold text-sm mb-2">History</h4>
           ${transfers.map(t => {
             const el = { mint:'✦ Minted', sale:'⇄ Sale', transfer:'→ Transfer' }[t.event_type] || t.event_type;
-            const isRealTx = t.tx_hash && !t.tx_hash.startsWith('BLOOM-TX-');
+            const isRealTx = t.tx_hash && !t.tx_hash.startsWith('UNODE-TX-');
             return `<div class="flex items-center gap-2 text-xs text-[#8b95ab]">
               <span class="text-[#e8eaf0]">${el}</span>
               <span class="inline-flex items-center gap-1">${t.to_username ? `to ${userTag(t.to_username, { size: 'w-4 h-4' })}` : ''}</span>
@@ -6741,7 +6756,7 @@ async function renderNFTDetail(sec, nftId) {
     <div id="nft-transfer-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
       <div class="card w-full max-w-sm space-y-3 mx-4">
         <h3 class="font-semibold">Transfer NFT</h3>
-        <p class="text-xs text-[#8b95ab]">Costs 0.5 BLOOM gas fee</p>
+        <p class="text-xs text-[#8b95ab]">Costs 0.5 UNODE gas fee</p>
         <input id="nft-transfer-to" class="inp" placeholder="Recipient username">
         <div id="nft-transfer-step2" class="hidden text-sm text-[#8b95ab]"></div>
         <div class="flex gap-2">
@@ -6829,7 +6844,7 @@ async function renderNFTDetail(sec, nftId) {
     try {
       let transferTxHash = null;
       if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
-        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'BLOOM', amount: 0.5 });
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: NATIVE_TOKEN, amount: 0.5 });
         transferTxHash = result?.tx_hash ?? result?.hash ?? null;
       }
       await api('POST', `/api/nfts/${id}/transfer`, { to_username: to, tx_hash: transferTxHash });
@@ -6865,7 +6880,7 @@ async function renderNFTMint(sec) {
   function renderStep() {
     sec.innerHTML = nftTopBar('mint', 'window._nftNav') + `
       <h2 class="text-xl font-bold mb-1">Mint NFT</h2>
-      <p class="text-[#8b95ab] text-sm mb-4">Costs 10.5 BLOOM • Balance: ${getBal('BLOOM')} BLOOM</p>
+      <p class="text-[#8b95ab] text-sm mb-4">Costs 10.5 UNODE • Balance: ${getBal('UNODE')} UNODE</p>
       <div class="flex gap-2 mb-6">
         ${['Artwork','Properties','Confirm'].map((l,i) => `
           <div class="flex items-center gap-1 ${i>0?'ml-2':''}">
@@ -6915,7 +6930,7 @@ async function renderNFTMint(sec) {
             <div class="text-[#8b95ab]">Collection</div><div>${esc(form.collection)}</div>
             <div class="text-[#8b95ab]">Rarity</div><div class="capitalize">${esc(form.rarity)}</div>
             <div class="text-[#8b95ab]">Royalty</div><div>${(form.royalty_bps/100).toFixed(1)}%</div>
-            <div class="text-[#8b95ab]">Mint Cost</div><div class="text-amber-400">10.5 BLOOM</div>
+            <div class="text-[#8b95ab]">Mint Cost</div><div class="text-amber-400">10.5 UNODE</div>
           </div>
           <p id="mint-msg" class="text-sm text-center"></p>
           <div class="flex gap-2">
@@ -6950,7 +6965,7 @@ async function renderNFTMint(sec) {
     try {
       let mintTxHash = null;
       if (S.config?.treasury_pubkey && window.usernode?.sendTransaction) {
-        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: 'BLOOM', amount: 10.5 });
+        const result = await window.usernode.sendTransaction({ to: S.config.treasury_pubkey, token: NATIVE_TOKEN, amount: 10.5 });
         mintTxHash = result?.tx_hash ?? result?.hash ?? null;
       }
       const d = await api('POST', '/api/nfts/mint', {
