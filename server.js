@@ -13,20 +13,28 @@ const USERNODE_JWT_PUBLIC_KEY = process.env.USERNODE_JWT_PUBLIC_KEY;
 const IS_STAGING = process.env.USERNODE_ENV === 'staging';
 const BLOOM_ADMIN = process.env.BLOOM_ADMIN_USERNAME || '';
 const UNITS = 1_000_000;
-const SWAP_GAS = 1 * UNITS;      // 1 BLOOM gas fee per swap
-const FUTURES_GAS = 1 * UNITS;   // 1 BLOOM gas fee per futures open/close
+// ── Native token (single source of truth) ─────────────────────────────────────
+// The app's native/gas currency is the Usernode platform token. Change the
+// ticker/name here and it propagates to every dynamically-built label and to the
+// on-chain identifiers below. Literal 'UNODE' strings elsewhere (SQL, seed rows)
+// are kept in sync with this constant.
+const NATIVE_TOKEN = 'UNODE';
+const NATIVE_TOKEN_NAME = 'Usernode';
+const TX_PREFIX = NATIVE_TOKEN + '-TX-';   // sentinel prefix for mock (off-chain) tx hashes
+const SWAP_GAS = 1 * UNITS;      // 1 UNODE gas fee per swap
+const FUTURES_GAS = 1 * UNITS;   // 1 UNODE gas fee per futures open/close
 // Post-to-Earn: points credited for each successful top-level post to the feed.
 const POST_REWARD_POINTS = 5;
 
 // Stakeable token registry — shared by POST /api/defi/stake validation and
 // the frontend card grid. apy_bps: annual yield in basis points.
 const STAKEABLE_TOKENS = {
-  BLOOM: { apy_bps: 1200, name: 'BloomMoney' },
+  UNODE: { apy_bps: 1200, name: 'Usernode' },
   ETH:   { apy_bps:  600, name: 'Ethereum'   },
   SOL:   { apy_bps:  800, name: 'Solana'     },
   BTC:   { apy_bps:  400, name: 'Bitcoin'    },
 };
-// Fixed play-money BLOOM price (USD) used when CoinGecko has no BLOOM entry.
+// Fixed play-money UNODE price (USD) used when CoinGecko has no UNODE entry.
 const BLOOM_PLAY_PRICE_USD = 0.10;
 
 const DAILY_TEMPLATES = [
@@ -50,9 +58,9 @@ const DAILY_TEMPLATES = [
   },
   {
     slug: 'bloom_price_up',
-    titleFn: (dateLabel) => `Will BLOOM token price increase today (${dateLabel})?`,
-    description: 'Daily market: will BLOOM end the day higher than it started?',
-    resolution_criteria: 'Resolved YES if BLOOM/USDC mark price at midnight UTC tonight is higher than at midnight UTC yesterday.',
+    titleFn: (dateLabel) => `Will UNODE token price increase today (${dateLabel})?`,
+    description: 'Daily market: will UNODE end the day higher than it started?',
+    resolution_criteria: 'Resolved YES if UNODE/USDC mark price at midnight UTC tonight is higher than at midnight UTC yesterday.',
     priceSymbol: null,
     priceMultiplier: null,
     priceRound: null,
@@ -118,6 +126,23 @@ app.use((req, res, next) => {
     if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   }
+  next();
+});
+
+// ── Wallet gate ───────────────────────────────────────────────────────────────
+// A linked Usernode wallet (usernode_pubkey) is required to use the app. Every
+// authenticated API/mutation is refused with 403 wallet_required until the user
+// has linked, so the client's full-screen gate can't be bypassed by calling the
+// API directly. Exemptions: the public paths/prefixes (unchanged) plus /api/me,
+// which must stay reachable pre-link so the client can learn identity and decide
+// to show the gate. Not gated on USERNODE_ENV — identical in staging and prod.
+const WALLET_EXEMPT = new Set(['/api/me']);
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api/')) return next();
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+  if (PUBLIC_PREFIXES.some(p => req.path.startsWith(p))) return next();
+  if (WALLET_EXEMPT.has(req.path)) return next();
+  if (req.user && !req.user.usernode_pubkey) return res.status(403).json({ error: 'wallet_required' });
   next();
 });
 
@@ -206,7 +231,7 @@ async function upsertUser(u) {
 
 async function ensureBalances(userId, pubkey) {
   for (const [sym, bal] of [
-    ['USDC', 1000000000], ['BLOOM', 100000000], ['TOK', 1000000000],
+    ['USDC', 1000000000], ['UNODE', 100000000], ['TOK', 1000000000],
     ['ETH', 0], ['BTC', 0],
     ['BNB', 500000], ['SOL', 5000000], ['XRP', 50000000],
     ['ADA', 100000000], ['DOGE', 200000000], ['TON', 10000000], ['USDT', 20000000],
@@ -381,7 +406,7 @@ const STAGING_TOP_COINS = [
   { rank:22, symbol:'ICP',   name:'Internet Computer',price_usd:9.50,       market_cap:4400000000,    volume_24h:80000000,    price_change_24h_pct:-0.67, circulating_supply:463000000,      high_24h:9.72,      low_24h:9.34,     swappable:false },
   { rank:23, symbol:'APT',   name:'Aptos',            price_usd:7.80,       market_cap:3900000000,    volume_24h:110000000,   price_change_24h_pct:1.12,  circulating_supply:500000000,      high_24h:7.98,      low_24h:7.65,     swappable:false },
   { rank:24, symbol:'POL',   name:'Polygon',          price_usd:0.48,       market_cap:4800000000,    volume_24h:190000000,   price_change_24h_pct:0.56,  circulating_supply:10000000000,    high_24h:0.492,     low_24h:0.471,    swappable:false },
-  { rank:25, symbol:'BLOOM', name:'BloomMoney',       price_usd:1.25,       market_cap:125000000,     volume_24h:4500000,     price_change_24h_pct:5.23,  circulating_supply:100000000,      high_24h:1.28,      low_24h:1.22,     swappable:true  },
+  { rank:25, symbol:'UNODE', name:'Usernode',       price_usd:1.25,       market_cap:125000000,     volume_24h:4500000,     price_change_24h_pct:5.23,  circulating_supply:100000000,      high_24h:1.28,      low_24h:1.22,     swappable:true  },
 ];
 
 // Augment the staging fixtures with the fields the redesigned Market table
@@ -456,9 +481,9 @@ app.get('/api/coins/top', async (req, res) => {
         swappable: symbol in COINGECKO_TICKER_MAP,
       });
     }
-    if (!coins.find(c => c.symbol === 'BLOOM')) {
+    if (!coins.find(c => c.symbol === 'UNODE')) {
       const livePrices = await getCoinGeckoPrices();
-      coins.push({ rank: coins.length + 1, symbol: 'BLOOM', name: 'BloomMoney', price_usd: livePrices['BLOOM'] || 0, market_cap: 0, volume_24h: 0, price_change_1h_pct: 0, price_change_24h_pct: 0, price_change_7d_pct: 0, circulating_supply: 0, high_24h: livePrices['BLOOM'] || 0, low_24h: livePrices['BLOOM'] || 0, logo_url: null, sparkline_7d: [], swappable: true });
+      coins.push({ rank: coins.length + 1, symbol: 'UNODE', name: 'Usernode', price_usd: livePrices['UNODE'] || 0, market_cap: 0, volume_24h: 0, price_change_1h_pct: 0, price_change_24h_pct: 0, price_change_7d_pct: 0, circulating_supply: 0, high_24h: livePrices['UNODE'] || 0, low_24h: livePrices['UNODE'] || 0, logo_url: null, sparkline_7d: [], swappable: true });
     }
     topCoinsCache.data = coins;
     topCoinsCache.fetchedAt = now;
@@ -576,7 +601,7 @@ setInterval(async () => {
           funding_rate = GREATEST(-0.01, LEAST(0.01, funding_rate + (random() * 0.0002 - 0.0001))),
           updated_at = NOW()
     `);
-    // Anchor ETH-PERP and BTC-PERP to real CoinGecko prices (BLOOM-PERP stays synthetic).
+    // Anchor ETH-PERP and BTC-PERP to real CoinGecko prices (UNODE-PERP stays synthetic).
     const _perpPrices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices();
     for (const [perp, ticker] of [['ETH-PERP', 'ETH'], ['BTC-PERP', 'BTC']]) {
       if (_perpPrices[ticker] != null) {
@@ -1131,22 +1156,22 @@ app.post('/api/posts/:id/tip', requireWallet, async (req, res) => {
 
     await client.query('BEGIN');
     const { rows: [senderBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE",
       [req.user.id]
     );
     if (!senderBal || Number(senderBal.balance) < amount)
-      throw new Error('Insufficient BLOOM balance');
+      throw new Error('Insufficient UNODE balance');
 
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'",
       [amount, req.user.id]
     );
     await client.query(
-      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'BLOOM',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
+      "INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'UNODE',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2, updated_at=NOW()",
       [post.user_id, amount]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'tip','BLOOM',$2,$3,$4)",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'tip','UNODE',$2,$3,$4)",
       [req.user.id, -amount, `Tip to @${post.username} for post #${postId}`, tx_hash || null]
     );
     await client.query('COMMIT');
@@ -1196,7 +1221,7 @@ app.get('/api/prices', async (req, res) => {
 
 app.get('/api/trade/market-stats', async (req, res) => {
   try {
-    const symbols = ['ETH', 'BTC', 'BLOOM', 'USDC'];
+    const symbols = ['ETH', 'BTC', 'UNODE', 'USDC'];
     const { rows } = await pool.query(`
       SELECT token, COUNT(*)::int AS swap_count
       FROM (
@@ -1592,7 +1617,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
     const { from_token, to_token, from_amount, tx_hash } = req.body;
-    const supported = ['USDC', 'USDT', 'BLOOM', 'ETH', 'BTC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TON'];
+    const supported = ['USDC', 'USDT', 'UNODE', 'ETH', 'BTC', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'TON'];
     if (!supported.includes(from_token) || !supported.includes(to_token) || from_token === to_token)
       return res.status(400).json({ error: 'Invalid tokens' });
 
@@ -1612,19 +1637,19 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Lock BLOOM row first for the gas fee (must be atomic with the swap).
-    // When swapping BLOOM→X, bloomRequired covers both the swap amount and gas.
+    // Lock UNODE row first for the gas fee (must be atomic with the swap).
+    // When swapping UNODE→X, bloomRequired covers both the swap amount and gas.
     const { rows: [bloomGasBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE",
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE",
       [req.user.id]
     );
     const bloomAvail = Number(bloomGasBal?.balance || 0);
-    const bloomRequired = from_token === 'BLOOM' ? fromUnitsAmt + SWAP_GAS : SWAP_GAS;
+    const bloomRequired = from_token === 'UNODE' ? fromUnitsAmt + SWAP_GAS : SWAP_GAS;
     if (bloomAvail < bloomRequired)
-      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+      throw new Error('Insufficient UNODE for gas (need 1 UNODE)');
 
-    // For non-BLOOM source tokens, also lock and verify the source row.
-    if (from_token !== 'BLOOM') {
+    // For non-UNODE source tokens, also lock and verify the source row.
+    if (from_token !== 'UNODE') {
       const { rows: [fromBal] } = await client.query(
         'SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol=$2 FOR UPDATE',
         [req.user.id, from_token]
@@ -1641,9 +1666,9 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
       'UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol=$3',
       [toUnitsAmt, req.user.id, to_token]
     );
-    // Deduct BLOOM gas fee
+    // Deduct UNODE gas fee
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'",
       [SWAP_GAS, req.user.id]
     );
     await client.query(
@@ -1655,7 +1680,7 @@ app.post('/api/defi/swap', requireWallet, async (req, res) => {
       [req.user.id, from_token, -fromUnitsAmt, `Swap ${from_token}→${to_token}`, tx_hash || null]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap_gas','BLOOM',$2,'Swap gas fee')",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'swap_gas','UNODE',$2,'Swap gas fee')",
       [req.user.id, -SWAP_GAS]
     );
     await client.query('COMMIT');
@@ -1687,7 +1712,7 @@ app.get('/api/defi/stakes', async (req, res) => {
 app.post('/api/defi/stake', requireWallet, async (req, res) => {
   const client = await pool.connect();
   try {
-    const token = (req.body.token || 'BLOOM').toUpperCase();
+    const token = (req.body.token || 'UNODE').toUpperCase();
     if (!STAKEABLE_TOKENS[token]) return res.status(400).json({ error: 'Unsupported token' });
     const amount = toUnits(req.body.amount);
     const tx_hash = req.body.tx_hash || null;
@@ -1761,7 +1786,7 @@ app.get('/api/defi/staking-stats', async (req, res) => {
     const prices = IS_STAGING ? STAGING_TICKER_PRICES : await getCoinGeckoPrices().catch(() => STAGING_TICKER_PRICES);
 
     function tokenPriceUsd(sym) {
-      if (sym === 'BLOOM') return BLOOM_PLAY_PRICE_USD;
+      if (sym === 'UNODE') return BLOOM_PLAY_PRICE_USD;
       return prices[sym] || 0;
     }
 
@@ -1802,12 +1827,12 @@ app.get('/api/defi/staking-activity', async (req, res) => {
 // ── DeFi: Liquidity ────────────────────────────────────────────────────────────
 
 const VALID_POOLS = {
-  BLOOM_USDC: ['BLOOM', 'USDC'],
+  BLOOM_USDC: ['UNODE', 'USDC'],
   ETH_USDC:   ['ETH',   'USDC'],
-  ETH_BLOOM:  ['ETH',   'BLOOM'],
+  ETH_BLOOM:  ['ETH',   'UNODE'],
   BTC_USDC:   ['BTC',   'USDC'],
   SOL_ETH:    ['SOL',   'ETH'],
-  BTC_BLOOM:  ['BTC',   'BLOOM'],
+  BTC_BLOOM:  ['BTC',   'UNODE'],
   SOL_USDC:   ['SOL',   'USDC'],
   ETH_BTC:    ['ETH',   'BTC'],
 };
@@ -2383,12 +2408,12 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const marginUnits = Math.ceil(qty * markPrice * UNITS / lev);
     const liqPrice = side === 'long' ? markPrice * (1 - 0.9 / lev) : markPrice * (1 + 0.9 / lev);
 
-    // BLOOM gas fee check.
+    // UNODE gas fee check.
     const { rows: [bloomOpenBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE", [req.user.id]
     );
     if (!bloomOpenBal || Number(bloomOpenBal.balance) < FUTURES_GAS)
-      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+      throw new Error('Insufficient UNODE for gas (need 1 UNODE)');
 
     const { rows: [bal] } = await client.query(
       "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='USDC' FOR UPDATE", [req.user.id]
@@ -2402,9 +2427,9 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
     const validTwapMinutes = twap_duration_minutes ? Math.max(1, parseInt(twap_duration_minutes)) : null;
     const validTwapParts = twap_parts ? Math.max(2, Math.min(100, parseInt(twap_parts))) : null;
 
-    // Deduct BLOOM gas fee
+    // Deduct UNODE gas fee
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'",
       [FUTURES_GAS, req.user.id]
     );
     const { rows: [pos] } = await client.query(`
@@ -2417,7 +2442,7 @@ app.post('/api/futures/positions', requireWallet, async (req, res) => {
       [req.user.id, -marginUnits, `Open ${side} ${lev}x (${mode})`, tx_hash || null]
     );
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures open gas fee')",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','UNODE',$2,'Futures open gas fee')",
       [req.user.id, -FUTURES_GAS]
     );
     await client.query('COMMIT');
@@ -2440,14 +2465,14 @@ app.delete('/api/futures/positions/:id', requireWallet, async (req, res) => {
     const pnl = Math.round((pos.mark_price - parseFloat(pos.entry_price)) * parseFloat(pos.quantity) * (pos.side === 'long' ? 1 : -1) * UNITS);
     const returnAmt = Math.max(0, Number(pos.margin) + pnl);
 
-    // BLOOM gas fee for closing.
+    // UNODE gas fee for closing.
     const { rows: [bloomCloseBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE", [req.user.id]
     );
     if (!bloomCloseBal || Number(bloomCloseBal.balance) < FUTURES_GAS)
-      throw new Error('Insufficient BLOOM for gas (need 1 BLOOM)');
+      throw new Error('Insufficient UNODE for gas (need 1 UNODE)');
     await client.query(
-      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'",
+      "UPDATE wallet_balances SET balance=balance-$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'",
       [FUTURES_GAS, req.user.id]
     );
 
@@ -2455,7 +2480,7 @@ app.delete('/api/futures/positions/:id', requireWallet, async (req, res) => {
     await client.query("UPDATE wallet_balances SET balance=balance+$1, updated_at=NOW() WHERE user_id=$2 AND token_symbol='USDC'", [returnAmt, req.user.id]);
     await client.query('UPDATE futures_markets SET open_interest=GREATEST(0, open_interest-$1) WHERE id=$2', [pos.margin, pos.market_id]);
     await client.query(
-      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','BLOOM',$2,'Futures close gas fee')",
+      "INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'futures_gas','UNODE',$2,'Futures close gas fee')",
       [req.user.id, -FUTURES_GAS]
     );
     await client.query(
@@ -2714,25 +2739,25 @@ app.post('/api/nfts/mint', requireWallet, async (req, res) => {
     const MINT_COST = 10.5 * UNITS;
     await client.query('BEGIN');
     const { rows: [bal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE", [req.user.id]
     );
-    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient BLOOM (need 10.5)');
-    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [MINT_COST, req.user.id]);
+    if (!bal || Number(bal.balance) < MINT_COST) throw new Error('Insufficient UNODE (need 10.5)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'", [MINT_COST, req.user.id]);
     const { rows: [nft] } = await client.query(
       `INSERT INTO nfts(owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity,properties)
        VALUES($1,$2,$1,$2,$3,$4,$5,'TEMP',$6,$7,$8,$9) RETURNING id`,
       [req.user.id, req.user.username, name, description || '', image_url, collectionVal, rbps, rarityVal, propsJson]
     );
-    const tokenId = 'BLOOM-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
+    const tokenId = NATIVE_TOKEN + '-' + nft.id.toString(16).padStart(8, '0').toUpperCase();
     await client.query('UPDATE nfts SET token_id=$1 WHERE id=$2', [tokenId, nft.id]);
-    const mintTxHash = tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase());
+    const mintTxHash = tx_hash || (TX_PREFIX + nft.id.toString(16).padStart(8, '0').toUpperCase());
     await client.query(
       `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
        VALUES($1,NULL,NULL,$2,$3,'mint',$4)`,
       [nft.id, req.user.id, req.user.username, mintTxHash]
     );
     await client.query(
-      `INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_gas','BLOOM',$2,$3,$4)`,
+      `INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_gas','UNODE',$2,$3,$4)`,
       [req.user.id, -MINT_COST, `Mint NFT: ${name}`, tx_hash || null]
     );
     await client.query('COMMIT');
@@ -2817,7 +2842,7 @@ app.post('/api/nfts/:id/buy', requireWallet, async (req, res) => {
       await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name} sold to @${req.user.username}`]);
     }
 
-    const txHash = req.body.tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase());
+    const txHash = req.body.tx_hash || (TX_PREFIX + nft.id.toString(16).padStart(8, '0').toUpperCase());
     // Transfer ownership
     await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [req.user.id, req.user.username, nft.id]);
     await client.query("UPDATE nft_listings SET status='sold' WHERE id=$1", [listing.id]);
@@ -2904,7 +2929,7 @@ app.post('/api/nfts/:id/accept-bid/:bidId', requireWallet, async (req, res) => {
       await client.query("INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES($1,'USDC',$2) ON CONFLICT(user_id,token_symbol) DO UPDATE SET balance=wallet_balances.balance+$2,updated_at=NOW()", [nft.creator_user_id, royalty]);
       await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description) VALUES($1,'nft_royalty','USDC',$2,$3)", [nft.creator_user_id, royalty, `Royalty: ${nft.name}`]);
     }
-    const txHash = 'BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'B';
+    const txHash = TX_PREFIX + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'B';
     await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [bid.bidder_user_id, bid.bidder_username, nft.id]);
     await client.query("UPDATE nft_bids SET status='accepted' WHERE id=$1", [bid.id]);
     await client.query("UPDATE nft_bids SET status='outbid' WHERE nft_id=$1 AND id!=$2 AND status='open'", [nft.id, bid.id]);
@@ -2938,19 +2963,19 @@ app.post('/api/nfts/:id/transfer', requireWallet, async (req, res) => {
     if (!recipient) throw new Error('Recipient not found');
     const GAS = Math.floor(0.5 * UNITS);
     const { rows: [bloomBal] } = await client.query(
-      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='BLOOM' FOR UPDATE", [req.user.id]
+      "SELECT balance FROM wallet_balances WHERE user_id=$1 AND token_symbol='UNODE' FOR UPDATE", [req.user.id]
     );
-    if (!bloomBal || Number(bloomBal.balance) < GAS) throw new Error('Insufficient BLOOM (need 0.5 for gas)');
-    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='BLOOM'", [GAS, req.user.id]);
+    if (!bloomBal || Number(bloomBal.balance) < GAS) throw new Error('Insufficient UNODE (need 0.5 for gas)');
+    await client.query("UPDATE wallet_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2 AND token_symbol='UNODE'", [GAS, req.user.id]);
     await client.query('UPDATE nfts SET owner_user_id=$1,owner_username=$2 WHERE id=$3', [recipient.user_id, recipient.username, nft.id]);
     await client.query("UPDATE nft_listings SET status='cancelled' WHERE nft_id=$1 AND status='active'", [nft.id]);
-    const txHash = req.body.tx_hash || ('BLOOM-TX-' + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T');
+    const txHash = req.body.tx_hash || (TX_PREFIX + nft.id.toString(16).padStart(8, '0').toUpperCase() + 'T');
     await client.query(
       `INSERT INTO nft_transfers(nft_id,from_user_id,from_username,to_user_id,to_username,event_type,tx_hash)
        VALUES($1,$2,$3,$4,$5,'transfer',$6)`,
       [nft.id, req.user.id, req.user.username, recipient.user_id, recipient.username, txHash]
     );
-    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_transfer_gas','BLOOM',$2,$3,$4)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`, req.body.tx_hash || null]);
+    await client.query("INSERT INTO transactions(user_id,type,token_symbol,amount,description,tx_hash) VALUES($1,'nft_transfer_gas','UNODE',$2,$3,$4)", [req.user.id, -GAS, `Transfer NFT to @${to_username}: ${nft.name}`, req.body.tx_hash || null]);
     await client.query('COMMIT');
     res.json({ ok: true, tx_hash: txHash });
   } catch (e) {
@@ -3932,7 +3957,7 @@ app.get('/api/users/search', async (req, res) => {
 });
 
 // Boot-time messaging seed (staging only). Creates the two demo conversations
-// (direct alice↔bob + the "BLOOM Whales" group) with a handful of messages.
+// (direct alice↔bob + the "UNODE Whales" group) with a handful of messages.
 // Idempotent via explicit high ids + ON CONFLICT DO NOTHING. Safe to call
 // repeatedly (boot seed and request-time demo injection both call it).
 async function ensureMessagingSeed() {
@@ -3949,17 +3974,17 @@ async function ensureMessagingSeed() {
   );
   await pool.query(
     `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
-       (990001,9902,9001,'staging-alice','Staging demo — hey Bob, did you see BLOOM pumped today? 🌸',NOW()-INTERVAL '20 minutes'),
+       (990001,9902,9001,'staging-alice','Staging demo — hey Bob, did you see UNODE pumped today? 🌸',NOW()-INTERVAL '20 minutes'),
        (990002,9902,9002,'staging-bob','Staging demo — yeah! Staked another 500 this morning.',NOW()-INTERVAL '16 minutes'),
        (990003,9902,9001,'staging-alice','Staging demo — nice. Want to copy-trade my ETH-PERP long?',NOW()-INTERVAL '12 minutes'),
        (990004,9902,9002,'staging-bob','Staging demo — for sure, send me the link 🚀',NOW()-INTERVAL '8 minutes')
      ON CONFLICT(id) DO NOTHING`
   );
-  // Group: "Staging demo — BLOOM Whales", conversation id 9901, members
+  // Group: "Staging demo — UNODE Whales", conversation id 9901, members
   // alice/bob/carol/eve (9001/9002/9003/9005).
   await pool.query(
     `INSERT INTO conversations(id,type,title,created_by_user_id,last_message_at)
-     VALUES (9901,'group','Staging demo — BLOOM Whales',9001,NOW()-INTERVAL '3 minutes') ON CONFLICT(id) DO NOTHING`
+     VALUES (9901,'group','Staging demo — UNODE Whales',9001,NOW()-INTERVAL '3 minutes') ON CONFLICT(id) DO NOTHING`
   );
   await pool.query(
     `INSERT INTO conversation_members(conversation_id,user_id,username) VALUES
@@ -3969,7 +3994,7 @@ async function ensureMessagingSeed() {
   );
   await pool.query(
     `INSERT INTO messages(id,conversation_id,sender_user_id,sender_username,content,created_at) VALUES
-       (990011,9901,9001,'staging-alice','Staging demo — welcome to the BLOOM Whales group! 🐳',NOW()-INTERVAL '30 minutes'),
+       (990011,9901,9001,'staging-alice','Staging demo — welcome to the UNODE Whales group! 🐳',NOW()-INTERVAL '30 minutes'),
        (990012,9901,9003,'staging-carol','Staging demo — gm whales. Opinion markets are heating up.',NOW()-INTERVAL '22 minutes'),
        (990013,9901,9005,'staging-eve','Staging demo — staking rewards just hit my wallet 🌱',NOW()-INTERVAL '14 minutes'),
        (990014,9901,9002,'staging-bob','Staging demo — who is aping the new ICO?',NOW()-INTERVAL '7 minutes'),
@@ -3985,7 +4010,7 @@ async function injectDemoConversations(user) {
   // seed already creates them, but request-time injection must be self-standing
   // so the ?demo=1 route works even against a freshly migrated test DB).
   await ensureMessagingSeed();
-  // (a) add the tester to the demo group "Staging demo — BLOOM Whales" (id 9901).
+  // (a) add the tester to the demo group "Staging demo — UNODE Whales" (id 9901).
   await pool.query(
     `INSERT INTO conversation_members(conversation_id, user_id, username)
      VALUES (9901, $1, $2) ON CONFLICT DO NOTHING`,
@@ -4520,7 +4545,7 @@ async function start() {
     CREATE TABLE IF NOT EXISTS defi_stakes (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL,
-      token VARCHAR(20) NOT NULL DEFAULT 'BLOOM',
+      token VARCHAR(20) NOT NULL DEFAULT 'UNODE',
       amount BIGINT NOT NULL,
       apy_bps INTEGER NOT NULL DEFAULT 1200,
       staked_at TIMESTAMPTZ DEFAULT NOW(),
@@ -4953,6 +4978,22 @@ async function start() {
   // Widen nft_transfers.tx_hash from VARCHAR(64) to VARCHAR(128) to fit real tx hashes
   await pool.query(`ALTER TABLE nft_transfers ALTER COLUMN tx_hash TYPE VARCHAR(128)`).catch(() => {});
 
+  // ── Native-token rename migration: BLOOM → UNODE (all environments) ──────────
+  // Idempotent one-time rename of the legacy 'BLOOM' native token to the Usernode
+  // token ('UNODE'). Preserves balances and history (a relabel, never a reset);
+  // re-running is a no-op once no BLOOM rows remain. The separate 'TOK' paywall
+  // token is intentionally left untouched. Internal pool-pair keys (BLOOM_USDC,
+  // ETH_BLOOM, BTC_BLOOM) are opaque identifiers stored on rows and are kept.
+  await pool.query(`UPDATE wallet_balances SET token_symbol='UNODE' WHERE token_symbol='BLOOM'`).catch(() => {});
+  await pool.query(`UPDATE transactions   SET token_symbol='UNODE' WHERE token_symbol='BLOOM'`).catch(() => {});
+  await pool.query(`UPDATE defi_stakes    SET token='UNODE'        WHERE token='BLOOM'`).catch(() => {});
+  await pool.query(`ALTER TABLE defi_stakes ALTER COLUMN token SET DEFAULT 'UNODE'`).catch(() => {});
+  await pool.query(`UPDATE defi_swaps     SET from_token='UNODE'   WHERE from_token='BLOOM'`).catch(() => {});
+  await pool.query(`UPDATE defi_swaps     SET to_token='UNODE'     WHERE to_token='BLOOM'`).catch(() => {});
+  await pool.query(`UPDATE futures_markets SET symbol='UNODE-PERP' WHERE symbol='BLOOM-PERP'`).catch(() => {});
+  await pool.query(`UPDATE market_prices  SET symbol='UNODE'       WHERE symbol='BLOOM'`).catch(() => {});
+  await pool.query(`UPDATE price_history  SET symbol='UNODE'       WHERE symbol='BLOOM'`).catch(() => {});
+
   // Ensure bot user exists (all environments)
   await pool.query(`
     INSERT INTO users (user_id, username, display_name)
@@ -4963,7 +5004,7 @@ async function start() {
   // Seed initial market prices
   await pool.query(`
     INSERT INTO market_prices(symbol,price_usd) VALUES
-      ('ETH',2500),('BTC',67000),('BLOOM',0.5),('USDC',1),
+      ('ETH',2500),('BTC',67000),('UNODE',0.5),('USDC',1),
       ('BNB',310),('SOL',150),('XRP',0.55),('ADA',0.45),
       ('DOGE',0.12),('TON',5.50),('USDT',1)
     ON CONFLICT(symbol) DO NOTHING
@@ -4982,7 +5023,7 @@ async function start() {
     { symbol: 'ADA',   fn: (i) => (0.45   * (1 + Math.cos(i * 0.50 + 0.3)    * 0.028)).toFixed(6) },
     { symbol: 'DOGE',  fn: (i) => (0.12   * (1 + Math.sin(i * 0.60 + 2.1)    * 0.035)).toFixed(6) },
     { symbol: 'TON',   fn: (i) => (5.50   * (1 + Math.cos(i * 0.44 + 1.5)    * 0.022)).toFixed(6) },
-    { symbol: 'BLOOM', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)      * 0.030)).toFixed(6) },
+    { symbol: 'UNODE', fn: (i) => (0.5    * (1 + Math.sin(i * 0.52 + 1)      * 0.030)).toFixed(6) },
     { symbol: 'USDC',  fn: ()  => '1.000000' },
     { symbol: 'USDT',  fn: ()  => '1.000000' },
     { symbol: 'LINK',  fn: (i) => (10     * (1 + Math.cos(i * 0.43 + 2)      * 0.024)).toFixed(6) },
@@ -5006,7 +5047,7 @@ async function start() {
   // Seed futures markets
   await pool.query(`
     INSERT INTO futures_markets(symbol,mark_price,index_price) VALUES
-      ('ETH-PERP',2500,2500),('BTC-PERP',67000,67000),('BLOOM-PERP',0.5,0.5)
+      ('ETH-PERP',2500,2500),('BTC-PERP',67000,67000),('UNODE-PERP',0.5,0.5)
     ON CONFLICT(symbol) DO NOTHING
   `);
 
@@ -5019,7 +5060,7 @@ async function start() {
         (9002,'staging-bob','0xSTAGING0000000000000000000000000000000002','Bob (Staging)','NFT collector and trader',false),
         (9003,'staging-carol','0xSTAGING0000000000000000000000000000000003','Carol (Staging)','Prediction market oracle',false),
         (9004,'staging-dave','0xSTAGING0000000000000000000000000000000004','Dave (Staging)','Futures trading enthusiast',false),
-        (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','BLOOM staker since day one',false),
+        (9005,'staging-eve','0xSTAGING0000000000000000000000000000000005','Eve (Staging)','UNODE staker since day one',false),
         (9006,'staging-admin','0xSTAGING0000000000000000000000000000000006','Admin (Staging)','Platform administrator',true),
         (9007,'staging-zara','0xSTAGING0000000000000000000000000000000007','Zara (Staging)','Liquidity provider and yield farmer',false),
         (9008,'staging-max','0xSTAGING0000000000000000000000000000000008','Max (Staging)','Launchpad degen, no uploaded avatar',false)
@@ -5080,7 +5121,7 @@ async function start() {
     for (const uid of [9001,9002,9003,9004,9005,9006]) {
       await pool.query(`
         INSERT INTO wallet_balances(user_id,token_symbol,balance) VALUES
-          ($1,'USDC',5000000000),($1,'BLOOM',500000000),($1,'TOK',1000000000),
+          ($1,'USDC',5000000000),($1,'UNODE',500000000),($1,'TOK',1000000000),
           ($1,'ETH',2000000),($1,'BTC',100000),
           ($1,'BNB',1000000),($1,'SOL',10000000),($1,'XRP',200000000),
           ($1,'ADA',100000000),($1,'DOGE',200000000),($1,'TON',10000000),($1,'USDT',20000000)
@@ -5094,9 +5135,9 @@ async function start() {
       [9002,'Staging demo post #2 — $ETH looking bullish after the merge. Just minted my first NFT on BloomMoney.'],
       [9003,'Staging demo post #3 — Opinion markets are live! Betting YES on $ETH to $5k before 2027. 📊'],
       [9004,'Staging demo post #4 — Paper trading $BTC-PERP with 10x leverage. Up 23% today! 📈'],
-      [9005,'Staging demo post #5 — Staking 500 $BLOOM at 12% APY. Passive income is the way.'],
-      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 $BLOOM. The rate is great right now!'],
-      [9002,'Staging demo post #7 — Added liquidity to $BLOOM/USDC pool. Earning fees every day.'],
+      [9005,'Staging demo post #5 — Staking 500 $UNODE at 12% APY. Passive income is the way.'],
+      [9001,'Staging demo post #6 — Swapped 100 USDC for 200 $UNODE. The rate is great right now!'],
+      [9002,'Staging demo post #7 — Added liquidity to $UNODE/USDC pool. Earning fees every day.'],
       [9003,'Staging demo post #8 — $BTC dominance rising. Invested in the SDC ICO. Early adopter advantages are real.'],
       [9006,'Staging demo post #9 — Platform stats looking healthy. $ETH volume up 30% in 24 hours! 🚀'],
       [9004,'Staging demo post #10 — Closed my $ETH-PERP long for +15% PnL. BloomMoney futures rule!'],
@@ -5112,7 +5153,7 @@ async function start() {
     // Seed replies
     await pool.query(`
       INSERT INTO posts(id,user_id,username,content,parent_id) VALUES
-        (900011,9002,'staging-bob','Staging demo reply — Same! BLOOM is only going up from here 🚀',900001),
+        (900011,9002,'staging-bob','Staging demo reply — Same! UNODE is only going up from here 🚀',900001),
         (900012,9003,'staging-carol','Staging demo reply — I agree, the swap fees are super low.',900001),
         (900013,9001,'staging-alice','Staging demo reply — Which collection? I want to see!',900002),
         (900014,9004,'staging-dave','Staging demo reply — I am in on that market too!',900003),
@@ -5125,7 +5166,7 @@ async function start() {
     // blur + "Pay 5 TOK to read alpha" banner renders out of the box.
     await pool.query(
       `INSERT INTO posts(id,user_id,username,content,locked) VALUES
-        (900016,9005,'staging-eve','Staging demo alpha — the secret BLOOM entry I''m not unblurring for free 🌸',TRUE)
+        (900016,9005,'staging-eve','Staging demo alpha — the secret UNODE entry I''m not unblurring for free 🌸',TRUE)
       ON CONFLICT(id) DO NOTHING`
     );
 
@@ -5151,7 +5192,7 @@ async function start() {
     await pool.query(`
       INSERT INTO opinion_markets(id,title,description,resolution_criteria,yes_pool,no_pool,status,created_by_user_id,closes_at) VALUES
         (9001,'Will ETH hit $5,000 before 2027?','Ethereum price prediction market','Resolved YES if ETH/USD closes above $5,000 on any major exchange before January 1, 2027.',500000000,300000000,'open',9006,'2026-12-31 00:00:00+00'),
-        (9002,'Will BLOOM token reach $2 within 90 days?','BloomMoney native token prediction','Resolved YES if BLOOM/USDC price exceeds $2.00 on BloomMoney.',100000000,100000000,'open',9006,'2026-09-20 00:00:00+00'),
+        (9002,'Will UNODE token reach $2 within 90 days?','BloomMoney native token prediction','Resolved YES if UNODE/USDC price exceeds $2.00 on BloomMoney.',100000000,100000000,'open',9006,'2026-09-20 00:00:00+00'),
         (9003,'Did Bitcoin ETF daily volume exceed $1B on 2026-06-01?','Bitcoin ETF volume milestone','Based on publicly reported ETF volume data for June 1, 2026.',400000000,50000000,'resolved',9006,NULL)
       ON CONFLICT(id) DO NOTHING
     `);
@@ -5197,7 +5238,7 @@ async function start() {
     // Seed Vault listings
     await pool.query(`
       INSERT INTO defi_vaults(id,name,token_pair,apy_bps,tvl_usd,description) VALUES
-        (9001,'Staging BLOOM-USDC Auto Vault','BLOOM/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
+        (9001,'Staging UNODE-USDC Auto Vault','UNODE/USDC',1850,250000,'Staging demo vault — Auto-compounding yield optimizer'),
         (9002,'Staging ETH Yield Vault','ETH/USDC',820,1200000,'Staging demo vault — Automated ETH yield strategy'),
         (9003,'Staging Stable Vault','USDC/DAI',510,500000,'Staging demo vault — Low-risk stablecoin vault')
       ON CONFLICT(id) DO NOTHING
@@ -5237,14 +5278,14 @@ async function start() {
     // Seed NFTs
     await pool.query(`
       INSERT INTO nfts(id,owner_user_id,owner_username,creator_user_id,creator_username,name,description,image_url,token_id,collection,royalty_bps,rarity) VALUES
-        (9001,9001,'staging-alice',9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=BLOOM+NFT+1','BLOOM-00002329','BloomMoney Genesis',500,'rare'),
-        (9002,9002,'staging-bob',9001,'staging-alice','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=BLOOM+NFT+2','BLOOM-0000232A','BloomMoney Genesis',500,'common'),
-        (9003,9003,'staging-carol',9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+BLOOM','BLOOM-0000232B','Bloom Rares',750,'epic'),
-        (9004,9004,'staging-dave',9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','BLOOM-0000232C','Bull Runners',300,'uncommon'),
-        (9005,9001,'staging-alice',9001,'staging-alice','Staging Diamond Hands','Staging demo NFT — For holders who never sold.','https://placehold.co/400x400/06b6d4/ffffff?text=DIAMOND+HANDS','BLOOM-0000232D','BloomMoney Genesis',500,'legendary'),
-        (9006,9002,'staging-bob',9003,'staging-carol','Staging Moon Mission','Staging demo NFT — 100x or bust.','https://placehold.co/400x400/f59e0b/000000?text=MOON+MISSION','BLOOM-0000232E','Bloom Rares',750,'rare'),
-        (9007,9005,'staging-eve',9004,'staging-dave','Staging Degen #1','Staging demo NFT — Staging degen trader badge.','https://placehold.co/400x400/ef4444/ffffff?text=DEGEN+1','BLOOM-0000232F','Bull Runners',300,'common'),
-        (9008,9003,'staging-carol',9003,'staging-carol','Staging Aurora','Staging demo NFT — Northern lights edition.','https://placehold.co/400x400/10b981/ffffff?text=AURORA','BLOOM-00002330','Bloom Rares',750,'epic')
+        (9001,9001,'staging-alice',9001,'staging-alice','Staging Genesis #1','Staging demo NFT — The first BloomMoney genesis token.','https://placehold.co/400x400/0052ff/ffffff?text=UNODE+NFT+1','UNODE-00002329','BloomMoney Genesis',500,'rare'),
+        (9002,9002,'staging-bob',9001,'staging-alice','Staging Genesis #2','Staging demo NFT — Second genesis token.','https://placehold.co/400x400/7c3aed/ffffff?text=UNODE+NFT+2','UNODE-0000232A','BloomMoney Genesis',500,'common'),
+        (9003,9003,'staging-carol',9003,'staging-carol','Staging Rare Bloom','Staging demo NFT — A rare bloom flower.','https://placehold.co/400x400/059669/ffffff?text=RARE+UNODE','UNODE-0000232B','Bloom Rares',750,'epic'),
+        (9004,9004,'staging-dave',9004,'staging-dave','Staging Bull Run','Staging demo NFT — Commemorating the 2026 bull run.','https://placehold.co/400x400/dc2626/ffffff?text=BULL+RUN','UNODE-0000232C','Bull Runners',300,'uncommon'),
+        (9005,9001,'staging-alice',9001,'staging-alice','Staging Diamond Hands','Staging demo NFT — For holders who never sold.','https://placehold.co/400x400/06b6d4/ffffff?text=DIAMOND+HANDS','UNODE-0000232D','BloomMoney Genesis',500,'legendary'),
+        (9006,9002,'staging-bob',9003,'staging-carol','Staging Moon Mission','Staging demo NFT — 100x or bust.','https://placehold.co/400x400/f59e0b/000000?text=MOON+MISSION','UNODE-0000232E','Bloom Rares',750,'rare'),
+        (9007,9005,'staging-eve',9004,'staging-dave','Staging Degen #1','Staging demo NFT — Staging degen trader badge.','https://placehold.co/400x400/ef4444/ffffff?text=DEGEN+1','UNODE-0000232F','Bull Runners',300,'common'),
+        (9008,9003,'staging-carol',9003,'staging-carol','Staging Aurora','Staging demo NFT — Northern lights edition.','https://placehold.co/400x400/10b981/ffffff?text=AURORA','UNODE-00002330','Bloom Rares',750,'epic')
       ON CONFLICT(id) DO NOTHING
     `);
     // Seed NFT listings (active marketplace listings)
@@ -5267,16 +5308,16 @@ async function start() {
     // Seed NFT transfer history (mints + sales)
     await pool.query(`
       INSERT INTO nft_transfers(id,nft_id,from_user_id,from_username,to_user_id,to_username,event_type,price_usdc,tx_hash) VALUES
-        (9001,9001,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-00002329'),
-        (9002,9002,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232A'),
-        (9003,9002,9001,'staging-alice',9002,'staging-bob','sale',100000000,'BLOOM-TX-0000232B'),
-        (9004,9003,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232C'),
-        (9005,9004,NULL,NULL,9004,'staging-dave','mint',NULL,'BLOOM-TX-0000232D'),
-        (9006,9005,NULL,NULL,9001,'staging-alice','mint',NULL,'BLOOM-TX-0000232E'),
-        (9007,9006,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-0000232F'),
-        (9008,9006,9003,'staging-carol',9002,'staging-bob','sale',180000000,'BLOOM-TX-00002330'),
-        (9009,9007,NULL,NULL,9005,'staging-eve','mint',NULL,'BLOOM-TX-00002331'),
-        (9010,9008,NULL,NULL,9003,'staging-carol','mint',NULL,'BLOOM-TX-00002332')
+        (9001,9001,NULL,NULL,9001,'staging-alice','mint',NULL,'UNODE-TX-00002329'),
+        (9002,9002,NULL,NULL,9001,'staging-alice','mint',NULL,'UNODE-TX-0000232A'),
+        (9003,9002,9001,'staging-alice',9002,'staging-bob','sale',100000000,'UNODE-TX-0000232B'),
+        (9004,9003,NULL,NULL,9003,'staging-carol','mint',NULL,'UNODE-TX-0000232C'),
+        (9005,9004,NULL,NULL,9004,'staging-dave','mint',NULL,'UNODE-TX-0000232D'),
+        (9006,9005,NULL,NULL,9001,'staging-alice','mint',NULL,'UNODE-TX-0000232E'),
+        (9007,9006,NULL,NULL,9003,'staging-carol','mint',NULL,'UNODE-TX-0000232F'),
+        (9008,9006,9003,'staging-carol',9002,'staging-bob','sale',180000000,'UNODE-TX-00002330'),
+        (9009,9007,NULL,NULL,9005,'staging-eve','mint',NULL,'UNODE-TX-00002331'),
+        (9010,9008,NULL,NULL,9003,'staging-carol','mint',NULL,'UNODE-TX-00002332')
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -5327,8 +5368,8 @@ async function start() {
         const rarity = demoRarities[(ci + j) % demoRarities.length];
         const royalty = 300 + ((ci + j) % 5) * 100;
         const img = `https://placehold.co/400x400/${c.hex}/ffffff?text=${c.name.split(' ')[0]}+${j + 1}`;
-        nftRows.push(`(${id},${owner.id},'${owner.username}',${creator.id},'${creator.username}','${c.name} #${j + 1}','Staging demo NFT — ${c.blurb}','${img}','BLOOM-S${id}','${c.name}',${royalty},'${rarity}')`);
-        transferRows.push(`(${demoMintTxId++},${id},NULL,NULL,${owner.id},'${owner.username}','mint',NULL,'BLOOM-TX-S${id}')`);
+        nftRows.push(`(${id},${owner.id},'${owner.username}',${creator.id},'${creator.username}','${c.name} #${j + 1}','Staging demo NFT — ${c.blurb}','${img}','UNODE-S${id}','${c.name}',${royalty},'${rarity}')`);
+        transferRows.push(`(${demoMintTxId++},${id},NULL,NULL,${owner.id},'${owner.username}','mint',NULL,'UNODE-TX-S${id}')`);
       }
       const seller = demoOwners[ci % demoOwners.length];
       const price = (25 + ci * 7) * 1000000; // USDC, 6 decimals
@@ -5336,7 +5377,7 @@ async function start() {
       if (ci % 2 === 0) { // sale history on half the collections so volume_usdc > 0
         const buyer = demoOwners[(ci + 2) % demoOwners.length];
         const salePrice = (40 + ci * 9) * 1000000;
-        transferRows.push(`(${demoSaleTxId++},${firstNftId},${seller.id},'${seller.username}',${buyer.id},'${buyer.username}','sale',${salePrice},'BLOOM-TX-SALE-${firstNftId}')`);
+        transferRows.push(`(${demoSaleTxId++},${firstNftId},${seller.id},'${seller.username}',${buyer.id},'${buyer.username}','sale',${salePrice},'UNODE-TX-SALE-${firstNftId}')`);
       }
     });
     await pool.query(`INSERT INTO nft_collections(id,name,description,banner_url,creator_username) VALUES ${colRows.join(',')} ON CONFLICT(id) DO NOTHING`);
@@ -5426,28 +5467,28 @@ async function start() {
     // Seed activity transactions for the Activity tab (covers all types)
     {
       const { rows: [exist] } = await pool.query(
-        `SELECT 1 FROM transactions WHERE description='Staging demo swap — Swap USDC to BLOOM' LIMIT 1`
+        `SELECT 1 FROM transactions WHERE description='Staging demo swap — Swap USDC to UNODE' LIMIT 1`
       );
       if (!exist) {
         await pool.query(`
           INSERT INTO transactions(id, user_id, type, token_symbol, amount, description) VALUES
-            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to BLOOM'),
+            (900201, 9001, 'swap',         'USDC',  -100000000, 'Staging demo swap — Swap USDC to UNODE'),
             (900202, 9001, 'swap',         'USDC',   -75000000, 'Staging demo swap — Swap USDC to ETH'),
-            (900203, 9001, 'swap',         'BLOOM',  -50000000, 'Staging demo swap — Swap BLOOM to USDC'),
+            (900203, 9001, 'swap',         'UNODE',  -50000000, 'Staging demo swap — Swap UNODE to USDC'),
             (900204, 9001, 'swap',         'USDC',  -200000000, 'Staging demo swap — Swap USDC to BTC'),
             (900205, 9001, 'swap',         'ETH',      -500000, 'Staging demo swap — Swap ETH to USDC'),
             (900206, 9004, 'futures_open', 'USDC',  -480000000, 'Staging demo futures — Open ETH-PERP Long 5x'),
             (900207, 9004, 'futures_pnl',  'USDC',   72000000, 'Staging demo futures — Close ETH-PERP +15% PnL'),
             (900208, 9004, 'futures_open', 'USDC',  -340000000, 'Staging demo futures — Open BTC-PERP Short 10x'),
             (900209, 9003, 'market_trade', 'USDC',   -50000000, 'Staging demo prediction — Bought YES on Will ETH hit $5k'),
-            (900210, 9003, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will BLOOM reach $2'),
+            (900210, 9003, 'market_trade', 'USDC',   -25000000, 'Staging demo prediction — Bought NO on Will UNODE reach $2'),
             (900211, 9003, 'ico_invest',   'USDC',  -100000000, 'Staging demo ICO — Invested in SDC ICO'),
-            (900212, 9001, 'tip',          'BLOOM',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002'),
-            (900213, 9002, 'tip',          'BLOOM',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003'),
-            (900214, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
-            (900215, 9001, 'swap_gas',     'BLOOM',   -1000000, 'Staging demo swap gas — Swap gas fee'),
-            (900216, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures open gas fee'),
-            (900217, 9004, 'futures_gas',  'BLOOM',   -1000000, 'Staging demo futures gas — Futures close gas fee')
+            (900212, 9001, 'tip',          'UNODE',   -5000000, 'Staging demo tip — Tip to @staging-bob for post #900002'),
+            (900213, 9002, 'tip',          'UNODE',  -10000000, 'Staging demo tip — Tip to @staging-carol for post #900003'),
+            (900214, 9001, 'swap_gas',     'UNODE',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900215, 9001, 'swap_gas',     'UNODE',   -1000000, 'Staging demo swap gas — Swap gas fee'),
+            (900216, 9004, 'futures_gas',  'UNODE',   -1000000, 'Staging demo futures gas — Futures open gas fee'),
+            (900217, 9004, 'futures_gas',  'UNODE',   -1000000, 'Staging demo futures gas — Futures close gas fee')
           ON CONFLICT(id) DO NOTHING
         `);
       }
@@ -5486,7 +5527,7 @@ async function start() {
       `, [ethFutMarket.id, btcFutMarket.id]);
 
       // staging-diana: 1 open position for copy-trade demo
-      const bloomFut = (await pool.query("SELECT id FROM futures_markets WHERE symbol='BLOOM-PERP'")).rows[0];
+      const bloomFut = (await pool.query("SELECT id FROM futures_markets WHERE symbol='UNODE-PERP'")).rows[0];
       if (bloomFut) {
         await pool.query(`
           INSERT INTO futures_positions(id,user_id,market_id,mode,side,leverage,entry_price,quantity,margin,liquidation_price,status,opened_at) VALUES
@@ -5532,9 +5573,9 @@ async function start() {
     }
     // Seed futures price snapshots
     {
-      const { rows: [cnt] } = await pool.query(`SELECT COUNT(*)::int AS n FROM futures_price_snapshots WHERE market_id IN (SELECT id FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','BLOOM-PERP'))`);
+      const { rows: [cnt] } = await pool.query(`SELECT COUNT(*)::int AS n FROM futures_price_snapshots WHERE market_id IN (SELECT id FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','UNODE-PERP'))`);
       if (cnt.n === 0) {
-        const fmkts = (await pool.query(`SELECT id, symbol FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','BLOOM-PERP')`)).rows;
+        const fmkts = (await pool.query(`SELECT id, symbol FROM futures_markets WHERE symbol IN ('ETH-PERP','BTC-PERP','UNODE-PERP')`)).rows;
         const seedRows = [];
         for (const fm of fmkts) {
           let base = fm.symbol==='ETH-PERP'?2490:fm.symbol==='BTC-PERP'?66800:0.499;
@@ -5593,9 +5634,9 @@ async function start() {
     // Seed vault strategies (all environments get these)
     await pool.query(`
       INSERT INTO vault_strategies(id,name,description,risk_level,target_apy,supported_tokens,is_active) VALUES
-        (1,'Conservative','Low-volatility strategy using stablecoin lending pools.','low',6.5,ARRAY['USDC','BLOOM'],true),
-        (2,'Balanced','Mixed allocation: stablecoins + blue-chip crypto lending.','medium',11.0,ARRAY['USDC','BLOOM','ETH'],true),
-        (3,'Growth','Higher-yield DeFi strategies with active rebalancing.','high',18.5,ARRAY['BLOOM','ETH'],true)
+        (1,'Conservative','Low-volatility strategy using stablecoin lending pools.','low',6.5,ARRAY['USDC','UNODE'],true),
+        (2,'Balanced','Mixed allocation: stablecoins + blue-chip crypto lending.','medium',11.0,ARRAY['USDC','UNODE','ETH'],true),
+        (3,'Growth','Higher-yield DeFi strategies with active rebalancing.','high',18.5,ARRAY['UNODE','ETH'],true)
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -5603,7 +5644,7 @@ async function start() {
     await pool.query(`
       INSERT INTO vault_positions(id,user_id,username,strategy_id,token,amount,deposited_at) VALUES
         (9001,9001,'staging-alice',1,'USDC',500000000000,NOW()-INTERVAL '30 days'),
-        (9002,9001,'staging-alice',2,'BLOOM',250000000000,NOW()-INTERVAL '7 days')
+        (9002,9001,'staging-alice',2,'UNODE',250000000000,NOW()-INTERVAL '7 days')
       ON CONFLICT(id) DO NOTHING
     `);
 
@@ -5665,7 +5706,7 @@ async function start() {
           (9002,'USDC','BTC',  1000000000,  15505, 0.0000155, NOW() - interval '5 hours'),
           (9002,'ETH', 'USDC',    500000,1650000000, 3300,    NOW() - interval '6 hours'),
           (9002,'USDC','BTC',   800000000,  12404, 0.0000155, NOW() - interval '7 hours'),
-          (9003,'USDC','BLOOM', 800000000,1600000000, 2.0,    NOW() - interval '8 hours'),
+          (9003,'USDC','UNODE', 800000000,1600000000, 2.0,    NOW() - interval '8 hours'),
           (9001,'BTC', 'ETH',     10000,   642857, 64.2857,   NOW() - interval '9 hours'),
           (9003,'ETH', 'BTC',    300000,    4600, 0.01533,    NOW() - interval '10 hours')
       `);
@@ -5675,12 +5716,12 @@ async function start() {
     // portfolio activity feed is non-empty with diverse tx types.
     await pool.query(`
       INSERT INTO transactions(id,user_id,type,token_symbol,amount,description,tx_hash) VALUES
-        (9101,9001,'send','BLOOM',-500000000,'Sent 500 BLOOM to ut1abc123','ut1txSend9001a'),
-        (9102,9001,'tip','BLOOM',-10000000,'Tip to @staging-bob for post #1',NULL),
-        (9103,9001,'stake','BLOOM',-300000000,'Stake BLOOM','ut1txStake9001a'),
-        (9104,9001,'unstake','BLOOM',305000000,'Unstake BLOOM',NULL),
-        (9105,9001,'liquidity_add','BLOOM',-200000000,'Add liquidity BLOOM_USDC','ut1txLiq9001a'),
-        (9106,9001,'liquidity_remove','BLOOM',202000000,'Remove liquidity BLOOM_USDC',NULL),
+        (9101,9001,'send','UNODE',-500000000,'Sent 500 UNODE to ut1abc123','ut1txSend9001a'),
+        (9102,9001,'tip','UNODE',-10000000,'Tip to @staging-bob for post #1',NULL),
+        (9103,9001,'stake','UNODE',-300000000,'Stake UNODE','ut1txStake9001a'),
+        (9104,9001,'unstake','UNODE',305000000,'Unstake UNODE',NULL),
+        (9105,9001,'liquidity_add','UNODE',-200000000,'Add liquidity BLOOM_USDC','ut1txLiq9001a'),
+        (9106,9001,'liquidity_remove','UNODE',202000000,'Remove liquidity BLOOM_USDC',NULL),
         (9107,9001,'vault_deposit','USDC',-1000000000,'Vault deposit: Conservative Yield','ut1txVault9001a'),
         (9108,9001,'vault_withdraw','USDC',1010000000,'Vault withdraw: 1000.00 USDC',NULL),
         (9109,9002,'stake','ETH',-500000,'Stake ETH','ut1txStake9002a'),
@@ -5732,14 +5773,14 @@ async function start() {
     await pool.query(`
       INSERT INTO transactions(user_id,type,token_symbol,amount,description)
       SELECT * FROM (VALUES
-        (9001,'swap','BLOOM',200000000,'Staging demo swap USDC→BLOOM'),
-        (9002,'stake','BLOOM',500000000,'Staging demo BLOOM stake deposit'),
+        (9001,'swap','UNODE',200000000,'Staging demo swap USDC→UNODE'),
+        (9002,'stake','UNODE',500000000,'Staging demo UNODE stake deposit'),
         (9003,'buy','USDC',50000000,'Staging demo ICO investment'),
-        (9004,'swap','USDC',1000000000,'Staging demo swap BLOOM→USDC'),
-        (9005,'stake','BLOOM',1000000000,'Staging demo BLOOM stake deposit 2'),
-        (9006,'airdrop','BLOOM',100000000,'Staging demo admin airdrop')
+        (9004,'swap','USDC',1000000000,'Staging demo swap UNODE→USDC'),
+        (9005,'stake','UNODE',1000000000,'Staging demo UNODE stake deposit 2'),
+        (9006,'airdrop','UNODE',100000000,'Staging demo admin airdrop')
       ) v(user_id,type,token_symbol,amount,description)
-      WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo swap USDC→BLOOM')
+      WHERE NOT EXISTS (SELECT 1 FROM transactions WHERE description='Staging demo swap USDC→UNODE')
     `).catch(() => {});
 
     // Admin action seeds for audit log demo
@@ -5759,13 +5800,13 @@ async function start() {
     // counters and activity feed are non-empty.
     await pool.query(`
       INSERT INTO defi_stakes(id,user_id,token,amount,apy_bps,staked_at,unstaked_at,reward_amount) VALUES
-        (990101,9001,'BLOOM',300000000,1200,NOW()-INTERVAL '14 days',NULL,0),
+        (990101,9001,'UNODE',300000000,1200,NOW()-INTERVAL '14 days',NULL,0),
         (990102,9002,'ETH',500000,600,NOW()-INTERVAL '7 days',NULL,0),
         (990103,9003,'SOL',5000000,800,NOW()-INTERVAL '21 days',NOW()-INTERVAL '3 days',32000),
         (990104,9004,'BTC',50000,400,NOW()-INTERVAL '30 days',NULL,0),
-        (990105,9005,'BLOOM',800000000,1200,NOW()-INTERVAL '5 days',NULL,0),
-        (990106,9001,'BLOOM',150000000,1200,NOW()-INTERVAL '60 days',NOW()-INTERVAL '10 days',2953424),
-        (990107,9002,'BLOOM',200000000,1200,NOW()-INTERVAL '2 days',NULL,0),
+        (990105,9005,'UNODE',800000000,1200,NOW()-INTERVAL '5 days',NULL,0),
+        (990106,9001,'UNODE',150000000,1200,NOW()-INTERVAL '60 days',NOW()-INTERVAL '10 days',2953424),
+        (990107,9002,'UNODE',200000000,1200,NOW()-INTERVAL '2 days',NULL,0),
         (990108,9003,'ETH',300000,600,NOW()-INTERVAL '3 days',NOW()-INTERVAL '1 day',1480)
       ON CONFLICT (id) DO NOTHING
     `).catch(() => {});
