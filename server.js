@@ -6,6 +6,11 @@ const jwt = require('jsonwebtoken');
 const Parser = require('rss-parser');
 const verify = require('./lib/verify');
 
+// The platform's address, injected by the platform at deploy (#2047). Never
+// written out here: a hardcoded hostname is what broke this app when the
+// platform moved domains. Empty only outside the platform (local runs).
+const PLATFORM_ORIGIN = (process.env.USERNODE_PLATFORM_ORIGIN || '').replace(/\/+$/, '');
+
 const app = express();
 const port = process.env.PORT || 3000;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -94,12 +99,12 @@ app.use((req, res, next) => {
   // CSP compatible with the Tailwind CDN + the hosted Usernode bridge origin.
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://social-vibecoding.usernodelabs.org https://s3.tradingview.com https://cdn.jsdelivr.net",
+    ("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com " + PLATFORM_ORIGIN + " https://s3.tradingview.com https://cdn.jsdelivr.net"),
     "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
-    "connect-src 'self' https://social-vibecoding.usernodelabs.org",
+    ("connect-src 'self' " + PLATFORM_ORIGIN),
     "img-src 'self' data: https:",
     "frame-src 'self' https://*.tradingview.com",
-    "frame-ancestors 'self' https://social-vibecoding.usernodelabs.org",
+    ("frame-ancestors 'self' " + PLATFORM_ORIGIN),
   ].join('; '));
   next();
 });
@@ -1534,7 +1539,7 @@ app.delete('/api/journal/:id', async (req, res) => {
 // embedding so no provider-controlled data can escape into script context.
 
 app.get('/oauth/callback', (req, res) => {
-  const safeOrigin = 'https://social-vibecoding.usernodelabs.org';
+  const safeOrigin = PLATFORM_ORIGIN;
   const code = String(req.query.code || '').replace(/[^a-zA-Z0-9._~-]/g, '').slice(0, 1000);
   const state = String(req.query.state || '').replace(/[^a-zA-Z0-9._~=+/-]/g, '').slice(0, 500);
   const provider = String(req.query.provider || '').replace(/[^a-z]/g, '').slice(0, 20);
@@ -4419,7 +4424,7 @@ app.get('*', (req, res) => {
   <div style="max-width:24rem;padding:2rem;text-align:center">
     <h1 style="font-size:1.25rem;margin:0 0 .5rem">Open BloomMoney inside Usernode</h1>
     <p style="color:#71717a;font-size:.9rem;margin:0 0 1.25rem">This app requires the Usernode platform.</p>
-    <a href="https://social-vibecoding.usernodelabs.org" style="display:inline-block;padding:.5rem 1rem;background:#0052ff;color:white;border-radius:.5rem;text-decoration:none;font-size:.9rem">Go to Usernode</a>
+    <a href="${PLATFORM_ORIGIN}" style="display:inline-block;padding:.5rem 1rem;background:#0052ff;color:white;border-radius:.5rem;text-decoration:none;font-size:.9rem">Go to Usernode</a>
   </div></body>`);
   }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
