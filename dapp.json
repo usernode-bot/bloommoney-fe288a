@@ -147,6 +147,8 @@
     { "name": "Opinion markets section in DOM", "path": "/?demo=1", "expectSelector": "#section-markets" },
     { "name": "Prediction market hero renders", "path": "/?demo=1", "expectSelector": ".pm-hero" },
     { "name": "Category filter chips render", "path": "/?demo=1", "expectSelector": ".pm-category-chip" },
+    { "name": "Market search input renders", "path": "/?demo=1", "expectSelector": "#pm-search" },
+    { "name": "Market search empty state renders", "path": "/?demo=1&pmq=zzz-no-match", "expectSelector": ".pm-empty-state" },
     { "name": "Market grid card renders", "path": "/?demo=1", "expectSelector": ".pm-market-card" },
     { "name": "How-it-works section renders", "path": "/?demo=1", "expectSelector": ".pm-how-it-works" },
     { "name": "Trade terminal in DOM", "path": "/?demo=1", "expectSelector": "#section-trade" },

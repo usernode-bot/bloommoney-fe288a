@@ -418,6 +418,12 @@ html:not(.dark) .futures-terminal .inp { background: #0d1021 !important; border-
 .pm-category-chip { flex-shrink: 0; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: #1c2236; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; white-space: nowrap; }
 .pm-category-chip:hover { color: #e8eaf0; border-color: rgba(124,92,252,0.3); }
 .pm-category-chip.active { background: #7c5cfc; color: #fff; border-color: #7c5cfc; }
+.pm-search-chip { display: flex; align-items: center; flex-shrink: 0; padding: 0 0.35rem 0 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; cursor: pointer; background: #1c2236; color: #8b95ab; border: 1px solid rgba(255,255,255,0.06); transition: all 0.15s; height: 2.15rem; }
+.pm-search-chip:focus-within { color: #e8eaf0; border-color: rgba(124,92,252,0.3); }
+.pm-search-chip input { background: transparent; border: none; outline: none; color: #e8eaf0; font-size: 0.8rem; font-weight: 600; width: 10rem; padding: 0.35rem 0.5rem; }
+.pm-search-chip input::placeholder { color: #8b95ab; }
+.pm-search-chip .pm-search-clear { width: 1.5rem; height: 1.5rem; border-radius: 9999px; color: #8b95ab; font-size: 0.75rem; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.pm-search-chip .pm-search-clear:hover { color: #e8eaf0; background: rgba(255,255,255,0.06); }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Post-to-Earn points animations */
 .points-pulse { animation: pointsPulse 0.7s ease-out; }
@@ -861,7 +867,13 @@ async function init() {
   // re-renders it from the live API.
   if (new URLSearchParams(location.search).get('demo') === '1') {
     const mk = document.getElementById('section-markets');
-    if (mk) { try { renderMarkets(mk, PM_DEMO_MARKETS); } catch (_) {} }
+    if (mk) {
+      try {
+        const pmq = new URLSearchParams(location.search).get('pmq');
+        if (pmq) pmSearchQuery = pmq;
+        renderMarkets(mk, PM_DEMO_MARKETS);
+      } catch (_) {}
+    }
     // Pre-render Market section so CI selectors exist without auth
     const mkr = document.getElementById('section-market');
     if (mkr) {
@@ -4512,6 +4524,7 @@ const PM_CATEGORIES = ['All', 'Crypto', 'Politics', 'Science', 'Sports', 'Entert
 // activeCategory lives at module scope so it survives the 10s auto-refresh
 // (load() re-renders the grid but reads this back from the closure).
 let pmActiveCategory = 'All';
+let pmSearchQuery = '';
 
 // Static demo markets used ONLY for the /?demo=1 prerender (no token / no
 // network). Mirrors the IS_STAGING seed so the hub looks the same in CI.
@@ -4619,9 +4632,18 @@ async function renderMarkets(sec, demoMarkets) {
     if (!grid) return;
     let list = allMarkets;
     if (pmActiveCategory !== 'All') list = list.filter(m => (m.category || 'General') === pmActiveCategory);
+    const q = pmSearchQuery.trim().toLowerCase();
+    if (q) list = list.filter(m => `${m.title || ''} ${m.description || ''}`.toLowerCase().includes(q));
     grid.innerHTML = list.length
       ? list.map(pmMarketCard).join('')
-      : `<div class="col-span-full text-center text-[#4e5872] text-sm py-10">No markets in ${esc(pmActiveCategory)}.</div>`;
+      : `<div class="pm-empty-state col-span-full text-center py-10">
+          <div class="text-3xl mb-2">&#x1f50d;</div>
+          <p class="text-sm font-semibold text-[#8b95ab]">No markets match your search</p>
+          <p class="text-xs text-[#4e5872] mt-1">Try a different keyword or clear the search to see all markets.</p>
+        </div>`;
+    // Keep the input's in-progress text across re-renders triggered by chip clicks.
+    const inp = document.getElementById('pm-search');
+    if (inp && inp.value !== pmSearchQuery) inp.value = pmSearchQuery;
     document.querySelectorAll('.pm-category-chip').forEach(b => {
       b.classList.toggle('active', b.dataset.cat === pmActiveCategory);
     });
@@ -4671,6 +4693,10 @@ async function renderMarkets(sec, demoMarkets) {
 
       <div class="pm-filter-bar sticky top-0 z-20 bg-[#0f1117]/95 backdrop-blur border-b border-[rgba(255,255,255,0.06)]">
         <div class="flex gap-2 overflow-x-auto px-4 py-2.5 scrollbar-hide">
+          <div class="pm-search-chip">
+            <input id="pm-search" type="text" placeholder="Search markets…" aria-label="Search markets" value="${esc(pmSearchQuery)}">
+            <button id="pm-search-clear" class="pm-search-clear hidden" type="button" aria-label="Clear search" title="Clear search" onclick="pmSetSearch('')">&#10005;</button>
+          </div>
           ${PM_CATEGORIES.map(c => `<button class="pm-category-chip ${c === pmActiveCategory ? 'active' : ''}" data-cat="${c}" onclick="pmSetCategory('${c}')">${c}</button>`).join('')}
         </div>
       </div>
@@ -4703,6 +4729,19 @@ async function renderMarkets(sec, demoMarkets) {
     renderGrid();
 
     window.pmSetCategory = (c) => { pmActiveCategory = c; renderGrid(); };
+    const searchInput = document.getElementById('pm-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => pmSetSearch(searchInput.value));
+      // Enter should not submit anything (there is no surrounding form) and
+      // should not bubble to card-level handlers.
+      searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+    }
+    window.pmSetSearch = (v) => {
+      pmSearchQuery = v;
+      renderGrid();
+      const clear = document.getElementById('pm-search-clear');
+      if (clear) clear.classList.toggle('hidden', !v.trim());
+    };
     window.toggleCreate = () => { showCreate = !showCreate; load(); };
     window.openMarket = (id) => { S.marketId = id; clearInterval(_activeInterval); _activeInterval = null; renderMarkets(sec); };
     window.createMarket = async () => {
