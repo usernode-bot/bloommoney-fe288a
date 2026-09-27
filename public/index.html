@@ -79,6 +79,10 @@
   })();
   </script>
     <title>BloomMoney</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.webmanifest">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
   // Semantic colour names resolving to the CSS vars defined in <style> below.
@@ -109,7 +113,7 @@
 <!-- ───── Wallet Prompt Modal ───── -->
 <div id="wallet-prompt" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onclick="if(event.target.id==='wallet-prompt') closeWalletPrompt()">
   <div class="bg-[#131620] border border-[rgba(255,255,255,0.08)] rounded-xl p-6 w-full max-w-xs text-center space-y-4" onclick="event.stopPropagation()">
-    <div class="text-4xl">🌸</div>
+    <img src="/icon.svg" alt="" class="w-12 h-12 mx-auto rounded-xl">
     <h2 class="text-xl font-bold text-[#e8eaf0]">Wallet Required</h2>
     <p id="wallet-prompt-msg" class="text-[#8b95ab] text-sm">Connect your wallet to continue.</p>
     <button id="connect-wallet-btn" class="w-full active:scale-95 transition-all text-white px-6 py-2.5 rounded-xl font-semibold shadow-lg shadow-[#7c5cfc]/30" style="background: linear-gradient(135deg, #7c5cfc, #4e9af1);">Connect Wallet</button>
@@ -148,7 +152,7 @@
       <button class="md:hidden text-[#8b95ab] hover:text-[#e8eaf0] p-1" onclick="toggleMobileSidebar()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')">🌸 BloomMoney</button>
+      <button class="font-bold text-[#7c5cfc] hover:text-[#9b7ffe] transition-colors" onclick="navigate('home')"><img src="/icon.svg" alt="" class="w-6 h-6 rounded-md inline-block align-middle mr-1.5">BloomMoney</button>
     </div>
     <div class="flex items-center gap-1.5">
       <!-- Identity: avatar + @username → Profile -->

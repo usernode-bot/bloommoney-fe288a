@@ -4411,10 +4411,6 @@ app.post('/admin/prices/futures/:id', requireAdminPage, async (req, res) => {
 
 // ── Static + HTML shell ────────────────────────────────────────────────────────
 
-// Browsers always request a favicon; without a file, the catch-all below would
-// gate it and return 401 to unauthenticated tabs, generating a console error.
-app.get('/favicon.ico', (req, res) => res.status(204).end());
-
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
